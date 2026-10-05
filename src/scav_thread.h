@@ -1,8 +1,8 @@
 #ifndef SCAV_THREAD_H_INCLUDED
 #define SCAV_THREAD_H_INCLUDED
 
-// The threading shim, one backend chosen at build time: pthreads, Win32, or null.
-// A shard writes only its own slot, so which thread runs it never reaches a result.
+// Threading shim with one backend chosen at build time: pthreads, Win32, or null.
+// A shard writes only its own slot, so results are the same on any thread.
 
 #include <cstdint>
 #include <type_traits>
@@ -11,14 +11,11 @@ namespace scav {
 
 using ShardFn = void (*)(void *ctx, uint32_t shard);
 
-// How many workers this host can run at once, at least 1. The null backend
-// says 1, because it is the backend that has no second thread to offer.
+// How many workers this host can run at once, at least 1; 1 in the null backend.
 uint32_t thread_concurrency();
 
-// Runs fn(ctx, s) once for every s in [0, shards) and returns once the last has
-// finished. `threads` of 1 runs them all on the caller in index order, and 0 is
-// `thread_concurrency()` -- safe as a default because the count never reaches
-// any result (6), so it buys wall clock and nothing else.
+// Runs fn(ctx, s) once for each s in [0, shards) and returns when all finish.
+// `threads` 1 runs them on the caller in index order; others use the process-wide pool.
 void parallel_for(uint32_t shards, uint32_t threads, ShardFn fn, void *ctx);
 
 // The same over a functor, erased to the overload above by a capture-free
@@ -33,8 +30,8 @@ void parallel_for(uint32_t shards, uint32_t threads, F &&fn) {
       &fn);
 }
 
-// Excludes every other holder while held, around a lookup or insert into state shards
-// share, never around a shard's own work. Not recursive; a spin lock in the null backend.
+// Held only around lookups and inserts into state that shards share. Not
+// recursive; the null backend uses a spin lock.
 class Mutex {
  public:
   Mutex();
@@ -66,8 +63,7 @@ inline void run_stripe(uint32_t shards,
                        uint32_t first,
                        ShardFn fn,
                        void *ctx) {
-  // 64-bit, so the index after the last stripe is representable near the top of
-  // the domain instead of wrapping back into it.
+  // 64-bit: the index after the last stripe may exceed UINT32_MAX.
   for (uint64_t shard{ first }; shard < shards; shard += workers) {
     fn(ctx, static_cast<uint32_t>(shard));
   }

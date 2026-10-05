@@ -1,16 +1,12 @@
 #!/usr/bin/env python3
-"""What is wrong with the picture, counted rather than looked at.
-
-Reads the rendered SVG back and checks the properties a reader notices, so a
-regression is a number that moved. A tool, not a test: the defect classes are
-the ones actually reported, and several are known-open work with an owner in
-the PRD, so it reports rather than fails.
+"""Counts reader-visible defects in rendered SVGs against the layout dump, per class.
+Exits 1 when the scav binary or every rendered SVG is missing, else 0.
 
   tools/audit.py                    every corpus chart, out/baseline
   tools/audit.py --in DIR
   tools/audit.py --chart vac.scav   one of them, with each finding listed
   tools/audit.py --gauntlet         the element suite instead of the corpus
-  tools/audit.py --portfolio-row 4  one row of 11.10's table, not the pick
+  tools/audit.py --portfolio-row 4  one portfolio row instead of the pick
   tools/audit.py --json             the counts as JSON, per chart and totalled
 """
 
@@ -23,19 +19,16 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CORPUS = REPO_ROOT / "test_data/charts"
-# The element suite, rendered by tools/baseline.py --gauntlet into the same
-# directory. src/layout/gauntlet_tests.cpp lays the same charts out with no
-# space requests, so its numbers and these are two scales and never comparable.
+# Element-suite charts; tools/baseline.py --gauntlet renders them to out/baseline.
+# Counts use measured text, unlike gauntlet_tests.cpp; never compare the two.
 GAUNTLET = CORPUS / "gauntlet"
 
-# State boxes come from the geometry columns, not the drawing: a choice is a
-# polygon and a final state two circles, so reading rects back exempts them.
+# State boxes come from the layout dump; these patterns read the SVG's other marks.
 POLYLINE = re.compile(r'<polyline points="([^"]+)"[^>]*class="scav-trans scav-id-(\d+)"')
 ARROWHEAD = re.compile(r'<polygon points="([^"]+)"[^>]*class="scav-trans scav-id-(\d+)"')
 DIVIDER = re.compile(
     r'<line x1="(-?\d+)" y1="(-?\d+)" x2="(-?\d+)" y2="(-?\d+)"[^>]*class="scav-sub')
-# The dotted concurrency boundary with the width it is stroked at: "sliced" is
-# about ink, and a zero-thickness segment misses a label the stroke covers.
+# A region divider line with its stroke width.
 DIVIDER_INK = re.compile(
     r'<line x1="(-?\d+)" y1="(-?\d+)" x2="(-?\d+)" y2="(-?\d+)"[^>]*'
     r'stroke-width="(\d+)"[^>]*class="scav-sub')
@@ -43,8 +36,7 @@ TEXT = re.compile(
     r'<text x="(-?\d+)" y="(-?\d+)" font-size="(\d+)"[^>]*textLength="(\d+)"[^>]*'
     r'class="scav-(trans|state|sub) scav-id-(\d+)"[^>]*>')
 
-# A mark and the glyph it belongs to carry the same id, which is what lets the
-# two be checked against each other without knowing the state's kind.
+# A state's circle glyph; it shares its `scav-id` with the state's mark text.
 CIRCLE = re.compile(
     r'<circle cx="(-?\d+)" cy="(-?\d+)" r="(\d+)"[^>]*class="scav-state scav-id-(\d+)"')
 
@@ -65,15 +57,13 @@ def inside(pt, box):
 
 
 def overlaps(a, b):
-    """Two rects sharing area. Touching is not overlapping: adjacent boxes are
-    what packing produces, and adjacent glyphs read fine."""
+    """True when two (x, y, w, h) rects share positive area."""
     return (a[0] < b[0] + b[2] and b[0] < a[0] + a[2] and
             a[1] < b[1] + b[3] and b[1] < a[1] + a[3])
 
 
 def ink_span(a, b, width):
-    """A segment's bounding box grown to the ink it is stroked with, so a line
-    laid along the edge of a label counts as crossing it."""
+    """A segment's bounding box grown by half the stroke width on every side."""
     half = width // 2
     return (min(a[0], b[0]) - half, min(a[1], b[1]) - half,
             abs(a[0] - b[0]) + (2 * half), abs(a[1] - b[1]) + (2 * half))
@@ -95,6 +85,19 @@ def flush(a, b, box):
     return False
 
 
+def runs_along(a, b, box, near):
+    """The segment runs parallel to one of the box's edges within `near` of it, on either
+    side, over a positive length of that edge."""
+    x, y, w, h = box
+    if a[1] == b[1] and a[0] != b[0]:
+        return (min(abs(a[1] - y), abs(a[1] - (y + h))) <= near and
+                min(a[0], b[0]) < x + w and max(a[0], b[0]) > x)
+    if a[0] == b[0] and a[1] != b[1]:
+        return (min(abs(a[0] - x), abs(a[0] - (x + w))) <= near and
+                min(a[1], b[1]) < y + h and max(a[1], b[1]) > y)
+    return False
+
+
 def gap(a, b):
     """The Chebyshev gap between two rects: zero on an axis they overlap or touch
     on, the larger of the two separations otherwise. Layout's own predicate."""
@@ -104,8 +107,7 @@ def gap(a, b):
 
 
 def overlap(a, b, c, d):
-    """Two collinear segments' shared length, or 0. Routes sharing a run read as
-    one polyline that fans out at the ends; 11.5's nudging separates them."""
+    """Shared length of two collinear axis-aligned segments, or 0."""
     if a[1] == b[1] == c[1] == d[1]:
         i, j = sorted((a[0], b[0]))
         k, l = sorted((c[0], d[0]))
@@ -118,9 +120,9 @@ def overlap(a, b, c, d):
 
 
 def trunks(a, b):
-    """Which segments of two routes lie in a run they end -- or begin -- as one:
-    the common suffix and prefix, plus each merge leg where the two legs reaching
-    that run lie along it. 11.5 keeps these together and 11.6 charges neither."""
+    """Segment indices of `a` and of `b` in the routes' common point prefix and suffix,
+    plus the leg next to each when the two routes' legs there overlap.
+    """
     n = min(len(a), len(b))
     tail = 0
     while tail < n and a[len(a) - 1 - tail] == b[len(b) - 1 - tail]:
@@ -143,15 +145,7 @@ def trunks(a, b):
 
 
 def enclosing(doc, state):
-    """Every state whose box contains `state`, and not `state` itself.
-
-    11.6 exempts a state from the whole-rect test where it *encloses* the
-    transition's source or target, because a label inside the composite its
-    transition runs in is where it belongs and charging it there makes zero
-    unreachable. An endpoint is exempt only where it holds the other end -- a
-    label over `Tripped` is a label over a box a reader sees, whether or not
-    `Tripped` is the transition it belongs to.
-    """
+    """The set of `state`'s ancestors, via each parent submachine's owner."""
     seen = []
     parent = doc["states"][state]["parent"]
     at = None if parent is None else doc["submachines"][parent]["owner"]
@@ -163,26 +157,46 @@ def enclosing(doc, state):
 
 
 def corner_arc(doc, state):
-    """The arc drawn at `state`'s corners, which no attachment may sit on.
+    """Corner-arc radius of `state`, as the dump's `state_corner` gives it."""
+    return doc["geometry"]["state_corner"][state]
 
-    Mirrors `state_corner_radius` in scav_layout.h: an eighth of the shorter
-    side, capped at the interior ring, and zero for a kind not drawn as a
-    rounded rect. The ring comes off the band origin the way layout reads it.
-    """
-    bx, _, bw, bh = doc["geometry"]["state"][state]
-    if doc["states"][state]["kind"] != "normal" or not (bw and bh):
-        return 0
-    ring = max(doc["geometry"]["state_before"][state][0] - bx, 0)
-    return min(min(bw, bh) // 8, ring)
+
+# Per face (0 left, 1 right, 2 top, 3 bottom): the band lining it and its `ruled` bit.
+BAND = {0: ("state_lead", 2), 1: ("state_trail", 3), 2: ("state_before", 0), 3: ("state_after", 1)}
+
+
+def on_exit(pt, doc, state):
+    """`pt` lies on a drawn edge of the face `state`'s loop room exits by, as the dump's
+    `state_loop_place` and `state_ruled` give it: the border where no band lines that face,
+    a ruled band's inner edge where one does."""
+    g = doc["geometry"]
+    face = g["state_loop_place"][state][0]
+    bx, by, bw, bh = g["state"][state]
+    key, bit = BAND[face]
+    band = g[key][state]
+    vertical = face < 2
+    if band[2 if vertical else 3] > 0:
+        if not g["state_ruled"][state] >> bit & 1:
+            return False
+        edge = [band[0] + band[2], band[0], band[1] + band[3], band[1]][face]
+    else:
+        edge = [bx, bx + bw, by, by + bh][face]
+    if vertical:
+        return pt[0] == edge and by <= pt[1] <= by + bh
+    return pt[1] == edge and bx <= pt[0] <= bx + bw
+
+
+def inner_loop(doc, trans):
+    """The state an internal or local self-transition is drawn inside, else None."""
+    edge = doc["transitions"][int(trans)]
+    if edge["src"] != edge["dst"] or edge["kind"] not in ("internal", "local"):
+        return None
+    return edge["src"]
 
 
 def geometry(chart, scav_bin, row=None):
-    """The geometry columns of one candidate.
-
-    `row` pins a row of the portfolio's table, and it has to be the row the SVG
-    beside it was rendered at: the boxes here and the drawing there are two
-    halves of one candidate, and pairing them across rows compares a picture to
-    somebody else's geometry.
+    """Live non-empty state boxes, chart rect and layout dump of one candidate.
+    `row` pins a portfolio row and must match the row the SVG was rendered at.
     """
     cmd = [str(scav_bin), "dump", "--layout", "--json"]
     if row is not None:
@@ -199,9 +213,8 @@ def geometry(chart, scav_bin, row=None):
 def audit(svg, every, chart, doc, verbose):
     found = {}
     notes = []
-    # Where each finding is, in the drawing's own grid units, so a reviewer
-    # checks the call rather than hunting for it. `at` is a rect; a finding
-    # with no natural extent passes none and is counted without a mark.
+    # Finding locations as (kind, rect, detail) in grid units; a finding without `at`
+    # is counted with no mark.
     marks = []
 
     def note(kind, detail, at=None):
@@ -212,22 +225,37 @@ def audit(svg, every, chart, doc, verbose):
             notes.append(f"    {kind}: {detail}")
 
     cx, cy, cw, ch = chart
+    # A route keeps `border_band`, one pad, from a state border it runs along.
+    band = doc["geometry"]["profile"]["border_band"]
     live = [i for i, st in enumerate(doc["states"]) if st["live"]]
     rects = doc["geometry"]["state"]
-    bands = (doc["geometry"]["state_before"], doc["geometry"]["state_after"])
+    bands = tuple(doc["geometry"][k] for k in ("state_before", "state_after", "state_lead",
+                                                "state_trail"))
     legs = []
     route = {}
     starts = []
     tips = []
+
+    # Each region divider as the zero-thickness box its line spans.
+    dividers = [span((int(a), int(b)), (int(c), int(d)))
+                for a, b, c, d in DIVIDER.findall(svg)]
+
+    # A route end on a state border or a region divider, or an inner loop's end on its
+    # exit boundary.
+    def attached(pt, trans):
+        if any(on_border(pt, box) for box in every + dividers):
+            return True
+        state = inner_loop(doc, trans)
+        pts = route.get(trans, [])
+        return state is not None and len(pts) > 1 and on_exit(pt, doc, state)
+
     for m in POLYLINE.finditer(svg):
         pts, trans = points(m.group(1)), m.group(2)
         route[trans] = pts
         found["route segments"] = found.get("route segments", 0) + len(pts) - 1
-        # The tail is the arrowhead's business; this is the other end, which
-        # has no glyph of its own to give it away.
         found["route starts"] = found.get("route starts", 0) + 1
         starts.append((pts[0], trans))
-        if not any(on_border(pts[0], box) for box in every):
+        if not attached(pts[0], trans):
             note("route start not on any border", f"t{trans} at {pts[0]}")
         for pt in pts:
             if not (cx <= pt[0] <= cx + cw and cy <= pt[1] <= cy + ch):
@@ -239,6 +267,10 @@ def audit(svg, every, chart, doc, verbose):
             for box in every:
                 if flush(a, b, box):
                     note("segment flush along a box", f"t{trans} {a}-{b} box {box}")
+            near = [box for box in every if runs_along(a, b, box, band - 1)]
+            if near:
+                note("segment nearer than pad to a border it runs along",
+                     f"t{trans} {a}-{b} box {near[0]}, pad {band}")
 
     merged = {}
     for i, (a, b, t1, ka) in enumerate(legs):
@@ -263,11 +295,10 @@ def audit(svg, every, chart, doc, verbose):
         tip, trans = points(m.group(1))[0], m.group(2)
         found["arrowheads"] = found.get("arrowheads", 0) + 1
         tips.append((tip, trans))
-        if not any(on_border(tip, box) for box in every):
+        if not attached(tip, trans):
             note("arrowhead not on any border", f"t{trans} tip {tip}")
 
-    # An attachment on the arc a rounded corner is drawn with is anchored to
-    # nothing: the bounding box has border there and the drawing does not.
+    # Counts route ends on state borders and flags those within a corner arc.
     for pt, trans in starts + tips:
         for i in live:
             bx, by, bw, bh = rects[i]
@@ -286,12 +317,7 @@ def audit(svg, every, chart, doc, verbose):
                      (pt[0] - r, pt[1] - r, 2 * r, 2 * r))
             break
 
-    # A head and a departure on one point of one box: the head is inked over the
-    # other route's own first leg, so it reads as belonging to the line it sits
-    # on. Two arrivals sharing a point are a fan-in and keep their one head
-    # (11.5's bundles); this is the mixed case, which no trunk explains. A fork
-    # bar is where it shows, every branch off one face having been handed the
-    # box's centre before 11.5's attachment projected them apart.
+    # Flags an arrowhead tip at the same point as another transition's route start.
     for tip, head in tips:
         for start, leaving in starts:
             if head != leaving and tip == start:
@@ -304,20 +330,12 @@ def audit(svg, every, chart, doc, verbose):
         if x1 != x2 and y1 != y2:
             note("divider not axis-aligned", f"({x1},{y1})-({x2},{y2})")
 
-    # A transition label overlapping a state box is the label placement 11.9
-    # calls strip matching and P7d owns; counted so its arrival is measurable.
-    # `y` is a baseline and `textLength` the advance sum, so one font size up from
-    # the baseline is the em box the builder reserved -- the same rectangle it
-    # measured with, which is what makes these comparable to the geometry.
     inked = []
     boundaries = [ink_span((int(a), int(b)), (int(c), int(d)), int(w))
                   for a, b, c, d, w in DIVIDER_INK.findall(svg)]
 
-    # **Two lanes closer than the type they carry.** `routes share a run` counts
-    # segments that are *collinear*; this counts ones that merely run alongside
-    # closer than a line of text is tall, which is what makes `mill` unreadable
-    # and what no class here could see (11.9.3). Parallel, overlapping along
-    # their own axis, and separated by less than one text height.
+    # Flags parallel legs of two routes that overlap lengthwise and lie closer than the
+    # smallest font size, excluding collinear legs.
     heights = [int(m.group(3)) for m in TEXT.finditer(svg)]
     line = min(heights) if heights else 0
     for i, (a, b, t1, _) in enumerate(legs):
@@ -341,19 +359,7 @@ def audit(svg, every, chart, doc, verbose):
                      f"t{t1}/t{t2} {apart} apart over {along}, one line is {line}",
                      ink_span(a, b, apart))
 
-    # 11.9.4's anchor, checked where it holds. The leader fixes the distance
-    # from a point on a label's own polyline to one of the eight points of its
-    # *placed box*, and the drawing shows the glyphs inside that box, so the
-    # SVG cannot see the invariant and the geometry columns can.
-    #
-    # **The bound, not an equality.** The leader fixes the distance to the
-    # attachment *point*, and the box's nearest edge is at most that far: a
-    # corner attachment with an axis-aligned leader legitimately sits closer,
-    # since the point it is held by is a corner and not the edge facing the
-    # leg. So `<= leader` is the whole of what anchoring means for a reader --
-    # a label is never further from its own line than half an em -- and it is
-    # true by construction of every anchored box. What it catches is the
-    # centred fallback, which is anchored to nothing.
+    # Flags a placed label box farther than `label_leader` from every leg of its route.
     leader = doc["geometry"].get("label_leader")
     for i, rect in enumerate(doc["geometry"].get("placed") or []):
         subjects = doc["geometry"].get("placed_subject") or []
@@ -374,7 +380,7 @@ def audit(svg, every, chart, doc, verbose):
     for m in TEXT.finditer(svg):
         x, y, size, length, which, ident = m.groups()
         x, y, size, length = int(x), int(y), int(size), int(length)
-        em = (x, y - size, length, size)
+        em = (x, y - size, length, size)  # one font size above the baseline `y`
         inked.append((em, which, ident))
         if which != "trans":
             continue
@@ -386,30 +392,18 @@ def audit(svg, every, chart, doc, verbose):
             bx, by, bw, bh = rect
             return bw and bh and x < bx + bw and x + length > bx and by < y < by + bh
 
-        # The composite a transition runs inside encloses its own label, so only
-        # the text bands that composite reserved are out of bounds for it (11.6).
+        # The label must clear text bands of states in `under` and boxes of all others.
         edge = doc["transitions"][int(ident)]
-        # States enclosing *both* ends. One enclosing a single end does not have
-        # to hold the label -- the label belongs on the ancestral side of that
-        # crossing -- so it is not exempt from the whole-rect test.
+        # States enclosing both ends.
         src, dst = edge["src"], edge["dst"]
         under = enclosing(doc, src) & enclosing(doc, dst)
         # A composite end holding the other end encloses the label as well.
         under |= {s for s, t in ((src, dst), (dst, src)) if s in enclosing(doc, t)}
-        # A transition with no route is the exception, and every one of them on
-        # the corpus is a self-transition: nothing placed its label and the
-        # builder draws it in the `after` band its own source reserved for
-        # exactly it. That band is inside the source's rect, so the whole-rect
-        # test reads eleven correct placements as violations -- `enclosing` is
-        # strict, so a source is never among its own ancestors and the exemption
-        # that used to live inside the `under` branch could never fire. What is
-        # still out of bounds there is the `before` band, which is the state's
-        # own title.
-        own_band = edge["src"] if not doc["geometry"]["route"][int(ident)] else None
+        # An internal or local self-transition is drawn inside its state.
+        if src == dst and edge["kind"] in ("internal", "local"):
+            under.add(src)
         for i in live:
-            if i == own_band:
-                hit = struck(bands[0][i])
-            elif i in under:
+            if i in under:
                 hit = any(struck(band[i]) for band in bands)
             else:
                 hit = struck(rects[i])
@@ -423,46 +417,27 @@ def audit(svg, every, chart, doc, verbose):
                      (x, y - size, length, size))
                 break
 
-        # A line drawn through a label cuts the word in half, and whose line it
-        # is makes no difference to the reader. 11.9's strips sit *beside* a
-        # leg, so this is the centred fallback and nothing else: a box with no
-        # feasible strip keeps the leg's exact centre and the leg goes through
-        # it (11.9.3).
+        # Flags a label whose em box overlaps a leg of its own route.
         for a, b, other, _ in legs:
             if other == ident and overlaps(em, span(a, b)):
                 note("label sliced by its own route", f"t{ident} on its own leg",
                      (x, y - size, length, size))
                 break
 
-        # The same for a dotted concurrency boundary, which is a region divider
-        # and not a route, so no route test sees it.
+        # Flags a label whose em box overlaps a region divider's stroke.
         for boundary in boundaries:
             if overlaps(em, boundary):
                 note("label sliced by a region divider", f"t{ident} across a divider",
                      (x, y - size, length, size))
                 break
 
-        # **A foreign line inside a label's leader.** This was "not nearer its own
-        # route than every other by a line of its own text", which was the right
-        # question against 11.9's strip grid, where a label's own gap ran from
-        # zero to four box heights and the reader had nothing constant to go by.
-        # Under 11.9.4's anchor that gap *is* the leader, exactly, for every
-        # label in the drawing -- so attribution is settled by construction and
-        # reads 0 of 192 placed boxes, and what the old form went on measuring
-        # was a `leader + em` clearance under an attribution rule's name.
-        #
-        # What is left worth counting is a stranger's line closer to the text
-        # than the text's own line is: the reader has no gap to tell them apart
-        # by. The em box sits inside the line box layout placed, so measuring
-        # here is the conservative count of the two.
+        # Flags a label em box nearer than `label_leader` to another route's leg.
         theirs = [gap(em, span(a, b)) for a, b, other, _ in legs if other != ident]
         if theirs and leader is not None and min(theirs) < leader:
             note("a foreign line inside a label's leader",
                  f"{min(theirs)} away, leader {leader}", (x, y - size, length, size))
 
-        # Everything of a submachine is contained in its parent state's box,
-        # out-of-machine transitions excepted -- a transition with no state
-        # enclosing both ends has no box to be inside.
+        # Flags a label outside any state box enclosing both its transition's ends.
         both = enclosing(doc, edge["src"]) & enclosing(doc, edge["dst"])
         for i in both:
             bx, by, bw, bh = rects[i]
@@ -474,9 +449,7 @@ def audit(svg, every, chart, doc, verbose):
                      f"outside state {i}", (x, y - size, length, size))
                 break
 
-    # Two strings inked into the same place read as one unreadable string, which
-    # is a different defect from a label over a box: nudging moves the routes a
-    # label follows, but nothing moves two labels apart. 11.9's strip matching.
+    # Flags each pair of overlapping text em boxes.
     found["texts"] = found.get("texts", 0) + len(inked)
     for i, (a_box, a_which, a_id) in enumerate(inked):
         for b_box, b_which, b_id in inked[i + 1:]:
@@ -484,9 +457,7 @@ def audit(svg, every, chart, doc, verbose):
                 note("texts overprint each other",
                      f"{a_which} {a_id} over {b_which} {b_id}", a_box)
 
-    # A mark drawn past the glyph that holds it. The circle and its text share an
-    # id, and the em box's worst corner against the radius is the whole check --
-    # `kind_min_*` sizes the glyph and knows nothing about what goes in it.
+    # Flags state text with an em-box corner outside the state's largest circle.
     glyph = {}
     for m in CIRCLE.finditer(svg):
         gx, gy, r, ident = int(m.group(1)), int(m.group(2)), int(m.group(3)), m.group(4)
@@ -579,6 +550,7 @@ def main():
              "label not anchored to its own polyline": "placed label boxes",
              "label outside its enclosing state": "transition labels",
              "segment flush along a box": "route segments",
+             "segment nearer than pad to a border it runs along": "route segments",
              "route start not on any border": "route starts",
              "arrowhead not on any border": "arrowheads",
              "an arrowhead over another route's end": "arrowheads",
@@ -595,11 +567,8 @@ def main():
                 "marks in a glyph"):
         print(f"{key:<40} {total.get(key, 0)}")
     print()
-    # Not a ratio, so it sits outside the block below: the shared run's extent is
-    # what nudging has to pay back, and the pair count alone hides which chart owes.
     print(f"  {'shared run, grid units':<40} {total.get('overlapped units', 0)}")
-    # The run two routes end or begin as one, which is a fan-in rather than a
-    # lane and is left alone by both nudging and the corridor term.
+    # Shared runs inside two routes' common point prefix or suffix (see `trunks`).
     print(f"  {'merged trunks':<40} {total.get('merged trunks', 0)}")
     print(f"  {'merged trunk, grid units':<40} {total.get('merged trunk units', 0)}")
     clean = True

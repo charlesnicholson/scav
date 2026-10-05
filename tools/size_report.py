@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-"""The shared library's and the CLI's sizes in one build tree: bytes as built,
-bytes as `cmake --install --strip` leaves them, and the code and constant
-sections.
+"""Prints the sizes of a build tree's shared library and CLI.
+Bytes as built and after `cmake --install --strip`, plus code and constant sections.
 
     tools/size_report.py out/macos-clang-libcxx-release
 """

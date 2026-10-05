@@ -1,5 +1,4 @@
-// Output streams and exit codes, which are a process's to choose. Everything
-// below them -- loading, validating, rendering a diagnostic -- is core's.
+// Code the CLI verbs share: output streams, layout flag parsing, and the load prologue.
 
 #include "cli.h"
 
@@ -33,7 +32,7 @@ void write_error(std::string_view what, std::string_view path) {
 
 namespace {
 
-// Two ordinals separated by a colon, the whole of `text`.
+// True when all of `arg` is two colon-separated ordinals, read into `a` and `b`.
 bool ordinal_pair(std::string_view arg, uint32_t &a, uint32_t &b) {
   size_t const colon{ arg.find(':') };
   if ((colon == std::string_view::npos) || (colon == 0) || (colon + 1 == arg.size())) {
@@ -96,22 +95,24 @@ bool read_value(std::string_view flag, std::string_view value, LayoutArgs &out) 
     out.pins.orients.push_back({ .frame = SubmachineId{ a } });
     return true;
   }
-  if ((flag == "--face") || (flag == "--side")) {
+  if (flag == "--end") {
     std::array<uint32_t, 4> field{};
     if (!ordinal_fields(value, field) || (field[2] > 1) || (field[3] > 3)) {
       return false;
     }
-    if (flag == "--face") {
-      out.pins.faces.push_back({ .trans = TransId{ field[0] },
-                                 .leg = field[1],
-                                 .end = field[2],
-                                 .face = field[3] });
-    } else {
-      out.pins.sides.push_back({ .trans = TransId{ field[0] },
-                                 .leg = field[1],
-                                 .end = field[2],
-                                 .side = field[3] });
+    out.pins.ends.push_back({ .trans = TransId{ field[0] },
+                              .leg = field[1],
+                              .end = field[2],
+                              .face = field[3] });
+    return true;
+  }
+  if (flag == "--loop") {
+    std::array<uint32_t, 3> field{};
+    if (!ordinal_fields(value, field) || (field[1] > 3) || (field[2] > 1)) {
+      return false;
     }
+    out.pins.loops.push_back(
+        { .state = StateId{ field[0] }, .face = field[1], .end = field[2] });
     return true;
   }
   if ((flag == "--fold") && (std::ranges::count(value, ':') == 2)) {
@@ -147,13 +148,10 @@ ArgRead read_layout_arg(int argc, char **argv, int &i, LayoutArgs &out) {
     return ArgRead::Taken;
   }
   if ((arg != "--profile") && (arg != "--portfolio-row") && (arg != "--rank") &&
-      (arg != "--cut") && (arg != "--reverse") && (arg != "--face") &&
-      (arg != "--orient") && (arg != "--side") && (arg != "--fold")) {
+      (arg != "--cut") && (arg != "--reverse") && (arg != "--end") &&
+      (arg != "--orient") && (arg != "--fold") && (arg != "--loop")) {
     return ArgRead::NotOurs;
   }
-  // The increment is its own statement: clang-tidy's
-  // bugprone-inc-dec-in-conditions is right that `++i` inside a compound
-  // condition depends on an evaluation order a reader has to reconstruct.
   if ((i + 1) >= argc) { return ArgRead::Malformed; }
   ++i;
   out.given = true;
@@ -187,23 +185,16 @@ void append_layout_args(std::string &out,
   for (RankPin const &r : pins.ranks) { pair("--rank", r.state.v, r.rank); }
   for (ChainCut const &k : pins.cuts) { pair("--cut", k.trans.v, k.leg); }
   for (ReversePin const &r : pins.reverses) { pair("--reverse", r.trans.v, r.leg); }
-  for (FacePin const &f : pins.faces) {
-    pair("--face", f.trans.v, f.leg);
+  for (EndPin const &e : pins.ends) {
+    pair("--end", e.trans.v, e.leg);
     out += ':';
-    string_append_u32(out, f.end);
+    string_append_u32(out, e.end);
     out += ':';
-    string_append_u32(out, f.face);
+    string_append_u32(out, e.face);
   }
   for (OrientPin const &o : pins.orients) {
     out += " --orient ";
     string_append_u32(out, o.frame.v);
-  }
-  for (SidePin const &sp : pins.sides) {
-    pair("--side", sp.trans.v, sp.leg);
-    out += ':';
-    string_append_u32(out, sp.end);
-    out += ':';
-    string_append_u32(out, sp.side);
   }
   for (FoldPin const &f : pins.folds) {
     pair("--fold", f.frame.v, f.mode);
@@ -211,6 +202,11 @@ void append_layout_args(std::string &out,
       out += ':';
       string_append_u32(out, f.layer);
     }
+  }
+  for (LoopPin const &l : pins.loops) {
+    pair("--loop", l.state.v, l.face);
+    out += ':';
+    string_append_u32(out, l.end);
   }
 }
 
@@ -224,8 +220,7 @@ void load_and_report(char const *path, bool validate, Loaded &out) {
   }
 
   std::string err;
-  // A load that never reached a chart leaves nothing to print, and its findings
-  // index the loader's buffers rather than a chart's.
+  // With no chart, diagnostics render against the loader's buffers.
   if (out.chart.documents.empty()) {
     for (Diagnostic const &d : out.diags) { diag_append(err, out.loader, d, path); }
     write_stream(err, stderr);

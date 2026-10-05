@@ -1,8 +1,8 @@
 #ifndef SCAV_LAYOUT_H_INCLUDED
 #define SCAV_LAYOUT_H_INCLUDED
 
-// libscavlayout's public API: validation and digest over the space tables,
-// the shipped profiles, and the router registry, over the C ABI's own PODs.
+// libscavlayout's C++ API over the C ABI's PODs: space tables, profiles, layout, cost
+// and the router registry.
 
 #include "scav/scav_core.h"
 #include "scav/scav_layout_c.h"
@@ -16,17 +16,13 @@ namespace scav {
 
 // Space requests ============================================================
 
-// A quarter of the coordinate domain, so a legal request cannot compose into
-// an illegal box: the box formula adds requests, padding, and packed children.
-inline constexpr int32_t SPACE_MAX{ COORD_MAX / 4 };
+inline constexpr int32_t SPACE_MAX{ COORD_MAX / 4 };  // bound on every space request
 
-// Every row of every table against the domain, findings sorted by (code,
-// kind, ordinal). False when it found anything; the caller rejects, never clamps.
+// Checks every row of every table against the domain, appending findings sorted by
+// (code, kind, ordinal). False when it found any.
 bool spaces_validate(Chart const &c, scav_spaces const &s, std::vector<Diagnostic> &diags);
 
-// xxh32 over counts and rows, field by field. A hashed layout input: a golden
-// is reproducible only against a stated measurement policy. The strides are ABI
-// facts rather than layout inputs and are deliberately not hashed.
+// xxh32 over each table's count and rows, field by field; strides are excluded.
 uint32_t spaces_digest(scav_spaces const &s);
 
 // Profile ===================================================================
@@ -35,50 +31,27 @@ uint32_t spaces_digest(scav_spaces const &s);
 // unknown name, writing nothing.
 bool profile_named(char const *name, scav_profile &out);
 
-// Every bound in the C header's table. scav_layout_run revalidates regardless.
+// True when every field is within the bound its `scav_profile` comment gives.
 bool profile_validate(scav_profile const &p);
 
 // Drawn silhouette =========================================================
 
-// The corner arc a `Normal` state is drawn with. Zero for every other kind --
-// a fork or join bar is square, and an inscribed glyph takes the one face
-// midpoint 11.5 already gives it.
-//
-// Stated here rather than in the reference builder because three places need
-// it and only one may own it: the builder draws this arc, the router keeps its
-// seats out of it, and phase 2 keeps children out of it.
-//
-// **Capped at the interior ring.** An eighth of the shorter side is a
-// proportion, and a proportion has no bound: a 12,904-unit composite draws a
-// 1,613-unit arc, twelve times the ring its children are inset by, so a child
-// at the ring sits outside the shape and a seat near a corner points at blank
-// canvas. Past `pad` the arc stops growing, which leaves a large box a rounded
-// rectangle rather than a stadium and puts the whole ring in the straight
-// zone. `pad` comes off the rects rather than the profile, the way
-// `size_owner_holes` reads it, so the three sites cannot disagree about it.
+// Corner radius of a `Normal` state: an eighth of the box's shorter side, capped at
+// `pad`. Zero for every other kind.
 inline int32_t state_corner_radius(StateKind kind, scav_rect const &box, int32_t pad) {
   if (kind != StateKind::Normal) { return 0; }
   int32_t const proportional{ ((box.w < box.h) ? box.w : box.h) / 8 };
   return (proportional < pad) ? proportional : pad;
 }
 
-// The distance a label's chosen attachment point is held from the point on its
-// own polyline that anchors it: half an em, so the tighter profile sits tighter
-// for free and a font-size change cannot leave the leader looking wrong
-// (11.9.4).
-//
-// **Half an em of box, not of whitespace.** The distance is to the placed
-// `scav_path_box`, and that box is a line height tall, so the gap a reader
-// sees is this plus whatever of the box the glyphs do not fill. Measuring to
-// the ink instead would need the app to declare its inset, which the space
-// tables do not carry; recorded as owed rather than assumed (11.9.4).
+// Distance from a label's anchor on its route to the attachment point on its placed
+// `scav_path_box`: half an em, at least 1.
 inline int32_t label_leader(scav_profile const &p) {
   return (p.font_size_grid / 2 > 1) ? (p.font_size_grid / 2) : 1;
 }
 
-// One line of the profile's type. Restated from `scav_draw.h`'s `line_height`
-// because layout is below draw; `functional_drawlist_tests.cpp` pins them equal
-// over the whole domain, zero outside it included.
+// ceil(font_size_grid * k_num / k_den), or 0 outside the profile's domain or past
+// COORD_MAX. Equals `scav_draw.h`'s `line_height`.
 inline int32_t label_line_height(scav_profile const &p) {
   if ((p.font_size_grid <= 0) || (p.line_height_k_num < 1) ||
       (p.line_height_k_num > 1024) || (p.line_height_k_den < 1) ||
@@ -91,84 +64,82 @@ inline int32_t label_line_height(scav_profile const &p) {
   return (h > COORD_MAX) ? 0 : static_cast<int32_t>(h);
 }
 
+// Derived spacing ===========================================================
+
+// The room a route keeps from another route: lanes, seats on one face, a loop's legs.
+constexpr int32_t route_clearance(scav_profile const &p) {
+  return (p.node_sep / 3 > 1) ? (p.node_sep / 3) : 1;
+}
+
+// Width of the band either side of a state's border that a route running along that
+// border keeps out of: one `pad`, at least 1.
+constexpr int32_t border_band(scav_profile const &p) { return (p.pad > 1) ? p.pad : 1; }
+
+// The room a route keeps from a box it passes: `border_band`, at least `route_clearance`.
+constexpr int32_t box_clearance(scav_profile const &p) {
+  return (border_band(p) > route_clearance(p)) ? border_band(p) : route_clearance(p);
+}
+
+// A route's cost per bend, in units of length: one rank separation.
+constexpr int64_t route_bend_penalty(scav_profile const &p) {
+  return (p.rank_sep > 1) ? p.rank_sep : 1;
+}
+
+int32_t loop_reach(scav_profile const &p);  // the far leg's distance in from the exit face
+int32_t loop_gap(scav_profile const &p);    // label to far leg, at most `label_leader`
+int32_t loop_lane(scav_profile const &p);   // the least lane between the loop's two legs
+
+// A run `[lo, lo + len]` along one face of an obstacle (0 left, 1 right, 2 top, 3 bottom)
+// whose interior no end seats in.
+struct OccupiedSpan {
+  uint32_t obstacle, face;
+  int32_t lo, len;
+};
+
+// Per inner loop in a laid-out chart's geometry columns, its ends' run on each face of its
+// state they touch, padded by `route_clearance`; `obstacle` is the StateId ordinal.
+void layout_occupied_spans(Chart const &c,
+                           scav_profile const &p,
+                           std::vector<OccupiedSpan> &out);
+
 // Layout ====================================================================
 
-// One state held at a rank longest path did not give it: 11.10a's placement
-// move, expressed as an input to phase 1 rather than a mutation of its output.
-// Public because a drawing is a function of its tuple *and* its pins, so a
-// caller re-deriving one from the model needs both.
-//
-// **Keyed by state and not by node**, because a node index is an artefact of
-// how a frame was built -- chaining appends bends, and which index a state
-// landed on is not something a caller can predict or should have to.
+// Holds `state` at `rank` in phase 1, in place of the rank longest path gives it.
 struct RankPin {
   StateId state{ INVALID };
   uint32_t rank{ 0 };
 };
 
-// A segment phase 1 leaves unchained, so it reaches the router as a net with no
-// waypoints and is drawn against the frame's obstacles rather than through the
-// corridor the layering would have sent it down (11.10b).
-//
-// **Keyed by transition and leg, never by segment ordinal**, for the reason
-// above: an index into an internal array is not a name a caller can produce.
-// `leg` indexes the transition's own run of segments, which phase 0 splits it
-// into (11.1), and is 0 for a transition that crosses no boundary.
+// Leaves leg `leg` of `trans` unchained in phase 1, so it routes with no waypoints.
+// `leg` indexes the transition's segments; 0 for one that crosses no boundary.
 struct ChainCut {
   TransId trans{ INVALID };
   uint32_t leg{ 0 };
 };
 
-// A segment phase 1 turns around before it breaks cycles, so some other edge of
-// the cycle carries the reversal (11.10d).
-//
-// **Which edge of a cycle is reversed decides the whole drawing, and nothing
-// chose it.** Cycle-breaking is a depth-first walk in node order, so the edge
-// that happens to close the walk is the one turned around -- an artefact of
-// declaration order. On `estop`, a three-state cycle, reversing `Tripped ->
-// Latched` instead of `Latched -> Clear` leaves no edge spanning two ranks, so
-// nothing is chained, nothing carries a bend waypoint, and Tier 2 falls from
-// 3,073 to 1,502 with bends 5 to 2.
+// Reverses leg `leg` of `trans` before phase 1 breaks cycles.
 struct ReversePin {
   TransId trans{ INVALID };
   uint32_t leg{ 0 };
 };
 
-// The face one end of a segment leaves its box by: 0 left, 1 right, 2 top, 3
-// bottom, and `end` 0 is the departure and 1 the arrival (11.10e).
-//
-// **Which face a transition leaves by decides how many times it turns**, and
-// the router picks it by which separation to the other end is larger -- a rule
-// handed one point and one box, so it cannot see the turn it is buying. On
-// `estop`, `Tripped -> Latched` leaves the left face and turns twice where the
-// bottom face turns once. A better rule was measured and is not the answer
-// (11.5); the choice is small, discrete, and belongs to the search.
-struct FacePin {
+// Puts end `end` (0 departure, 1 arrival) of leg `leg` of `trans` on face 0 left, 1 right,
+// 2 top or 3 bottom: of its box at a box end, of its state's border at a port end.
+struct EndPin {
   TransId trans{ INVALID };
   uint32_t leg{ 0 };
   uint32_t end{ 0 };
   uint32_t face{ 0 };
 };
 
-// A frame whose ranks run down the page rather than across it: layers are rows,
-// the cross axis is horizontal, and its ports sit on its top and bottom
-// borders (11.10g). A column of states in sequence is one frame's choice, and
-// `axis`'s `Moving` wants both of its regions that way.
+// Lays out `frame` with ranks running down the page: layers are rows, the cross axis
+// is horizontal, and its ports sit on its top and bottom borders.
 struct OrientPin {
   SubmachineId frame{ INVALID };
 };
 
-// The side of its state's border a leg end's port sits on: 0 left, 1 right, 2 top,
-// 3 bottom, with `end` as a face pin has it. A port on a region's border takes none.
-struct SidePin {
-  TransId trans{ INVALID };
-  uint32_t leg{ 0 };
-  uint32_t end{ 0 };
-  uint32_t side{ 0 };
-};
-
-// Whether a frame's run folds, in place of its row's rule: `mode` 0 as the scale measure
-// picks, 1 always, 2 never, and a nonzero `layer` the one rank it cuts before.
+// Overrides the row's fold rule for `frame`: `mode` FOLD_SCALE lets the scale measure
+// decide; a nonzero `layer` is the one rank the fold cuts before.
 inline constexpr uint32_t FOLD_SCALE{ 0 };
 inline constexpr uint32_t FOLD_ALWAYS{ 1 };
 inline constexpr uint32_t FOLD_NEVER{ 2 };
@@ -178,43 +149,41 @@ struct FoldPin {
   uint32_t layer{ 0 };
 };
 
-// Everything besides the tuple that a drawing is a function of.
+// Places `state`'s loop room on face `face` (0 left, 1 right, 2 top, 3 bottom) of its free
+// interior, at end `end` of that face: 0 leading (top or left), 1 trailing.
+struct LoopPin {
+  StateId state{ INVALID };
+  uint32_t face{ 0 };
+  uint32_t end{ 0 };
+};
+
+// Every input besides the tuple that a drawing depends on.
 struct SearchPins {
   std::vector<RankPin> ranks;
   std::vector<ChainCut> cuts;
   std::vector<ReversePin> reverses;
-  std::vector<FacePin> faces;
+  std::vector<EndPin> ends;
   std::vector<OrientPin> orients;
-  std::vector<SidePin> sides;
   std::vector<FoldPin> folds;  // the last pin naming a frame decides it
+  std::vector<LoopPin> loops;  // the last pin naming a state decides it
 };
 
-// Rows in the fixed table of chart-global phase-2 tuples Level 2 chooses
-// between: the box packer, compaction, where a frame's desired ratio comes
-// from, and whether its rank run folds (11.10, 11.10a). The bound on
-// `portfolio_m` and on `layout_run`'s `row`.
+// Rows in the Level 2 table of phase-2 tuples, one per combination of box packer,
+// compaction, ratio source and fold; bounds `portfolio_m` and `layout_run`'s `row`.
 inline constexpr uint32_t LAYOUT_SEARCH_ROWS{ 16 };
 
-// Decomposes, orders, then sizes, places and routes every phase-2 tuple the
-// chart's size admits and keeps the one exact `Cost` ranks first (11.10).
-// Writes the geometry columns and sizes `placed` to the path boxes. False
-// leaves the last successful run's columns. True can still leave RouteDegraded
-// findings in `diags`, one per transition drawn as a straight line.
-// `inflations` receives how many spacing inflations the written geometry took
-// and `tuple` which row of the table produced it, row 0 being the profile as
-// the caller passed it.
-//
-// `row` runs one named row of the table in place of the search, which is what
-// lets calibration render a candidate the objective would never pick and score
-// it beside the one it does (11.10, 11.12). It is not a search knob: nothing
-// shipping passes it, `portfolio_m` is unread when it is set, and the caller
-// bounds it -- `INVALID` searches, and anything else must be below
-// `LAYOUT_SEARCH_ROWS`.
-//
-// `pins` seeds phase 1 with what a previous run's `taken` reported, which is the
-// other half of re-deriving a drawing from the model: with the tuple in `row`
-// and `portfolio_k` at zero it reproduces that run exactly, searching nothing.
-// Level 1 continues from them when it has budget.
+// Lays out and searches the first `portfolio_m` table rows; keeps the lowest `Cost`.
+// Writes the geometry columns and sizes `placed` to the path boxes. False leaves the
+// last successful run's columns; true may leave one RouteDegraded finding in `diags`
+// per transition drawn as a straight line.
+// `inflations`: spacing inflations the written geometry took.
+// `tuple`: the table row that produced it; row 0 is the profile as passed.
+// `row`: runs that row alone, ignoring `portfolio_m`; `INVALID` searches, any other
+// value must be below `LAYOUT_SEARCH_ROWS`.
+// `moves`: how many more pins the drawing rests on than the seed `pins`.
+// `taken`: every pin the drawing rests on.
+// `pins`: a prior run's `taken`, seeding phase 1. With that run's row in `row` and
+// `portfolio_k` 0 it reproduces that run; a nonzero `portfolio_k` searches on from it.
 bool layout_run(Chart &c,
                 scav_spaces const &s,
                 scav_layout_opts const &o,
@@ -227,22 +196,14 @@ bool layout_run(Chart &c,
                 SearchPins *taken = nullptr,
                 SearchPins const *pins = nullptr);
 
-// The decisions behind the drawing that ships, as JSON in `out` (11.16).
-// Debug-only: the trace is not a geometry column, is not hashed, and no builder
-// reads it.
-//
-// **Searches first, then traces what won.** Tracing the search itself records
-// every candidate it rejected and leaves no way to tell which one shipped, so
-// this runs normally, takes the winning tuple and pins, and re-derives that one
-// drawing with the sink attached and nothing searching. `threads` is one for
-// the traced run, so event order is the algorithm's and not the scheduler's.
-// The geometry is the searched run's, byte for byte.
-// `Shipped` traces the drawing that won and nothing else. `Search` traces the
-// search itself, every rejected candidate included, which is what answers "why
-// was that move not taken" -- at the price that the stream holds drawings
-// nobody sees and no marker says which of them shipped.
-enum class TraceScope : uint32_t { Shipped, Search };
+enum class TraceScope : uint32_t {
+  Shipped,  // a single-threaded re-run of the winning row and pins, searching nothing
+  Search,   // the whole search on one thread, every candidate included
+  Outline   // the whole search on one thread, its row and kick events only
+};
 
+// Runs `layout_run` from `pins` and writes its decision trace as JSON to `out`. Debug
+// output, unhashed.
 bool layout_trace_json(Chart &c,
                        scav_spaces const &s,
                        scav_layout_opts const &o,
@@ -250,17 +211,16 @@ bool layout_trace_json(Chart &c,
                        std::vector<Diagnostic> &diags,
                        std::vector<char> &out,
                        uint32_t row = INVALID,
-                       TraceScope scope = TraceScope::Shipped);
+                       TraceScope scope = TraceScope::Shipped,
+                       SearchPins const *pins = nullptr);
 
-// Split so a pure translation moves the coordinate hash and not the structural
-// one: structure is sides, depths and turn tokens; coordinates are the rest.
-// The structural hash is seeded with the model's structural digest (6).
+// Structural: route lengths, turn directions, port sides and depths, seeded with the
+// model's structural digest. Coordinate: the rest; a translation moves only this one.
 uint32_t layout_structural_hash(Chart const &c);
 uint32_t layout_coordinate_hash(Chart const &c);
 
-// Every non-geometry input: profile, router name and version, space tables --
-// through which the font reaches a digest it cannot be an argument to. A third
-// value, since seeding the other two would cost the split its point.
+// Hash of every non-geometry layout input: profile, router name and version, and
+// space tables.
 uint32_t layout_inputs_digest(Chart const &c);
 
 // Cost ======================================================================
@@ -269,23 +229,24 @@ inline constexpr uint32_t TIER2_TERMS{ 13 };
 
 // The thirteen Tier-2 quantities before weighting, and the Tier-0 counts.
 struct CostTerms {
-  int64_t bends{ 0 };       // direction changes at a route's interior vertices
-  int64_t corridor{ 0 };    // length two routes' segments run collinear over
-  int64_t crossings{ 0 };   // properly crossing route segment pairs
-  int64_t excess_len{ 0 };  // over min_len, charged per crossing on the edge
-  int64_t adjacency{ 0 };   // sibling submachine pairs joined but not adjacent
-  // Per placed box: another box, and the `before`/`after` bands of each state enclosing
+  int64_t bends{ 0 };      // direction changes at a route's interior vertices
+  int64_t corridor{ 0 };   // length two routes' segments run collinear over
+  int64_t crossings{ 0 };  // properly crossing route segment pairs
+  // Per route: its length past max(end-to-end distance, its boxes' summed widths), times
+  // one plus its crossings.
+  int64_t excess_len{ 0 };
+  // Segments joining concurrent submachines that are not adjacent; fork and join excluded.
+  int64_t adjacency{ 0 };
+  // Overlapping placed-box pairs, plus each placed box over a band of a state enclosing
   // both endpoints.
   int64_t label{ 0 };
-  // Per placed box: how far short of its own height the box falls of being
-  // nearer its own route than every other transition's.
+  // Per placed box: its gap to its own route plus its height, less its gap to the
+  // nearest other route, when positive.
   int64_t label_near{ 0 };
-  int64_t aspect{ 0 };  // |w * dar_den - h * dar_num|
+  int64_t aspect{ 0 };  // |w * dar_den - h * dar_num| of the root bounding box
   int64_t area{ 0 };    // the root bounding box
-  // Per pair of different transitions' segments on one axis, overlapping along
-  // it and closer than an em but not collinear: the overlap scaled by the
-  // shortfall, `along * (em - apart) / em`. Continuous with `corridor` at
-  // `apart = 0` (11.6).
+  // Per pair of different transitions' parallel segments that overlap along their axis
+  // and lie closer than an em but not collinear: `along * (em - apart) / em`.
   int64_t crowding{ 0 };
   int64_t length{ 0 };  // every route's polyline, end to end, summed
   // Bends in a state the route only passes through: below the lowest common ancestor
@@ -295,30 +256,48 @@ struct CostTerms {
   // live children's rects.
   int64_t whitespace{ 0 };
 
-  // Tier 0, forbidden rather than priced: the obstacle set makes these
-  // unrepresentable, and the count survives as a net (11.6).
+  // Tier 0 counts, summed into `Cost::t0_violations`.
   int32_t through_box{ 0 };
+  // Route segments entering a band of a state whose interior they may occupy.
+  int32_t through_band{ 0 };
   int32_t box_overlap{ 0 };
-  // Transitions with a segment to draw and a route of fewer than two points; Tier 0, since
-  // every Tier-2 term scores one perfect.
+  // Transitions with a segment to draw and a route of fewer than two points.
   int32_t vanished{ 0 };
-  // Route segments running along a state's border.
+  // Route segments running along a state's border inside its `border_band`, either side.
   int32_t flush{ 0 };
-  // Route segments entering a region neither end lies in: a concurrent
-  // sibling of an endpoint's own region, or any region of a state the route
-  // only leaves or reaches. `through_box` sees the states; this sees the
-  // regions inside a state a route is allowed to be in (11.10g).
+  // Route segments entering a region neither end lies in, or an external route's segments
+  // entering both its ends' regions.
   int32_t through_region{ 0 };
-  // Route vertices where an axis-aligned segment turns straight back along the
-  // one before it. The run is drawn twice over one line, so a reader sees a
-  // route that stops and another that starts rather than one that turns
-  // (11.10g).
+  // Route vertices where an axis-aligned segment turns straight back along the one
+  // before it.
   int32_t retrace{ 0 };
-  // Per placed box, each state rect it overlaps but those enclosing both endpoints.
+  // Pairs of one route's non-adjacent segments that cross.
+  int32_t self_crossing{ 0 };
+  // Pairs of different transitions' collinear segments sharing a run, except a pair both
+  // in the two routes' common head or tail.
+  int32_t shared_run{ 0 };
+  // Per placed box, each state rect it overlaps except those enclosing both endpoints.
   int32_t label_over_box{ 0 };
   // Per placed box, each segment of another transition's route it overlaps.
   int32_t label_over_route{ 0 };
+  // Placed boxes whose Chebyshev gap to their own transition's route exceeds
+  // `label_leader`.
+  int32_t label_far{ 0 };
+  // Inner loops with an end on neither their state's border nor a ruled band's inner edge.
+  int32_t loop_unanchored{ 0 };
 };
+
+inline constexpr uint32_t TIER0_TERMS{ 13 };
+
+// Tier-0 term names, in `tier0_terms` order.
+inline constexpr std::array<char const *, TIER0_TERMS> TIER0_NAMES{
+  "through_box",      "through_band", "box_overlap",    "vanished",   "flush",
+  "through_region",   "retrace",      "self_crossing",  "shared_run", "label_over_box",
+  "label_over_route", "label_far",    "loop_unanchored"
+};
+
+// The Tier-0 counts in `TIER0_NAMES` order; `cost_of` sums them.
+std::array<int32_t, TIER0_TERMS> tier0_terms(CostTerms const &t);
 
 // Compared lexicographically, in this order.
 struct Cost {
@@ -327,20 +306,17 @@ struct Cost {
   int64_t t2{ 0 };
 };
 
-// Every term is converted to the unit the profile names it in before its weight
-// applies, so a weight is an exchange rate between comparable quantities (11.6).
+// Tier 0 sums the violation counts; Tier 2 sums each term times its weight, with
+// lengths in ems and areas in ems squared, ceiled.
 Cost cost_of(CostTerms const &t, scav_profile const &p);
 
-// Each weighted term's share of `cost_of`'s sum in basis points, floored and in
-// CostTerms order, so a golden watches the balance a weight change moves.
+// Each weighted term's share of `cost_of`'s Tier-2 sum in basis points, floored, in
+// CostTerms order.
 std::array<int64_t, TIER2_TERMS> cost_shares(CostTerms const &t, scav_profile const &p);
 
 bool cost_less(Cost const &a, Cost const &b);
 
-// The cost vector of a chart's own geometry columns, decomposing as it goes, so
-// a caller holding a laid-out chart needs nothing internal to score one. The
-// scoring itself is `cost_columns`, which is what a test reaches for when it
-// already has the split graph.
+// Cost terms of a laid-out chart's geometry columns, decomposing the chart first.
 CostTerms layout_cost(Chart const &c,
                       scav_profile const &p,
                       scav_spaces const &s = {},
@@ -353,7 +329,8 @@ uint32_t router_count();
 // The name of the router at `index`. False past the end.
 bool router_name(uint32_t index, scav_byte const *&out, uint32_t &len);
 
-// Its version, bumped whenever its output moves. False past the end.
+// The version of the router at `index`; it changes whenever its output does. False
+// past the end.
 bool router_version(uint32_t index, uint32_t &out);
 
 // False when nothing registered has that name.

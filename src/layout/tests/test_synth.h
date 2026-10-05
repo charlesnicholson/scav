@@ -1,8 +1,8 @@
 #ifndef SCAV_LAYOUT_TESTS_TEST_SYNTH_H_INCLUDED
 #define SCAV_LAYOUT_TESTS_TEST_SYNTH_H_INCLUDED
 
-// The charts more than one suite builds: the two at the scale target, and the
-// sealed channel with the profile that seals it.
+// Charts more than one suite builds: the two scale targets, and a fork bar routed into a
+// nested state, with its profile.
 
 #include "scav/scav_core.h"
 #include "scav/scav_layout_c.h"
@@ -13,16 +13,14 @@ namespace scav {
 // edge per level.
 Chart nested_2k_chart();
 
-// The same count in one submachine, which is the largest single routing graph
-// any chart produces (11.5).
+// 2048 states in one submachine: a chain with a back edge every 16 states.
 Chart flat_2k_chart();
 
-// The bar ranks before `outer` and stands taller than it, so under the profile
-// below it spans `outer`'s frame and walls off the route into `deep`.
+// A fork bar ranked before `outer`, with a transition into `deep`, nested in `outer`;
+// under `sealed_profile` the bar is flush against `outer`.
 Chart sealed_chart();
 
-// Clearance is a third of `node_sep`, so this asks for 192 grid units of it
-// across a rank boundary nothing wide. The move sweep is off: see the .cpp.
+// Zero `rank_sep` and a router clearance of 192 (`node_sep` / 3), with Level 1 off.
 scav_profile sealed_profile(scav_profile const &base);
 
 }  // namespace scav

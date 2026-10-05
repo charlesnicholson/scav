@@ -1,5 +1,5 @@
-// Level 1 search shortcuts, each against a layout that does the work: the search memo,
-// unscored no-op faces, and face moves scored from the incumbent's prefix.
+// Level 1 search shortcuts checked against runs without them: the search memo, unscored
+// no-op faces, and face moves scored from the incumbent's prefix.
 
 #include "layout/pack.h"
 #include "layout/size.h"
@@ -19,10 +19,7 @@
 namespace scav {
 
 void search_key(scav_profile const &objective,
-                scav_profile const &knobs,
-                DarSource dar,
-                Compaction pack,
-                Fold fold,
+                Row const &row,
                 uint32_t budget,
                 bool refold,
                 SearchPins const &seed,
@@ -60,10 +57,7 @@ scav_profile readable() {
 
 struct Inputs {
   scav_profile objective{};
-  scav_profile knobs{};
-  DarSource dar{ DarSource::Profile };
-  Compaction pack{ Compaction::Off };
-  Fold fold{ Fold::Scale };
+  Row row;
   uint32_t budget{ 64 };
   bool refold{ false };
   SearchPins seed;
@@ -74,10 +68,7 @@ struct Inputs {
 std::vector<uint32_t> key_of(Inputs const &in) {
   std::vector<uint32_t> key;
   search_key(in.objective,
-             in.knobs,
-             in.dar,
-             in.pack,
-             in.fold,
+             in.row,
              in.budget,
              in.refold,
              in.seed,
@@ -86,7 +77,7 @@ std::vector<uint32_t> key_of(Inputs const &in) {
   return key;
 }
 
-// Restores the memo whatever a case leaves it as.
+// Re-enables the memo and disables its verifier on scope exit.
 struct MemoGuard {
   MemoGuard() = default;
   MemoGuard(MemoGuard const &) = delete;
@@ -115,7 +106,7 @@ Laid lay_out(char const *name, bool labelled = false) {
   std::vector<scav_path_box> boxes;
   for (uint32_t t = 0; labelled && (t < c.transitions.size()); ++t) {
     Transition const &tr{ c.transitions[t] };
-    if ((tr.live == 0) || ((tr.src == tr.dst) && (tr.kind != TransKind::External))) {
+    if ((tr.live == 0) || ((tr.src == tr.dst) && (tr.kind != TransKind::Default))) {
       continue;
     }
     boxes.push_back({ .subject = t, .w = 40, .h = 12, .order = 0 });
@@ -138,26 +129,26 @@ Laid lay_out(char const *name, bool labelled = false) {
 TEST_CASE("search memo: the key tells apart every input a search is a function of") {
   Inputs base;
   base.objective = readable();
-  base.knobs = readable();
+  base.row.knobs = readable();
   base.seed.ranks.push_back({ .state = StateId{ 3 }, .rank = 1 });
   base.seed.ranks.push_back({ .state = StateId{ 5 }, .rank = 2 });
-  base.seed.faces.push_back({ .trans = TransId{ 2 }, .leg = 0, .end = 1, .face = 3 });
-  base.seed.sides.push_back({ .trans = TransId{ 2 }, .leg = 0, .end = 0, .side = 1 });
+  base.seed.ends.push_back({ .trans = TransId{ 2 }, .leg = 0, .end = 1, .face = 3 });
+  base.seed.ends.push_back({ .trans = TransId{ 2 }, .leg = 0, .end = 0, .face = 1 });
   base.scope.assign(4, 0);
 
   std::vector<Inputs> variants(22, base);
   variants[0].objective.node_sep += 1;
-  variants[1].knobs.node_sep += 1;
-  variants[2].dar = DarSource::OwnerHole;
-  variants[3].pack = Compaction::On;
-  variants[4].fold = Fold::Always;
+  variants[1].row.knobs.node_sep += 1;
+  variants[2].row.dar = DarSource::OwnerHole;
+  variants[3].row.pack = Compaction::On;
+  variants[4].row.fold = Fold::Always;
   variants[5].budget += 1;
   variants[6].seed.ranks[1].rank = 3;
   variants[7].seed.cuts.push_back({ .trans = TransId{ 1 }, .leg = 0 });
   variants[8].seed.reverses.push_back({ .trans = TransId{ 1 }, .leg = 0 });
-  variants[9].seed.faces[0].face = 2;
+  variants[9].seed.ends[0].face = 2;
   variants[10].seed.orients.push_back({ .frame = SubmachineId{ 0 } });
-  // Rank pins apply in order, so the same two in the other order are another start.
+  // The same two rank pins in the other order key differently.
   std::swap(variants[11].seed.ranks[0], variants[11].seed.ranks[1]);
   variants[12].scoped = true;
   variants[13].scoped = true;
@@ -165,9 +156,9 @@ TEST_CASE("search memo: the key tells apart every input a search is a function o
   variants[14].scoped = true;
   variants[14].scope[3] = 1;
   variants[15].seed.ranks.pop_back();
-  variants[16].seed.sides.push_back(
-      { .trans = TransId{ 1 }, .leg = 0, .end = 1, .side = 0 });
-  variants[17].seed.sides[0].side = 2;
+  variants[16].seed.ends.push_back(
+      { .trans = TransId{ 1 }, .leg = 0, .end = 1, .face = 0 });
+  variants[17].seed.ends[1].face = 2;
   variants[18].seed.folds.push_back({ .frame = SubmachineId{ 2 }, .mode = FOLD_NEVER });
   variants[19].seed.folds.push_back({ .frame = SubmachineId{ 2 }, .mode = FOLD_ALWAYS });
   variants[20].seed.folds.push_back(
@@ -214,7 +205,7 @@ TEST_CASE("search memo: a layout searched through it is the one searched without
 
 TEST_CASE("search memo: every search it answers is the search run afresh" *
           doctest::test_suite("full")) {
-  // Each answer is checked against the search run anyway, including those not taken.
+  // The verifier checks each memo answer, taken or not, against the search run afresh.
   MemoGuard const guard;
   layout_test_search_memo_verify(true);
   constexpr std::array<char const *, 5> CHARTS{ "axis.scav",

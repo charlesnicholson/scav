@@ -1,5 +1,5 @@
-// The filesystem transport, which is the one part of core that opens a file.
-// Everything writes under the build tree, so a run leaves nothing behind it.
+// Tests the filesystem transport, the only part of core that opens a file.
+// Scratch files are written under the build tree.
 
 #include "core/tests/test_support.h"
 #include "scav/scav_core.h"

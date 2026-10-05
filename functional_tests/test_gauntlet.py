@@ -1,12 +1,6 @@
 #!/usr/bin/env python3
-"""The element suite through the same verbs the corpus goes through.
-
-`src/layout/gauntlet_tests.cpp` lays these charts out in-process with no space
-requests, so nothing there exercises the loader, the printer, or the renderer,
-and the array it iterates is hand-maintained. Both gaps are the same gap: a
-chart added to the directory and not to the array is a shape nobody asserts
-anything about, and one asserted on but never rendered is a shape no reader
-ever sees."""
+"""Runs the element suite through the CLI and tools, and checks the unit suites'
+arrays list the same charts as the directory."""
 
 import os
 import re
@@ -21,13 +15,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import scavtest  # noqa: E402
 
 CHARTS = Path("test_data/charts/gauntlet")
-# Every suite carrying a hand-maintained copy of the directory: the element
-# properties, and the bench row the cost golden is built from.
-SUITES = (Path("src/layout/gauntlet_tests.cpp"), Path("src/layout/bench_tests.cpp"))
+# The one hand-maintained list of the element charts, shared by the unit suites.
+SUITES = (Path("src/core/tests/corpus.h"),)
 SVG_NS = "{http://www.w3.org/2000/svg}"
 
-# The array initializer, then the names inside it. Anchored on the declaration
-# so a chart name appearing in a comment elsewhere in the file is not one.
+# The `GAUNTLET{...}` initializer, then the chart names inside it.
 ARRAY = re.compile(r"GAUNTLET\{(.*?)\}", re.S)
 NAME = re.compile(r'"([^"]+)"')
 
@@ -86,10 +78,8 @@ class TestGauntlet(unittest.TestCase):
 
     @scavtest.full_only
     def test_the_tools_reach_the_suite(self) -> None:
-        """`--gauntlet` on both, since a switch nothing runs is a switch that
-        rots. What is asserted is that they see the suite and agree on the file
-        names between them, not what the audit counts: those are findings with
-        an owner in the PRD, which is why the audit reports rather than fails."""
+        """`baseline.py --gauntlet` renders every chart; `audit.py --gauntlet` finds
+        each one rendered."""
         out = scavtest.fresh_dir(self.cfg.scratch_dir / "gauntlet")
         rendered = scavtest.run(
             [self.cfg.python, self.cfg.repo_root / "tools/baseline.py", "--gauntlet",

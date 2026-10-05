@@ -9,8 +9,7 @@ namespace scav {
 
 namespace {
 
-// Hand-rolled: std::to_string is locale-free for integers, but this generator
-// feeds a hash-adjacent corpus and one call that is not is one too many.
+// Appends `v` in decimal.
 void append_u32(std::string &out, uint32_t v) {
   std::array<char, 10> buf{};
   uint32_t n{ 0 };
@@ -30,8 +29,7 @@ void indent(std::string &out, uint32_t depth) {
   for (uint32_t i = 0; i < (2U * depth); ++i) { out.push_back(' '); }
 }
 
-// What remains to be emitted for one open block. Iterative like the parser: a
-// test drives depth to 10,000, and a recursive generator would fall over first.
+// What remains to emit for one open block, kept on an explicit stack.
 struct Frame {
   uint32_t depth;
   uint32_t submachine;  // next submachine to open, once the block body is done
@@ -66,8 +64,7 @@ void emit_attrs(Gen &g, uint32_t depth, uint32_t id) {
       append_u32(g.out, id);
       g.out += "\",\n";
     } else if (i == 1) {
-      // The block spelling and a list value, so the parser's two other attribute
-      // shapes are on the hot path too.
+      // Block spelling with a list value: the parser's other two attribute shapes.
       g.out += "@synth { kind = \"generated\", tags = [\"a\", \"b\"], flagged },\n";
     } else {
       g.out += "@synth:n";
@@ -121,8 +118,8 @@ void emit_leaves(Gen &g, uint32_t depth) {
   }
 }
 
-// One top-level composite state and everything under it. Nesting continues in
-// submachine 0 only, so a subtree is linear in `depth`, not exponential.
+// One top-level composite state and everything under it. Only submachine 0
+// nests, so a subtree is linear in `depth`.
 void emit_subtree(Gen &g) {
   std::vector<Frame> stack;
   uint32_t const root_id{ g.next_id++ };
@@ -170,8 +167,7 @@ void emit_subtree(Gen &g) {
     ++g.stats.submachines;
     ++g.stats.statements;
 
-    // Pushed before the body is written, so the close brace is owed even if the
-    // nested state below pushes another frame first.
+    // Pushed before the body, so its close brace follows any nested state's frame.
     stack.push_back(
         { .depth = depth, .submachine = 0, .indent = body_indent, .in_submachine = true });
     emit_leaves(g, body_indent);

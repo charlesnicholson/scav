@@ -1,5 +1,5 @@
-// Canonical form belongs to running the printer, so this verb is what makes it
-// something a repo can hold. One file at a time; includes are not followed.
+// `scav fmt`: rewrites each file in canonical form, or reports it under `--check`.
+// One file at a time; includes are not followed.
 
 #include "cli.h"
 
@@ -15,8 +15,7 @@ namespace cli {
 
 namespace {
 
-// Diagnostics from a parse have no chart to hang on, so their spans index the
-// bytes just read.
+// Appends parse diagnostics as `path:line:col: message`; spans index `bytes`.
 void report(std::string &err,
             char const *path,
             std::vector<scav_byte> const &bytes,
@@ -58,8 +57,7 @@ int run_fmt(std::vector<char const *> const &paths, bool check_only) {
     report(err, path, pd.src_bytes, diags);
     write_stream(err, stderr);
     if (!ok) {
-      // Printing a half-parsed document would write a file that says less than
-      // the one on disk.
+      // A file that fails to parse is left unchanged.
       worst = EXIT_UNUSABLE;
       continue;
     }
@@ -71,8 +69,7 @@ int run_fmt(std::vector<char const *> const &paths, bool check_only) {
       continue;
     }
 
-    // Against the bytes on disk, not the normalized ones: line endings, the BOM
-    // and NFC all move at parse, and comparing after would call a CRLF file clean.
+    // Compares the raw bytes on disk, before normalization, with the canonical text.
     std::string_view const before{ reinterpret_cast<char const *>(bytes.data()),
                                    bytes.size() };
     if (before == canonical) { continue; }

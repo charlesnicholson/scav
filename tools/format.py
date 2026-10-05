@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""Run clang-format over scav's C++ sources.
-
-envy.lua pins the version, because clang-format's output moves between releases
-and a gate is only a gate if every machine runs the same one.
+"""Runs clang-format over scav's C++ sources, preferring envy's pinned copy.
 
     $(./bin/envy product python3) tools/format.py            # rewrite files in place
     $(./bin/envy product python3) tools/format.py --check    # exit non-zero on any diff
@@ -17,15 +14,13 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-# Everything scav writes; generated and third-party trees are not ours to touch.
+# Directories holding scav's own sources.
 SOURCE_ROOTS: tuple[str, ...] = ("include", "src", "apps", "plugins", "functional_tests")
 SOURCE_SUFFIXES: tuple[str, ...] = (".h", ".cpp")
 
 
 def clang_format() -> str:
-    """envy's copy, whose version envy.lua pins, so a diff reads the same
-    everywhere. It sits behind SCAV_LINT, so the query fails fast without it --
-    which is what the PATH fallback is for."""
+    """Path of envy's pinned clang-format, else the one on PATH; exits if neither."""
     envy = REPO_ROOT / "bin" / ("envy.bat" if os.name == "nt" else "envy")
     if envy.is_file():
         found = subprocess.run([str(envy), "product", "clang-format"],
@@ -43,8 +38,7 @@ def clang_format() -> str:
 def sources() -> list[Path]:
     found = [p for root in SOURCE_ROOTS for p in (REPO_ROOT / root).rglob("*")
              if p.is_file() and p.suffix in SOURCE_SUFFIXES]
-    # Byte-wise: directory iteration order is unspecified, and this output should
-    # not vary with the filesystem.
+    # Sorted byte-wise for a filesystem-independent order.
     return sorted(found, key=lambda p: str(p).encode("utf-8"))
 
 

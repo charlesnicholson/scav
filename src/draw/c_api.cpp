@@ -31,9 +31,8 @@ scav_result measure_result(scav::MeasureStatus st) {
   return SCAV_E_INVALID_ARG;
 }
 
-// One of the DrawList's own arrays with the stride to walk it at, so a reader is
-// told the row size rather than assuming its own header's -- exactly how a
-// column is read. An empty array reads back NULL and zero, and its stride.
+// Writes a DrawList array's base, row stride and count; an empty array gives NULL, its
+// stride and zero.
 template <typename T>
 scav_result rows_out(std::vector<T> const &rows,
                      T const **out,
@@ -48,8 +47,8 @@ scav_result rows_out(std::vector<T> const &rows,
   return SCAV_OK;
 }
 
-// A span against a flat byte pool, under the rule every other span accessor
-// follows: zero length reads back NULL and zero, past the end is an error.
+// Reads span `ref` from `pool`: zero length gives NULL and zero; past the end is
+// SCAV_E_INVALID_ARG.
 scav_result span_out(std::vector<scav_byte> const &pool,
                      scav_span ref,
                      scav_byte const **out,
@@ -214,8 +213,6 @@ scav_result scav_drawlist_validate(scav_drawlist const *list, uint32_t *out_prim
 scav_result scav_drawlist_canonicalize(scav_drawlist *list) {
   if (list == nullptr) { return SCAV_E_INVALID_ARG; }
   uint32_t bad{ 0 };
-  // Canonicalizing an invalid list would index past an array; refusing here is
-  // what lets the sort trust every span it reads.
   if (!scav::drawlist_validate(list->list, bad)) { return SCAV_E_DRAWLIST; }
   scav::drawlist_canonicalize(list->list);
   return SCAV_OK;

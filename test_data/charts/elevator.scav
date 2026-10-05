@@ -1,0 +1,51 @@
+// An elevator car: deep history restores the car after a power cut, a junction
+// merges two arrivals, a local transition stays inside the door cycle, external
+// transitions leave and re-enter service, and descriptions and internal loops sit
+// in the states they belong to.
+chart elevator "elevator car controller" {
+  state Service "car in normal service" {
+    state Parked "doors closed, no calls",
+    state Travel "between floors" {
+      state Accel,
+      state Cruise,
+      state Decel,
+      trans * -> Accel,
+      trans Accel -> Cruise "at speed",
+      trans Cruise -> Decel "floor near",
+      trans internal Cruise -> Cruise "floor passed",
+    },
+    state Arrive junction,
+    state Doors "door cycle" {
+      state Opening,
+      state Open "dwell",
+      state Closing,
+      trans * -> Opening,
+      trans Opening -> Open "open limit",
+      trans Open -> Closing "dwell over",
+      trans Closing -> Opening "obstruction",
+      trans internal Open -> Open "call button",
+    },
+    state Resume deephistory,
+    trans * -> Parked,
+    trans Parked -> Travel "call",
+    trans Travel/Decel -> Arrive "level",
+    trans Parked -> Arrive "call here",
+    trans Arrive -> Doors,
+    trans Doors/Closing -> Parked "closed, idle",
+    trans Doors/Closing -> Travel "closed, calls",
+    trans local Doors -> Doors/Opening "reopen",
+  },
+  state PowerLoss "on battery, brakes set",
+  state Inspection "manual control from the car top",
+
+  trans * -> Service,
+  trans Service -> PowerLoss "mains lost",
+  trans PowerLoss -> Service/Resume "mains back",
+  trans internal PowerLoss -> PowerLoss "battery check",
+  trans Service -> Inspection "key on",
+  trans Inspection -> Service "key off",
+  trans Inspection -> Inspection "jog",
+  trans Service/Doors/Open -> Inspection "fire service",
+  trans external Service/Travel/Cruise -> Service/Parked "overspeed",
+  trans external Service/Doors -> Service "door fault",
+}

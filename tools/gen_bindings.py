@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the low-level Python layer from the ABI JSON.
-
-Bindings are generated, not hand-written, so the half that would drift cannot.
-The idiomatic wrapper beside the output is the hand-written half and stays
-small: everything here is pure marshalling, which is what having no callback
-anywhere in the extension surface buys.
+"""Generates the low-level Python ctypes layer from the ABI JSON.
 
   tools/gen_bindings.py --abi abi/scav_abi.json --out bindings/python/scav/_abi.py
 """
@@ -14,8 +9,7 @@ import json
 import sys
 from pathlib import Path
 
-# Every fixed-width type the ABI uses, and nothing else: a type absent here is
-# an error, because guessing a width is how a binding starts corrupting memory.
+# ctypes spellings of the ABI's primitive types; any other name is an ABI-defined type.
 CTYPES = {
     "void": None,
     "char": "ctypes.c_char",
@@ -89,10 +83,8 @@ def ctype_of(type_info: dict, arrays: int | None = None) -> str:
         if base is None:
             if pointer == 0:
                 return "None"
-            # `void*` never appears in this ABI by design, so it is not modelled.
             raise SystemExit(f"gen_bindings: void with {pointer} pointers")
-        # A `char*` is a NUL-terminated input name, which ctypes marshals from
-        # bytes directly; anything wider stays an explicit pointer.
+        # A const `char*` is a NUL-terminated string, marshalled as `c_char_p`.
         if (name == "char") and (pointer == 1) and type_info["const"]:
             return "ctypes.c_char_p"
     else:
@@ -113,14 +105,12 @@ def struct_class(struct: dict) -> str:
                      f'{ctype_of(field["type"], field.get("array"))}),')
     lines.append("    ]")
     lines.append("")
-    # The layout the C toolchain measured, asserted rather than assumed. Padding
-    # is pinned, so a mismatch is an ABI break and not a portability quirk.
+    # Emits asserts that size, alignment and field offsets match the ABI JSON.
     lines.append(f"assert ctypes.sizeof({struct['name']}) == {struct['size']}, "
                  f'"{struct["name"]} is not {struct["size"]} bytes"')
     lines.append(f"assert ctypes.alignment({struct['name']}) == {struct['align']}")
     for field in struct["fields"]:
-        # getattr, not attribute syntax: a C-legal field name can be a keyword
-        # in the binding language, and the assertion must survive that.
+        # `getattr` reaches a field whose name is a Python keyword.
         lines.append(f'assert getattr({struct["name"]}, "{field["name"]}").offset'
                      f' == {field["offset"]}')
     return "\n".join(lines)
@@ -136,8 +126,6 @@ def function_binding(fn: dict) -> str:
 def generate(abi: dict) -> str:
     out = [HEADER]
 
-    # Handles are opaque, so each is its own incomplete Structure: distinct
-    # types, so a binding cannot hand a chart where a drawlist was wanted.
     handles = [h["name"] for header in abi["headers"] for h in header["handles"]]
     out.append("# Opaque handles. Distinct types on purpose: passing one where "
                "another\n# belongs is a TypeError rather than a segfault.")
@@ -160,8 +148,6 @@ def generate(abi: dict) -> str:
                + "".join(f'    {v}: "{k}",\n' for k, v in errors.items())
                + "}\n")
 
-    # Aliases before the structs that use them, and structs in header order:
-    # ctypes needs a name defined before it is referenced.
     aliases: list[str] = []
     for header in abi["headers"]:
         for alias in header["aliases"]:
@@ -170,9 +156,7 @@ def generate(abi: dict) -> str:
     for header in abi["headers"]:
         for struct in header["structs"]:
             structs.append(struct_class(struct))
-    # An alias may name a struct, so the struct has to come first; and a struct
-    # may name an alias. The ABI only aliases primitives and whole structs, so
-    # two passes settle it: primitive aliases, structs, then the rest.
+    # Emits primitive aliases, then structs, then aliases of structs.
     primitive_aliases = [a for a in aliases if "ctypes." in a]
     struct_aliases = [a for a in aliases if "ctypes." not in a]
     out.append("\n".join(primitive_aliases) + "\n")

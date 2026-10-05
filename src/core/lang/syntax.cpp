@@ -35,16 +35,16 @@ char const *syntax_state_kind_name(StateKind kind) {
 
 char const *syntax_trans_kind_name(TransKind kind) {
   switch (kind) {
-    case TransKind::External: return "external";
+    case TransKind::Default: return "default";
     case TransKind::Internal: return "internal";
     case TransKind::Local: return "local";
+    case TransKind::External: return "external";
   }
   return "unknown";
 }
 
 bool syntax_state_kind_from_name(std::string_view text, StateKind &out) {
-  // `initial` and `final` are absent on purpose: the format reaches them only
-  // through `*`, so accepting them here would add a second spelling.
+  // `initial` and `final` states are spelled only as the `*` endpoint.
   if (text == "normal") {
     out = StateKind::Normal;
     return true;

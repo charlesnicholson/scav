@@ -19,8 +19,8 @@ constexpr uint32_t CODEPOINT_MAX{ 0x10FFFF };
 
 bool is_continuation(scav_byte b) { return (b & 0xC0U) == 0x80U; }
 
-// Fills `cp` from the `n` continuation bytes after `at`. Truncated and
-// InvalidByte are distinguished because they are different mistakes.
+// Shifts the `n` continuation bytes after `at` into `cp`. On failure sets `err` to
+// Utf8Truncated or Utf8InvalidByte.
 bool take_continuations(scav_byte const *bytes,
                         size_t len,
                         size_t at,
@@ -88,8 +88,6 @@ bool source_text_utf8_decode(scav_byte const *bytes,
 
   if (!take_continuations(bytes, len, at, trail, cp, err)) { return false; }
 
-  // Checked after decoding rather than by a lead-byte range table: one rule per
-  // failure mode reads better, and the diagnostic says which one broke.
   if (cp < lowest) {
     err = DiagCode::Utf8Overlong;
     return false;
@@ -135,8 +133,8 @@ bool source_text_is_ascii(scav_byte const *bytes, size_t len) {
 bool source_text_is_nfc(scav_byte const *bytes, size_t len) {
   size_t at{ 0 };
   while (at < len) {
-    if (bytes[at] < 0x80U) {  // ASCII is NFC by construction, and is the hot path
-      do {  // as a run, so a mostly-ASCII document costs one compare per byte
+    if (bytes[at] < 0x80U) {
+      do {  // ASCII is always NFC
         ++at;
       } while ((at < len) && (bytes[at] < 0x80U));
       continue;
@@ -151,10 +149,10 @@ bool source_text_is_nfc(scav_byte const *bytes, size_t len) {
   return true;
 }
 
-// The slow lane of source_text_to_nfc: decode [at, stop), normalize, re-encode
-// into `out`. Returns whether anything changed.
 namespace {
 
+// Decodes [at, stop), normalizes to NFC and appends the UTF-8 to `out`. Returns
+// true when normalization changed the text.
 bool nfc_segment(scav_byte const *bytes,
                  size_t at,
                  size_t stop,
@@ -166,8 +164,7 @@ bool nfc_segment(scav_byte const *bytes,
     uint32_t width{ 0 };
     DiagCode err{ DiagCode::Ok };
     if (!source_text_utf8_decode(bytes, stop, at, cp, width, err)) {
-      // The caller validated already, so this cannot fire on a real document.
-      // Copying the byte through keeps a fuzz case from losing data silently.
+      // Copies an undecodable byte through unchanged; validated input has none.
       out.push_back(bytes[at]);
       ++at;
       continue;
@@ -188,8 +185,8 @@ bool source_text_to_nfc(scav_byte const *bytes, size_t len, std::vector<scav_byt
   out.clear();
   out.reserve(len);
 
-  // ASCII runs copy verbatim. The slow lane starts one character early, since
-  // a following mark may compose with it, and resumes at the next ASCII.
+  // Copies ASCII runs verbatim and normalizes each non-ASCII segment, starting one
+  // byte early to include the preceding starter.
   size_t at{ 0 };
   bool changed{ false };
   while (at < len) {
@@ -224,29 +221,25 @@ bool source_text_normalize(scav_byte const *bytes,
                            std::vector<Diagnostic> &diags) {
   out.clear();
 
-  // size_t stops here: every offset downstream lands in a {uint32 off, len}
-  // span, so an unaddressable document is rejected rather than truncated.
+  // Input longer than a uint32 Span addresses is DocumentTooLarge.
   uint32_t checked_len{ 0 };
   if (!narrow(len, checked_len)) {
     diags.push_back({ .code = DiagCode::DocumentTooLarge, .doc = doc, .src = {} });
     return false;
   }
 
-  // A UTF-8 BOM is a byte-order mark for an encoding that has no byte order, so
-  // it is signature-only and is dropped rather than kept as U+FEFF.
+  // Drops a leading UTF-8 BOM.
   uint32_t at{ 0 };
   if ((checked_len >= 3) && (bytes[0] == 0xEFU) && (bytes[1] == 0xBBU) &&
       (bytes[2] == 0xBFU)) {
     at = 3;
   }
 
-  // Validate and fold line endings in one pass. Spans on anything reported here
-  // index the raw input, because `out` is what is being built.
+  // Validates UTF-8 and folds CR and CRLF to LF in one pass. Diagnostic spans index
+  // the raw input.
   out.reserve(checked_len - at);
   bool multibyte{ false };
   while (at < checked_len) {
-    // Bytes that are neither CR nor a multi-byte lead copy as a run, which on
-    // an ASCII document with LF endings is the whole file in one memcpy.
     uint32_t const run{ [&] {
       uint32_t r{ at };
       while ((r < checked_len) && (bytes[r] < 0x80U) && (bytes[r] != '\r')) { ++r; }
@@ -277,8 +270,6 @@ bool source_text_normalize(scav_byte const *bytes,
     at += width;
   }
 
-  // ASCII is NFC by construction and the loop above saw every byte, so a
-  // document copied as pure runs skips the NFC pass.
   if (multibyte && !source_text_is_nfc(out.data(), out.size())) {
     std::vector<scav_byte> composed;
     source_text_to_nfc(out.data(), out.size(), composed);

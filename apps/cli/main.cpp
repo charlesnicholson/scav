@@ -18,8 +18,9 @@ constexpr std::string_view USAGE{
   "  fmt [--check] <file>...      canonical print, in place; --check gates\n"
   "  check <file>                 structural validation, exit 1 on a finding\n"
   "  deps [--target NAME] <file>  the document network as a depfile\n"
-  "  dump [--hash|--json] [--layout [LAYOUT...]] [--trace [--trace-search]] <file>"
-  "  the model; --layout adds geometry and the flags it rests on, --trace its "
+  "  dump [--hash|--json] [--layout [LAYOUT...]] [--trace "
+  "[--trace-search|--trace-outline]] "
+  "<file>  the model; --layout adds geometry and the flags it rests on, --trace its "
   "decisions\n"
   "  render [-o FILE] [--embed-font] [LAYOUT...] <file>"
   "   chart -> SVG\n"
@@ -27,7 +28,7 @@ constexpr std::string_view USAGE{
   "and diff against the goldens\n"
   "\n"
   "  LAYOUT: --profile NAME, --portfolio-row N, --rank S:R, --cut T:L, "
-  "--reverse T:L, --face T:L:E:F, --orient F, --side T:L:E:S, --fold F:M[:L], "
+  "--reverse T:L, --end T:L:E:F, --orient F, --fold F:M[:L], --loop S:F:E, "
   "--no-search, "
   "--no-text\n"
 };
@@ -47,6 +48,7 @@ int dispatch(int argc, char **argv) {
     bool layout{ false };
     bool trace{ false };
     bool trace_search{ false };
+    bool trace_outline{ false };
     LayoutArgs args;
     for (int i = 2; i < argc; ++i) {
       ArgRead const read{ read_layout_arg(argc, argv, i, args) };
@@ -64,6 +66,8 @@ int dispatch(int argc, char **argv) {
         flag = &trace;
       } else if (arg == "--trace-search") {
         flag = &trace_search;
+      } else if (arg == "--trace-outline") {
+        flag = &trace_outline;
       }
       if (flag != nullptr) {
         if (*flag) { return usage(); }
@@ -74,16 +78,18 @@ int dispatch(int argc, char **argv) {
         return usage();
       }
     }
-    // A pinned row only reaches layout, so it is the geometry's flag and not
-    // the model's: `--hash` and a bare dump have nothing to point at.
-    // `--trace` is layout's, like `--portfolio-row`: it prints the decisions
-    // one run made and there are none without a run (11.16).
-    // `--trace-search` is a mode of `--trace`, not a second flag beside it.
-    if ((path == nullptr) || (hash && (json || layout)) || (trace_search && !trace) ||
+    // Layout flags and `--trace` require `--layout`; `--trace-search` and
+    // `--trace-outline` require `--trace` and exclude each other; `--hash` excludes
+    // `--json` and `--layout`.
+    if ((path == nullptr) || (hash && (json || layout)) ||
+        ((trace_search || trace_outline) && !trace) || (trace_search && trace_outline) ||
         ((args.given || trace) && !layout)) {
       return usage();
     }
-    return run_dump(path, hash, json, layout, trace, trace_search, args);
+    TraceScope scope{ TraceScope::Shipped };
+    if (trace_search) { scope = TraceScope::Search; }
+    if (trace_outline) { scope = TraceScope::Outline; }
+    return run_dump(path, hash, json, layout, trace, scope, args);
   }
 
   if (verb == "render") {

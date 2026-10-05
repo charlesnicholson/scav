@@ -1,0 +1,8 @@
+// Two depths under one composite, joined by an external transition: the route leaves the
+// composite and comes back in through the inner composite to its child.
+chart bypass "an external transition between two depths of one composite" {
+  state Outer { state A, state Inner { state B, trans * -> B }, trans * -> A },
+
+  trans * -> Outer,
+  trans external Outer/A -> Outer/Inner/B "skip",
+}

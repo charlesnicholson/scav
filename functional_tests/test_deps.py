@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""`scav deps` writes the document network as a depfile. The last test is the
-one that matters: a real ninja build consuming a real depfile."""
+"""Tests `scav deps`: a chart's document network as a depfile, consumed by ninja."""
 
 import os
 import subprocess
@@ -62,17 +61,14 @@ class TestDeps(unittest.TestCase):
         self.assertTrue(result.stdout.startswith("out/vac.svg: "))
 
     def test_a_chart_with_no_includes_depends_on_itself(self) -> None:
-        # The target is the caller's string verbatim, since a build system has to
-        # match it; a dependency is a document name, which is `/`-separated on
-        # every transport. On Windows those two are spelled differently.
+        # The target is the caller's string verbatim; dependencies are `/`-separated.
         chart = self.write("solo.scav", "chart solo {\n  state A,\n}\n")
         result = self.run_scav("deps", chart)
         self.assertEqual(0, result.returncode)
         self.assertEqual(f"{chart}: {chart.as_posix()}\n", result.stdout)
 
     def test_document_order_is_the_include_graph_not_arrival(self) -> None:
-        # A DocId comes from the first include statement naming it, ordered
-        # breadth-first, so the line survives however the files were fetched.
+        # DocIds follow the first include naming each document, breadth-first.
         first = self.run_scav("deps", VAC.as_posix()).stdout
         for _ in range(3):
             self.assertEqual(first, self.run_scav("deps", VAC.as_posix()).stdout)
@@ -101,8 +97,7 @@ class TestDeps(unittest.TestCase):
                     targeted.stdout)
 
     def test_deps_does_not_gate_on_structural_validity(self) -> None:
-        # A duplicate name is `check`'s finding. A build should not lose its
-        # dependency edges because a state name is wrong.
+        # A duplicate state name still yields the full depfile.
         leaf = self.write("dupleaf.scav", "chart leaf {\n  state L,\n}\n")
         chart = self.write(
             "dup.scav",
@@ -145,9 +140,7 @@ class TestDeps(unittest.TestCase):
             'chart root {\n  include "leaf.scav" as l,\n  state R,\n}\n',
             encoding="utf-8",
         )
-        # Ninja runs a command through a shell on POSIX and through CreateProcess
-        # on Windows, so `>` and `&&` reach the program as ordinary arguments
-        # there. The rule is one process that does its own redirection.
+        # render.py opens its own output files; the command uses no shell operators.
         (build / "render.py").write_text(
             "import subprocess, sys\n"
             "scav, src, out = sys.argv[1:4]\n"
@@ -158,11 +151,8 @@ class TestDeps(unittest.TestCase):
             "                   stdout=f, check=True)\n",
             encoding="utf-8",
         )
-        # The build statement stays relative to the build directory: ninja reads
-        # `:` there as the output separator, so a `D:/...` output is a syntax
-        # error rather than a path.
-        # `dump` stands in for a renderer: what matters is that ninja learns the
-        # second dependency from the depfile, not from the build description.
+        # The build statement's paths are relative to the build directory.
+        # `dump` stands in for a renderer; ninja learns leaf.scav from the depfile.
         (build / "build.ninja").write_text(
             f"""rule render
   command = {self.cfg.python} {build / "render.py"} {self.exe} """
@@ -180,11 +170,9 @@ build root.txt: render root.scav
         self.assertEqual(0, scavtest.run([ninja, "-C", build], env=env).returncode)
         first = (build / "root.txt").read_text(encoding="utf-8")
         self.assertIn("state L", first)
-        # The depfile names the included document, which is the whole point.
         self.assertIn("leaf.scav", (build / "root.txt.d").read_text(encoding="utf-8"))
 
-        # Nothing changed, so nothing reruns: without this the next assertion
-        # would pass for the wrong reason.
+        # A no-op rebuild reruns nothing.
         second = scavtest.run([ninja, "-C", build], env=env)
         self.assertEqual(0, second.returncode)
         self.assertIn("no work to do", second.stdout)

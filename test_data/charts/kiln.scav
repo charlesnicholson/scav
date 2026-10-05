@@ -1,0 +1,50 @@
+// Written for what a state carries inside it: descriptions under a header,
+// internal transitions drawn as loops inside their states, and hierarchy
+// crossings into composites whose headers wall their top faces.
+chart kiln "pottery kiln controller" {
+  @doc = "ramps, soaks and cools a firing schedule",
+
+  state Idle "door closed, elements off",
+  state Loading "door open",
+  state Firing "schedule running" {
+    submachine heat "element control" {
+      state Ramping "climbing at the segment rate",
+      state Soaking "holding at the segment peak",
+      state Cooling "controlled descent",
+      trans * -> Ramping,
+      trans Ramping -> Soaking "peak reached",
+      trans Soaking -> Ramping "next segment",
+      trans Soaking -> Cooling "last segment done",
+      trans internal Ramping -> Ramping "pid tick",
+      trans internal Soaking -> Soaking "pid tick",
+    },
+    submachine watch "thermocouple watch" {
+      state Reading,
+      state Suspect "two readings disagree",
+      trans * -> Reading,
+      trans Reading -> Suspect "drift",
+      trans Suspect -> Reading "agree",
+      trans internal Reading -> Reading "sample",
+    },
+  },
+  state Fault "latched until acknowledged" {
+    state Overtemp,
+    state Sensor,
+    trans * -> Overtemp,
+  },
+  state Done "cooled below handling temperature",
+
+  trans * -> Idle,
+  trans Idle -> Loading "door opened",
+  trans Loading -> Idle "door closed",
+  trans Idle -> Firing "start",
+  trans internal Idle -> Idle "display refresh",
+  trans Idle -> Idle "self test",
+  trans internal Firing -> Firing "log segment",
+  trans Firing -> Done "cooled",
+  trans Firing:watch/Suspect -> Fault/Sensor "sensor lost",
+  trans Firing:heat/Ramping -> Fault/Overtemp "runaway",
+  trans internal Fault -> Fault/Sensor "retest",
+  trans Fault -> Idle "acknowledged",
+  trans Done -> Idle "unloaded",
+}

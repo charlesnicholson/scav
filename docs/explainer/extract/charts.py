@@ -4,7 +4,7 @@ import time
 
 import common as X
 
-CHARTS = ["estop", "led", "brew", "dock", "tcp", "axis", "toolchanger", "bottler"]
+CHARTS = ["estop", "led", "brew", "dock", "tcp", "axis", "toolchanger", "bottler", "kiln"]
 NOTEXT = ("estop", "brew")
 
 

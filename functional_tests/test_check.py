@@ -46,17 +46,14 @@ class TestCheck(unittest.TestCase):
 
     def test_every_corpus_chart_is_structurally_valid(self) -> None:
         root = self.cfg.repo_root / CHARTS
-        # Only the roots: an included document is checked through the network
-        # that includes it, and on its own it is a valid chart too.
+        # Each top-level chart checks clean on its own, included documents among them.
         for chart in sorted(root.glob("*.scav")):
             result = self.run_scav("check", (CHARTS / chart.name).as_posix())
             self.assertEqual("", result.stderr, chart.name)
             self.assertEqual(0, result.returncode, chart.name)
             self.assertEqual("", result.stdout, chart.name)
 
-    # Every finding class a `.scav` file can reach. The rest of §10's checks are
-    # about a model built in memory -- a tombstoned row, a span outside its
-    # document, a column of the wrong length -- and no loaded chart has one.
+    # Every finding class a `.scav` file can reach.
     FINDINGS = {
         "duplicate_name": (
             "chart d {\n  state A,\n  state A,\n}\n",

@@ -136,29 +136,38 @@ SX.register('pipeline', function (sec) {
           });
           o.reversed.forEach(function (rv) { h.mark('trans', rv.trans); });
         });
-        info.innerHTML = '<b>Phase 1</b> breaks cycles (highlighted edges reversed) and ranks each frame; dashed boxes are ranks. <code>grinder</code> was turned to run down. Label charges on the gaps, in units: ' + gc.join(', ') + '.';
+        var down = FR.filter(function (fr) { return fr.down; }).map(function (fr) { return fr.owner == null ? 'The root frame' : '<code>' + fr.name + '</code>'; });
+        info.innerHTML = '<b>Phase 1</b> breaks cycles (highlighted edges reversed) and ranks each frame; dashed boxes are ranks. ' + (down.length ? down.join(' and ') + ' was turned to run down. ' : '') + 'Label charges on the gaps, in units: ' + gc.join(', ') + '.';
       } else if (cur === 'size' || cur === 'facing') {
         var fold = ST.sizing.passes[0].filter(function (e) { return e.kind === 'piece_packed'; });
-        var org = FR[1].rect;
+        var foldNames = [];
         fold.forEach(function (pc) {
+          var fr = FR[pc.frame], org = fr.rect;
+          if (foldNames.indexOf(fr.name) < 0) foldNames.push(fr.name);
           tip(h.rect([org[0] + pc.at[0], org[1] + pc.at[1], pc.size[0], pc.size[1]], { fill: 'none', stroke: 'var(--hl)', 'stroke-width': u * 2.5, 'stroke-dasharray': (u * 8) + ' ' + (u * 5) }),
-            '<b>fold piece</b> of frame 1 (water) starting at rank ' + pc.rank + '<br>packed at (' + pc.at.join(', ') + ') in the frame, ' + pc.size.join(' × ') + ' units');
+            '<b>fold piece</b> of frame ' + pc.frame + ' (' + frameName(fr) + ') starting at rank ' + pc.rank + '<br>packed at (' + pc.at.join(', ') + ') in the frame, ' + pc.size.join(' × ') + ' units');
         });
         ST.sizing.passes[0].filter(function (e) { return e.kind === 'node_placed'; }).forEach(function (e) {
           tip(h.dot(e.at, u * 4, { fill: 'var(--hl-2)' }), '<b>node placed</b> ' + e.state + '<br><span class="m">(rank-axis start, cross-axis centre) = (' + e.at.join(', ') + ')</span>');
         });
-        if (cur === 'size') info.innerHTML = '<b>Phase 2</b> sizes frames bottom-up. <code>water</code> was too wide for its aspect target, so it is <b>folded</b> and its two pieces (orange) packed; blue dots are placed nodes. Chart: ' + SX.fmt(ST.sizing.box[2]) + ' × ' + SX.fmt(ST.sizing.box[3]) + ' units.';
+        if (cur === 'size') info.innerHTML = '<b>Phase 2</b> sizes frames bottom-up. ' + foldNames.map(function (n) { return '<code>' + n + '</code>'; }).join(' and ') + (foldNames.length > 1 ? ' were' : ' was') + ' too wide for the aspect target, so ' + (foldNames.length > 1 ? 'each is' : 'it is') + ' <b>folded</b> and its pieces (orange) packed; blue dots are placed nodes. Chart: ' + SX.fmt(ST.sizing.box[2]) + ' × ' + SX.fmt(ST.sizing.box[3]) + ' units.';
         else info.innerHTML = '<b>The facing pass</b> turns ports toward their route\'s far end and reruns phases 1 and 2 if any turned. <code>brew</code> has no ports, so sizing ran once.';
       } else if (cur === 'route') {
         var seatsAt = {}, seatOrder = [];   // seats landing on one point share one dot and one tooltip
+        var netsAt = {};                    // nets between one pair of centres share one hit line
         ST.routing.nets.forEach(function (n) {
-          tip(h.line([n.src, n.dst], { stroke: 'var(--hl-2)', 'stroke-width': u * 2, 'stroke-dasharray': (u * 6) + ' ' + (u * 5) }), '<b>net planned</b> for “' + (G.trans[n.trans].label || G.trans[n.trans].src_path + ' → ' + G.trans[n.trans].dst_path) + '”<br><span class="m">between node centres, before seating</span>');
+          var key = [n.src.join(','), n.dst.join(',')].sort().join(' '), nm = '“' + (G.trans[n.trans].label || G.trans[n.trans].src_path + ' → ' + G.trans[n.trans].dst_path) + '”';
+          if (netsAt[key]) { netsAt[key].names.push(nm); } else {
+            h.line([n.src, n.dst], { stroke: 'var(--hl-2)', 'stroke-width': u * 2, 'stroke-dasharray': (u * 6) + ' ' + (u * 5) });
+            netsAt[key] = { hit: h.line([n.src, n.dst], { stroke: 'transparent', 'stroke-width': u * 10 }), names: [nm] };
+          }
           n.seats.forEach(function (st) {
             var k = st.to.join(',');
             if (!seatsAt[k]) { seatsAt[k] = []; seatOrder.push(k); }
             seatsAt[k].push(st);
           });
         });
+        Object.keys(netsAt).forEach(function (k) { tip(netsAt[k].hit, '<b>net' + (netsAt[k].names.length > 1 ? 's' : '') + ' planned</b> for ' + netsAt[k].names.join(' and ') + '<br><span class="m">between node centres, before seating</span>'); });
         seatOrder.forEach(function (k) {
           var list = seatsAt[k], later = list.some(function (st) { return st.pass !== 'attach'; });
           tip(h.dot(list[0].to, u * (later ? 6 : 4), { fill: later ? 'var(--series-5)' : 'var(--hl)' }),

@@ -21,7 +21,14 @@ SplitSegment const &seg(SplitGraph const &g, uint32_t t, uint32_t i) {
   return g.segments[segs_of(g, t).off + i];
 }
 
-// The port a segment ends on, so a test names boundaries rather than indices.
+// The routes through `s`'s border: one port each.
+uint32_t crossings(SplitGraph const &g, StateId s) {
+  uint32_t n{ 0 };
+  for (SplitPort const &port : g.ports) { n += (port.state == s) ? 1U : 0U; }
+  return n;
+}
+
+// The port that segment `i` of transition `t` ends on.
 SplitPort const &dst_port(SplitGraph const &g, uint32_t t, uint32_t i) {
   return g.ports[seg(g, t, i).dst_port];
 }
@@ -33,7 +40,7 @@ TEST_CASE("split: a sibling transition is one segment in the shared frame") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SplitGraph const g{ decompose(c) };
   CHECK(g.ports.empty());
@@ -43,7 +50,6 @@ TEST_CASE("split: a sibling transition is one segment in the shared frame") {
                                       .frame = root,
                                       .src_port = INVALID,
                                       .dst_port = INVALID,
-                                      .separator = 0,
                                       .src_inner = 0,
                                       .dst_inner = 0 });
   CHECK(g.state_depth[a.v] == 0);
@@ -56,7 +62,7 @@ TEST_CASE("split: exiting a composite splits once at its border") {
   SubmachineId const inner{ build_submachine(c, comp, {}, {}) };
   StateId const s{ build_state(c, inner, "S", StateKind::Normal, {}) };
   StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
-  build_trans(c, s, d, TransKind::External, {});
+  build_trans(c, s, d, TransKind::Default, {});
 
   SplitGraph const g{ decompose(c) };
   REQUIRE(segs_of(g, 0).len == 2);
@@ -64,8 +70,8 @@ TEST_CASE("split: exiting a composite splits once at its border") {
   CHECK(seg(g, 0, 1).frame == root);
   CHECK(dst_port(g, 0, 0).state == comp);
   CHECK(dst_port(g, 0, 0).crossing == 0);
-  CHECK(g.state_crossings[comp.v] == 1);
-  CHECK(g.state_crossings[s.v] == 0);
+  CHECK(crossings(g, comp) == 1);
+  CHECK(crossings(g, s) == 0);
   CHECK(g.state_depth[s.v] == 1);
 }
 
@@ -81,7 +87,7 @@ TEST_CASE("split: exits run innermost-out, enters outermost-in, frames follow") 
   StateId const e1{ build_state(c, root, "E1", StateKind::Normal, {}) };
   SubmachineId const n1{ build_submachine(c, e1, {}, {}) };
   StateId const d{ build_state(c, n1, "D", StateKind::Normal, {}) };
-  build_trans(c, s, d, TransKind::External, {});
+  build_trans(c, s, d, TransKind::Default, {});
 
   SplitGraph const g{ decompose(c) };
   REQUIRE(segs_of(g, 0).len == 4);
@@ -102,7 +108,7 @@ TEST_CASE("split: kind decides whether the source border splits") {
   StateId const comp{ build_state(c, root, "C", StateKind::Normal, {}) };
   SubmachineId const inner{ build_submachine(c, comp, {}, {}) };
   StateId const child{ build_state(c, inner, "K", StateKind::Normal, {}) };
-  build_trans(c, comp, child, TransKind::External, {});
+  build_trans(c, comp, child, TransKind::Default, {});
   build_trans(c, comp, child, TransKind::Internal, {});
   build_trans(c, comp, child, TransKind::Local, {});
 
@@ -120,26 +126,27 @@ TEST_CASE("split: kind decides whether the source border splits") {
     REQUIRE(segs_of(g, t).len == 1);
     CHECK(seg(g, t, 0).frame == inner);
   }
-  CHECK(g.state_crossings[comp.v] == 1);  // only the external row crossed
+  CHECK(crossings(g, comp) == 1);  // only the external row crossed
 }
 
-TEST_CASE("split: self-transitions route outside or not at all") {
+TEST_CASE("split: every self-transition is one segment in its parent frame") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
-  build_trans(c, a, a, TransKind::External, {});
+  build_trans(c, a, a, TransKind::Default, {});
   build_trans(c, a, a, TransKind::Internal, {});
   build_trans(c, a, a, TransKind::Local, {});
 
   SplitGraph const g{ decompose(c) };
-  REQUIRE(segs_of(g, 0).len == 1);  // the loop outside, in the parent frame
-  CHECK(seg(g, 0, 0).frame == root);
-  CHECK(segs_of(g, 1).len == 0);  // the app draws these inside the box
-  CHECK(segs_of(g, 2).len == 0);
+  for (uint32_t t = 0; t < 3; ++t) {
+    REQUIRE(segs_of(g, t).len == 1);  // outside for external, the loop room otherwise
+    CHECK(seg(g, t, 0).frame == root);
+  }
   CHECK(g.ports.empty());
+  CHECK(crossings(g, a) == 0);
 }
 
-TEST_CASE("split: concurrent siblings get a direct arrow through the separator") {
+TEST_CASE("split: concurrent siblings get a direct arrow through one divider port") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const owner{ build_state(c, root, "O", StateKind::Normal, {}) };
@@ -147,17 +154,18 @@ TEST_CASE("split: concurrent siblings get a direct arrow through the separator")
   SubmachineId const m2{ build_submachine(c, owner, "m2", {}) };
   StateId const a{ build_state(c, m1, "a", StateKind::Normal, {}) };
   StateId const b{ build_state(c, m2, "b", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SplitGraph const g{ decompose(c) };
-  REQUIRE(segs_of(g, 0).len == 3);
+  REQUIRE(segs_of(g, 0).len == 2);
+  REQUIRE(g.ports.size() == 1);
+  CHECK(dst_port(g, 0, 0).state.v == INVALID);
   CHECK(dst_port(g, 0, 0).sub == m1);
-  CHECK(dst_port(g, 0, 1).sub == m2);
+  CHECK(dst_port(g, 0, 0).into == m2);
   CHECK(seg(g, 0, 0).frame == m1);
-  CHECK(seg(g, 0, 1).frame == root);  // the separator channel, owned upward
-  CHECK(seg(g, 0, 1).separator == 1);
-  CHECK(seg(g, 0, 2).frame == m2);
-  CHECK(g.state_crossings[owner.v] == 0);  // the owner's border is never crossed
+  CHECK(seg(g, 0, 1).frame == m2);
+  CHECK(seg(g, 0, 1).src_port == seg(g, 0, 0).dst_port);  // both regions share it
+  CHECK(crossings(g, owner) == 0);  // the owner's border is never crossed
 }
 
 TEST_CASE("split: a deep exit pulls on every ancestor it crosses") {
@@ -174,8 +182,8 @@ TEST_CASE("split: a deep exit pulls on every ancestor it crosses") {
     parent = build_submachine(c, s, {}, {});
   }
   StateId const leaf{ build_state(c, parent, "leaf", StateKind::Normal, {}) };
-  build_trans(c, leaf, top, TransKind::External, {});
-  build_trans(c, leaf, top, TransKind::External, {});
+  build_trans(c, leaf, top, TransKind::Default, {});
+  build_trans(c, leaf, top, TransKind::Default, {});
 
   SplitGraph const g{ decompose(c) };
   CHECK(g.state_depth[leaf.v] == DEPTH);
@@ -183,7 +191,7 @@ TEST_CASE("split: a deep exit pulls on every ancestor it crosses") {
     CAPTURE(t);
     CHECK(segs_of(g, t).len == DEPTH + 1);
   }
-  for (StateId const s : ancestors) { CHECK(g.state_crossings[s.v] == 2); }
+  for (StateId const s : ancestors) { CHECK(crossings(g, s) == 2); }
   CHECK(g.ports.size() == 2 * DEPTH);
 }
 
@@ -195,14 +203,14 @@ TEST_CASE("split: a transition into an enclosing composite stops on its inner fa
   StateId const mid{ build_state(c, m_outer, "M", StateKind::Normal, {}) };
   SubmachineId const m_mid{ build_submachine(c, mid, {}, {}) };
   StateId const s{ build_state(c, m_mid, "S", StateKind::Normal, {}) };
-  build_trans(c, s, outer, TransKind::External, {});
+  build_trans(c, s, outer, TransKind::Default, {});
 
   SplitGraph const g{ decompose(c) };
   REQUIRE(segs_of(g, 0).len == 2);  // exits mid only; the endpoint is outer itself
   CHECK(dst_port(g, 0, 0).state == mid);
   CHECK(seg(g, 0, 0).frame == m_mid);
   CHECK(seg(g, 0, 1).frame == m_outer);
-  CHECK(g.state_crossings[outer.v] == 0);
+  CHECK(crossings(g, outer) == 0);
 }
 
 TEST_CASE("split: tombstones drop out and identical charts split identically") {
@@ -211,8 +219,8 @@ TEST_CASE("split: tombstones drop out and identical charts split identically") {
     SubmachineId const root{ build_chart(c, "t", {}) };
     StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
     StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-    build_trans(c, a, b, TransKind::External, {});
-    build_trans(c, b, a, TransKind::External, {});
+    build_trans(c, a, b, TransKind::Default, {});
+    build_trans(c, b, a, TransKind::Default, {});
     return c;
   };
   Chart c1{ build() };
@@ -223,7 +231,6 @@ TEST_CASE("split: tombstones drop out and identical charts split identically") {
   CHECK(g1.ports == g2.ports);
   CHECK(g1.segments == g2.segments);
   CHECK(g1.trans_segments == g2.trans_segments);
-  CHECK(g1.state_crossings == g2.state_crossings);
 
   c1.transitions[1].live = 0;
   SplitGraph const g3{ decompose(c1) };
@@ -233,7 +240,7 @@ TEST_CASE("split: tombstones drop out and identical charts split identically") {
 
 namespace {
 
-// The structural invariants every route owes, checked from the POD alone.
+// Checks the structural invariants of transition `t`'s route from the POD alone.
 void check_route(Chart const &c, SplitGraph const &g, uint32_t t) {
   Span const span{ g.trans_segments[t] };
   Transition const &tr{ c.transitions[t] };
@@ -256,13 +263,12 @@ void check_route(Chart const &c, SplitGraph const &g, uint32_t t) {
     // Every crossing moves to a different frame.
     if (k > 0) { CHECK(sg.frame != g.segments[span.off + k - 1].frame); }
 
-    // Only the two outer ends can be flagged inner, and one route cannot run
-    // inward and outward at once.
+    // Only the route's two outer ends carry an inner flag, and never both.
     if (k != 0) { CHECK(sg.src_inner == 0); }
     if ((k + 1) != span.len) { CHECK(sg.dst_inner == 0); }
     CHECK((sg.src_inner & sg.dst_inner) == 0);
-    // What phase 1 leans on: a port-less end is a child of this frame unless
-    // the flag is set, and then it is the state owning the frame outright.
+    // A port-less end is a child of the segment's frame or, with its inner flag set,
+    // the frame's owner.
     if (k == 0) {
       if (sg.src_inner != 0) {
         CHECK(c.submachines[sg.frame.v].owner == tr.src);
@@ -283,10 +289,11 @@ void check_route(Chart const &c, SplitGraph const &g, uint32_t t) {
     SplitPort const &p{ g.ports[ports[k]] };
     CHECK(p.crossing == k);
     CHECK((p.state.v == INVALID) != (p.sub.v == INVALID));
+    CHECK((p.sub.v == INVALID) == (p.into.v == INVALID));
     if (p.state.v != INVALID) {
       if (p.state == tr.src) {
         // The one source-border split: external, source enclosing the target.
-        CHECK(tr.kind == TransKind::External);
+        CHECK(tr.kind == TransKind::Default);
         CHECK(ancestor_or_self(c, tr.src, tr.dst));
       } else if (ancestor_or_self(c, p.state, tr.src)) {
         CHECK(!ancestor_or_self(c, p.state, tr.dst));  // an exit separates them
@@ -297,8 +304,13 @@ void check_route(Chart const &c, SplitGraph const &g, uint32_t t) {
     } else {
       StateId const owner{ c.submachines[p.sub.v].owner };
       REQUIRE(owner.v != INVALID);
-      CHECK(ancestor_or_self(c, owner, tr.src));  // separators sit inside a common state
+      CHECK(ancestor_or_self(c, owner, tr.src));  // dividers sit inside a common state
       CHECK(ancestor_or_self(c, owner, tr.dst));
+      CHECK(c.submachines[p.into.v].owner == owner);  // between two of its regions
+      CHECK(p.sub != p.into);
+      // The legs either side route in the region left and the region entered.
+      CHECK(g.segments[span.off + k].frame == p.sub);
+      CHECK(g.segments[span.off + k + 1].frame == p.into);
     }
   }
 }
@@ -328,7 +340,7 @@ TEST_CASE("split: every endpoint pair and kind holds the route invariants") {
   for (uint32_t src = 0; src < n_states; ++src) {
     for (uint32_t dst = 0; dst < n_states; ++dst) {
       for (TransKind const kind :
-           { TransKind::External, TransKind::Internal, TransKind::Local }) {
+           { TransKind::Default, TransKind::Internal, TransKind::Local }) {
         REQUIRE(build_trans(c, { src }, { dst }, kind, {}).v != INVALID);
       }
     }
@@ -344,12 +356,6 @@ TEST_CASE("split: every endpoint pair and kind holds the route invariants") {
   for (uint32_t i = 1; i < g.ports.size(); ++i) {
     CHECK(g.ports[i - 1].trans.v <= g.ports[i].trans.v);
   }
-  // The accumulated pull is exactly the fold of the state-border ports.
-  std::vector<uint32_t> fold(c.states.size(), 0);
-  for (SplitPort const &port : g.ports) {
-    if (port.state.v != INVALID) { ++fold[port.state.v]; }
-  }
-  CHECK(fold == g.state_crossings);
 }
 
 TEST_CASE("split: intermediate borders split even when the source's does not") {
@@ -362,7 +368,7 @@ TEST_CASE("split: intermediate borders split even when the source's does not") {
   StateId const kid{ build_state(c, m, "K", StateKind::Normal, {}) };
   SubmachineId const km{ build_submachine(c, kid, {}, {}) };
   StateId const grand{ build_state(c, km, "G", StateKind::Normal, {}) };
-  build_trans(c, comp, grand, TransKind::External, {});
+  build_trans(c, comp, grand, TransKind::Default, {});
   build_trans(c, comp, grand, TransKind::Internal, {});
   build_trans(c, comp, grand, TransKind::Local, {});
 
@@ -382,8 +388,8 @@ TEST_CASE("split: intermediate borders split even when the source's does not") {
     CHECK(seg(g, t, 0).frame == m);
     CHECK(seg(g, t, 1).frame == km);
   }
-  CHECK(g.state_crossings[comp.v] == 1);  // the external row alone
-  CHECK(g.state_crossings[kid.v] == 3);   // every kind exits substates
+  CHECK(crossings(g, comp) == 1);  // the external row alone
+  CHECK(crossings(g, kid) == 3);   // every kind exits substates
 }
 
 TEST_CASE("split: a shallow source enters a deep target outermost first") {
@@ -395,7 +401,7 @@ TEST_CASE("split: a shallow source enters a deep target outermost first") {
   StateId const kid{ build_state(c, m, "K", StateKind::Normal, {}) };
   SubmachineId const km{ build_submachine(c, kid, {}, {}) };
   StateId const grand{ build_state(c, km, "G", StateKind::Normal, {}) };
-  build_trans(c, a, grand, TransKind::External, {});
+  build_trans(c, a, grand, TransKind::Default, {});
 
   SplitGraph const g{ decompose(c) };
   REQUIRE(segs_of(g, 0).len == 3);
@@ -407,8 +413,8 @@ TEST_CASE("split: a shallow source enters a deep target outermost first") {
 }
 
 TEST_CASE("split: a nested concurrent crossing exits, crosses, and enters") {
-  // The concurrent owner sits inside another composite, so the separator
-  // channel's frame is that composite's region, not the root.
+  // The concurrent owner sits inside another composite; the crossing is one divider port
+  // between its two regions.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const wrap{ build_state(c, root, "W", StateKind::Normal, {}) };
@@ -422,22 +428,20 @@ TEST_CASE("split: a nested concurrent crossing exits, crosses, and enters") {
   StateId const q{ build_state(c, m2, "Q", StateKind::Normal, {}) };
   SubmachineId const qm{ build_submachine(c, q, {}, {}) };
   StateId const q1{ build_state(c, qm, "Q1", StateKind::Normal, {}) };
-  build_trans(c, p1, q1, TransKind::External, {});
+  build_trans(c, p1, q1, TransKind::Default, {});
 
   SplitGraph const g{ decompose(c) };
-  REQUIRE(segs_of(g, 0).len == 5);
+  REQUIRE(segs_of(g, 0).len == 4);
   CHECK(dst_port(g, 0, 0).state == p);  // exit
-  CHECK(dst_port(g, 0, 1).sub == m1);   // separator, both sides
-  CHECK(dst_port(g, 0, 2).sub == m2);
-  CHECK(dst_port(g, 0, 3).state == q);  // enter
+  CHECK(dst_port(g, 0, 1).sub == m1);   // the divider, one port for both sides
+  CHECK(dst_port(g, 0, 1).into == m2);
+  CHECK(dst_port(g, 0, 2).state == q);  // enter
   CHECK(seg(g, 0, 0).frame == pm);
   CHECK(seg(g, 0, 1).frame == m1);
-  CHECK(seg(g, 0, 2).frame == wm);  // the channel, in the owner's region
-  CHECK(seg(g, 0, 2).separator == 1);
-  CHECK(seg(g, 0, 3).frame == m2);
-  CHECK(seg(g, 0, 4).frame == qm);
-  CHECK(g.state_crossings[o.v] == 0);
-  CHECK(g.state_crossings[wrap.v] == 0);
+  CHECK(seg(g, 0, 2).frame == m2);
+  CHECK(seg(g, 0, 3).frame == qm);
+  CHECK(crossings(g, o) == 0);
+  CHECK(crossings(g, wrap) == 0);
 }
 
 TEST_CASE("split: siblings deep inside one composite meet in its region") {
@@ -451,13 +455,13 @@ TEST_CASE("split: siblings deep inside one composite meet in its region") {
   StateId const y{ build_state(c, nm, "Y", StateKind::Normal, {}) };
   SubmachineId const ym{ build_submachine(c, y, {}, {}) };
   StateId const y1{ build_state(c, ym, "y1", StateKind::Normal, {}) };
-  build_trans(c, x1, y1, TransKind::External, {});
+  build_trans(c, x1, y1, TransKind::Default, {});
 
   SplitGraph const g{ decompose(c) };
   REQUIRE(segs_of(g, 0).len == 3);
   CHECK(seg(g, 0, 1).frame == nm);  // the common frame is nested, not the root
-  CHECK(seg(g, 0, 1).separator == 0);
-  CHECK(g.state_crossings[n.v] == 0);
+  CHECK(dst_port(g, 0, 0).into.v == INVALID);
+  CHECK(crossings(g, n) == 0);
 }
 
 TEST_CASE("split: degenerate inputs are sized, empty, and skipped") {
@@ -474,9 +478,9 @@ TEST_CASE("split: degenerate inputs are sized, empty, and skipped") {
   build_submachine(c, comp, {}, {});
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, comp, comp, TransKind::External, {});  // composite self-loop
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, comp, comp, TransKind::Default, {});  // composite self-loop
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   // A hand-poked unresolved endpoint and a tombstoned endpoint state.
   c.transitions[1].src = { INVALID };
@@ -530,7 +534,7 @@ TEST_CASE("split: a loaded network splits across its include host") {
       CHECK(segs_of(g, t).len == 1);  // the initial pseudostate is a sibling
     }
   }
-  CHECK(g.state_crossings[host.v] == 1);
+  CHECK(crossings(g, host) == 1);
   CHECK(g.state_depth[l.v] == 1);
 }
 
@@ -544,12 +548,12 @@ TEST_CASE("split: an inner end is flagged on the segment that terminates there")
   StateId const mid{ build_state(c, m_outer, "M", StateKind::Normal, {}) };
   SubmachineId const m_mid{ build_submachine(c, mid, {}, {}) };
   StateId const leaf{ build_state(c, m_mid, "L", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, outer, leaf, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, outer, leaf, TransKind::Default, {});
   build_trans(c, outer, leaf, TransKind::Internal, {});
-  build_trans(c, leaf, mid, TransKind::External, {});
+  build_trans(c, leaf, mid, TransKind::Default, {});
   build_trans(c, leaf, mid, TransKind::Internal, {});
-  build_trans(c, leaf, outer, TransKind::External, {});
+  build_trans(c, leaf, outer, TransKind::Default, {});
 
   SplitGraph const g{ decompose(c) };
   for (uint32_t t = 0; t < c.transitions.size(); ++t) {
@@ -562,8 +566,8 @@ TEST_CASE("split: an inner end is flagged on the segment that terminates there")
   CHECK(seg(g, 0, 0).src_inner == 0);
   CHECK(seg(g, 0, 0).dst_inner == 0);
 
-  // Ancestor to descendant, external: the source border splits, so the route
-  // starts outside the source box like any other.
+  // Ancestor to descendant, external: the source border splits, and no segment is
+  // flagged inner.
   REQUIRE(segs_of(g, 1).len == 3);
   for (uint32_t k = 0; k < 3; ++k) {
     CAPTURE(k);
@@ -580,8 +584,7 @@ TEST_CASE("split: an inner end is flagged on the segment that terminates there")
   CHECK(seg(g, 2, 1).src_inner == 0);
   CHECK(seg(g, 2, 1).dst_inner == 0);
 
-  // Descendant to ancestor: the tail ends on the target's inner face, and the
-  // kind makes no difference because the target's border is never crossed.
+  // Descendant to ancestor: the tail ends on the target's inner face for either kind.
   for (uint32_t t : { 3U, 4U }) {
     CAPTURE(t);
     REQUIRE(segs_of(g, t).len == 1);
@@ -599,7 +602,7 @@ TEST_CASE("split: an inner end is flagged on the segment that terminates there")
   CHECK(seg(g, 5, 1).src_inner == 0);
   CHECK(seg(g, 5, 1).dst_inner == 1);
   CHECK(seg(g, 5, 1).frame == m_outer);
-  CHECK(g.state_crossings[outer.v] == 1);  // transition 1 alone
+  CHECK(crossings(g, outer) == 1);  // transition 1 alone
 }
 
 TEST_CASE("split: containment climbs one step, or all the way, or gives up") {
@@ -623,8 +626,8 @@ TEST_CASE("split: containment climbs one step, or all the way, or gives up") {
   CHECK(!ancestor_or_self(c, w, z));
   CHECK(!ancestor_or_self(c, x, { INVALID }));
 
-  // X now claims to live inside its own grandchild's region, so the climb from
-  // Z runs Z, Y, X, Y, X and never reaches a root. The step cap ends it.
+  // X re-parented into its grandchild's region: the climb from Z cycles Z, Y, X, Y, X
+  // until the step cap ends it.
   c.states[x.v].parent = m_y;
   CHECK(ancestor_or_self(c, y, z));   // still found, inside the cap
   CHECK(!ancestor_or_self(c, w, z));  // W is unreachable, and the walk stops
@@ -638,7 +641,7 @@ TEST_CASE("split: each graph has its own serial and a label segment per transiti
   SubmachineId const inner{ build_submachine(c, comp, {}, {}) };
   StateId const s{ build_state(c, inner, "S", StateKind::Normal, {}) };
   StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
-  build_trans(c, s, d, TransKind::External, {});
+  build_trans(c, s, d, TransKind::Default, {});
   build_trans(c, d, d, TransKind::Internal, {});
 
   SplitGraph const g1{ decompose(c) };
@@ -647,7 +650,7 @@ TEST_CASE("split: each graph has its own serial and a label segment per transiti
   CHECK(g2.serial != 0);
   CHECK(g1.serial != g2.serial);
 
-  // The table answers what the walk computes on a graph without one.
+  // `trans_label` matches `label_segment` run on a copy with the table cleared.
   SplitGraph by_hand{ g1 };
   by_hand.trans_label.clear();
   REQUIRE(g1.trans_label.size() == c.transitions.size());
@@ -656,4 +659,33 @@ TEST_CASE("split: each graph has its own serial and a label segment per transiti
   }
   CHECK(g1.trans_label[0] == segs_of(g1, 0).off + 1);  // the leg in `root`
   CHECK(g1.trans_label[1] == INVALID);
+}
+
+TEST_CASE("split: an inner loop is a normal state's internal or local self-loop") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  struct Named {
+    char const *name;
+    StateKind kind;
+  };
+  for (Named const at : { Named{ .name = "N", .kind = StateKind::Normal },
+                          Named{ .name = "C", .kind = StateKind::Choice },
+                          Named{ .name = "J", .kind = StateKind::Junction },
+                          Named{ .name = "H", .kind = StateKind::History },
+                          Named{ .name = "D", .kind = StateKind::DeepHistory } }) {
+    StateId const s{ build_state(c, root, at.name, at.kind, {}) };
+    for (TransKind const how :
+         { TransKind::Default, TransKind::Internal, TransKind::Local }) {
+      build_trans(c, s, s, how, {});
+    }
+  }
+  SplitGraph const g{ decompose(c) };
+  for (uint32_t t = 0; t < c.transitions.size(); ++t) {
+    CAPTURE(t);
+    Transition const &tr{ c.transitions[t] };
+    bool const normal{ c.states[tr.src.v].kind == StateKind::Normal };
+    CHECK(inner_loop(c, t) == (normal && (tr.kind != TransKind::Default)));
+    CHECK(segs_of(g, t).len == 1);
+    CHECK(g.trans_label[t] == (inner_loop(c, t) ? INVALID : segs_of(g, t).off));
+  }
 }

@@ -1,18 +1,8 @@
 #ifndef SCAV_DRAW_C_H_INCLUDED
 #define SCAV_DRAW_C_H_INCLUDED
 
-/* libscavdraw's C API: the font metrics handle and the DrawList render IR.
- *
- * A DrawList is five flat arrays plus a string pool, read out with the same
- * span accessors as a column. Every field of scav_style and scav_prim is four
- * bytes wide, so the canonical form can be compared byte for byte without
- * reading padding.
- *
- * Sizes cross under scav_core_c.h's rule: a caller-owned POD or row array is
- * passed with its own size beside it, checked before any other argument and
- * whether or not the pointer is NULL, and a size that disagrees with this
- * library's is SCAV_E_ABI. Each array scav hands back reports the stride to
- * walk it with. */
+/* libscavdraw's C API. Each caller-owned POD or row array passes its size, checked first,
+ * NULL or not; a mismatch is SCAV_E_ABI. Each returned array reports its row stride. */
 
 #include "scav/scav_core_c.h"
 /* The space tables and the placed boxes, which is where a label's rect is. */
@@ -33,8 +23,7 @@ typedef struct scav_metrics scav_metrics;
 typedef struct scav_images scav_images;
 typedef struct scav_drawlist scav_drawlist;
 
-/* What a primitive is. `points` and the two scalars are fixed per kind, so a
- * backend switches once and never guesses. */
+/* Primitive kinds. Each kind fixes the meaning of `points`, `a` and `b`. */
 enum {
   SCAV_PRIM_RECT = 0,     /* 2 points: opposite corners */
   SCAV_PRIM_RRECT = 1,    /* 2 points, a = corner radius */
@@ -54,11 +43,10 @@ typedef struct {
   uint32_t fill_rgba;
   int32_t stroke_w;       /* grid units */
   uint32_t dash;          /* 0 = solid; app-defined otherwise */
-  int32_t font_size_grid; /* 1/16 pt, the same width as everywhere else */
+  int32_t font_size_grid; /* grid units, 1/16 pt */
 } scav_style;
 
-/* Draw order is `depth`, not array position, which is what makes a DrawList
- * appendable. 48 bytes, no padding. */
+/* Draw order is `depth`, independent of array position. 48 bytes, no padding. */
 typedef struct {
   uint32_t kind; /* one of SCAV_PRIM_* */
   int32_t depth;
@@ -71,33 +59,25 @@ typedef struct {
   int32_t a, b;      /* kind-specific scalars */
 } scav_prim;
 
-/* An unclipped primitive names no clip rect. A macro, not an enumerator: an
- * unnamed C enum takes an implementation-chosen underlying type, and under the
- * MS ABI that is `int`, which makes this value -1 on one platform and
- * 4294967295 on the others. */
+/* The `clip` of an unclipped primitive. A macro, unsigned on every ABI. */
 #define SCAV_CLIP_NONE 0xFFFFFFFFU
 
 /* Metrics ================================================================= */
 
-/* NULL `ttf` selects the bundled font. The handle copies what it parses, so
- * the caller's buffer need not outlive the call. Immutable after create, so it
- * is shared across threads without locking. */
+/* NULL `ttf` selects the bundled font. The handle copies `ttf`; the caller may free it.
+ * Immutable after create; threads share it without locking. */
 scav_result scav_metrics_create(scav_byte const *ttf, uint32_t len, scav_metrics **out);
 void scav_metrics_destroy(scav_metrics *metrics);
 
-/* xxh32 over the font's bytes: identity and version in one number, which is
- * what a DrawList golden records rather than a name a file could lie about. */
+/* xxh32 over the font's bytes: the font's identity and version. */
 scav_result scav_metrics_identity(scav_metrics const *metrics, uint32_t *out);
 
 /* Design units per em, and the glyph count the tail rule is bounded by. */
 scav_result scav_metrics_units_per_em(scav_metrics const *metrics, uint32_t *out);
 scav_result scav_metrics_glyph_count(scav_metrics const *metrics, uint32_t *out);
 
-/* One line of NFC UTF-8: `w` is the advance sum scaled to grid units, ceiled
- * once at the end, and `h` is `font_size_grid`. A newline is
- * SCAV_E_INVALID_ARG -- wrapping is the caller's, so it splits first -- and a
- * codepoint the font has no glyph for is SCAV_E_NO_GLYPH rather than a silent
- * zero, which would size a box narrower than its own text. */
+/* One line of NFC UTF-8: `w` is the advance sum in grid units, rounded up once; `h` is
+ * `font_size_grid`. A newline is SCAV_E_INVALID_ARG, a missing glyph SCAV_E_NO_GLYPH. */
 scav_result scav_measure_text(scav_metrics const *metrics,
                               scav_byte const *utf8_nfc,
                               uint32_t len,
@@ -111,8 +91,8 @@ scav_result scav_line_height(int32_t font_size_grid,
                              int32_t k_den,
                              int32_t *out);
 
-/* Author-supplied breaks only, so `w` is the widest line and `h` is the line
- * count times the line height. Layout never re-wraps. */
+/* Splits at author newlines only: `w` is the widest line, `h` the line count times the
+ * line height. */
 scav_result scav_measure_block(scav_metrics const *metrics,
                                scav_byte const *utf8_nfc,
                                uint32_t len,
@@ -127,7 +107,7 @@ scav_result scav_measure_block(scav_metrics const *metrics,
 scav_result scav_drawlist_create(scav_drawlist **out);
 void scav_drawlist_destroy(scav_drawlist *list);
 
-/* Row counts, so a binding can size its reads without walking anything. */
+/* Row counts of each array, and the text pool's byte count. NULL outputs are skipped. */
 scav_result scav_drawlist_counts(scav_drawlist const *list,
                                  uint32_t *out_prims,
                                  uint32_t *out_styles,
@@ -135,8 +115,8 @@ scav_result scav_drawlist_counts(scav_drawlist const *list,
                                  uint32_t *out_clips,
                                  uint32_t *out_text);
 
-/* The flat arrays, read out with the same three-call shape as a column, each
- * reporting the stride to walk it with the way a column does. */
+/* Each flat array as base pointer, row stride and count, the shape a column uses.
+ * An empty array reads back NULL and zero. */
 scav_result scav_drawlist_prims(scav_drawlist const *list,
                                 scav_prim const **out,
                                 uint32_t *out_stride,
@@ -164,26 +144,22 @@ scav_result scav_drawlist_str(scav_drawlist const *list,
  * SCAV_E_DRAWLIST names the offending primitive in `out_prim`. */
 scav_result scav_drawlist_validate(scav_drawlist const *list, uint32_t *out_prim);
 
-/* Sorts by (depth, prim bytes), deduplicates the style and clip tables, and
- * rewrites the indices. Content, not emission order, so two builders drawing
- * one picture in different orders compare equal. Idempotent. */
+/* Sorts by (depth, prim content), dedupes the style and clip tables, and rewrites the
+ * indices. Lists drawing one picture in any emission order compare equal. Idempotent. */
 scav_result scav_drawlist_canonicalize(scav_drawlist *list);
 
-/* xxh32 over the canonical form and the font's identity. The DrawList golden's
- * one number: the font is a hashed input here, where glyph advances live. */
+/* xxh32 over the font's identity and the list's content in its current order. */
 scav_result scav_drawlist_digest(scav_drawlist const *list,
                                  scav_metrics const *metrics,
                                  uint32_t *out);
 
-/* Appends `src` onto `dst`, rebasing style, clip, point and payload indices --
- * a shipped function rather than a documented insert() because those four
- * index per-list arrays. Depth resolves the interleaving. */
+/* Appends `src` onto `dst`, rebasing style, clip, point and payload indices. `depth`
+ * orders the merged primitives. */
 scav_result scav_drawlist_append(scav_drawlist *dst, scav_drawlist const *src);
 
 /* Images ================================================================== */
 
-/* Raster only, and dimensions come from registration rather than decoding, so
- * no backend needs a decoder to size an image. */
+/* A registry of raster images; dimensions are given at registration. */
 scav_result scav_images_create(scav_images **out);
 void scav_images_destroy(scav_images *images);
 scav_result scav_image_register(scav_images *images,
@@ -205,12 +181,8 @@ scav_result scav_image_extent(scav_images const *images,
 
 /* Reference builder ======================================================= */
 
-/* The standard appearance over a laid-out chart. Emitters take the depth to
- * draw at, so an app interleaves its own primitives without forking anything;
- * `scav_emit_chart` calls them in an order it documents and nothing else
- * depends on. Hand back the same space tables and placed boxes layout was
- * given: a label's rect is the one layout placed, not one a builder recomputes.
- * A chart with no geometry columns is SCAV_E_STATE.
+/* Emits a laid-out chart at `depth`; a NULL `palette` selects the standard one. Pass the
+ * spaces and placed boxes layout was given. A chart without geometry is SCAV_E_STATE.
  *
  * The two row sizes and `spaces_size` are checked first and are SCAV_E_ABI when
  * any disagrees, a NULL palette, NULL spaces and zero placed rows included. */
@@ -227,21 +199,16 @@ scav_result scav_emit_chart(scav_drawlist *list,
                             uint32_t placed_row_size,
                             int32_t depth);
 
-/* The reference measurement pass, which is the policy every corpus golden is
- * stated against -- and the reason it lives in the shared library rather than
- * in each binding: Python's `/` yields a float, and a space request computed
- * that way would differ under FMA contraction and fail the golden silently.
+/* The reference measurement pass: fills the four space tables for `chart`.
  *
  * Pass all four caps as 0 with a non-null `out_counts` to query the four
  * counts, then call again with buffers. `out_counts` receives four values in
  * this order: box_state, box_sub, path_clear, path_box. A cap too small is
- * SCAV_E_CAPACITY and never truncates. SCAV_E_STATE when the pass fails, whether
- * a codepoint has no glyph or a request leaves the legal domain; the two are not
- * told apart here, only by scav_measure_text on the text itself.
+ * SCAV_E_CAPACITY and never truncates. SCAV_E_STATE when the pass fails: a codepoint
+ * with no glyph, or a request outside the legal domain.
  *
- * The profile's size and all four row sizes are checked first and are
- * SCAV_E_ABI when any disagrees -- on the count query too, since a row size is
- * the stride the caller will read the second call's rows back at. */
+ * The profile size and all four row sizes are checked first, on the count query too;
+ * any mismatch is SCAV_E_ABI. */
 scav_result scav_measure_chart(scav_chart const *chart,
                                scav_metrics const *metrics,
                                scav_profile const *profile,
@@ -268,20 +235,14 @@ enum {
   SCAV_STYLE_TITLE = 3,  /* state name */
   SCAV_STYLE_LABEL = 4,  /* transition label */
   SCAV_STYLE_PSEUDO = 5, /* initial, final, choice, fork, join, history */
-  /* The arrowhead, which is a filled glyph and not a stroked one. Its own row
-   * because a stroke on a closed fill inflates it by half the width all round
-   * and spikes at the tip by the miter: at 16 units and a 53-degree head that
-   * is 18 units past the border the tip was aimed at. A caller restyling the
-   * route now says what the head touching the border should look like rather
-   * than inheriting a stroke the polyline needed. */
-  SCAV_STYLE_ARROW = 6,
+  SCAV_STYLE_ARROW = 6,  /* arrowhead triangle, tip on the target border */
   SCAV_STYLE_COUNT = 7
 };
 
 /* NOLINTEND(modernize-use-using, readability-identifier-naming) */
 
-/* The shipped palette, so a caller that wants the standard look passes it
- * straight through. Writes SCAV_STYLE_COUNT rows. */
+/* Writes the standard palette's SCAV_STYLE_COUNT rows to `out`. A smaller `cap` is
+ * SCAV_E_CAPACITY. */
 scav_result scav_palette_standard(scav_style *out, uint32_t cap, uint32_t row_size);
 
 #ifdef __cplusplus

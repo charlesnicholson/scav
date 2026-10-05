@@ -1,9 +1,8 @@
 #ifndef SCAV_DRAW_HANDLES_H_INCLUDED
 #define SCAV_DRAW_HANDLES_H_INCLUDED
 
-// The three handles only libscavdraw's C surface operates on. Complete here and
-// opaque everywhere else, so no C++ member can reach a caller's translation
-// unit. `scav_chart` is shared and lives at the src root instead.
+// The three handles only libscavdraw's C surface operates on: complete here, opaque
+// elsewhere. `scav_chart` is shared and lives at the src root.
 
 #include "scav/scav_draw.h"
 #include "scav/scav_types.h"

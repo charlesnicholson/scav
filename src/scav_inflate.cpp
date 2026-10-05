@@ -50,8 +50,8 @@ constexpr std::array<uint32_t, 256> CRC_TABLE{ [] {
   return t;
 }() };
 
-// LSB-first bits. Bits at and above `count` are always zero, so a peek past the
-// end of the input reads zeros rather than bytes that are not there.
+// LSB-first bit reader. Bits of `buf` at and above `count` are zero, so a peek
+// past the end of the input reads zeros.
 struct Bits {
   scav_byte const *in;
   uint32_t len;
@@ -323,7 +323,7 @@ uint32_t le32(scav_byte const *at) {
          (static_cast<uint32_t>(at[2]) << 16U) | (static_cast<uint32_t>(at[3]) << 24U);
 }
 
-// Past a zero-terminated header field, or false if no terminator comes first.
+// Advances `pos` past a zero-terminated header field; false if `end` comes first.
 bool skip_string(scav_byte const *in, uint32_t end, uint32_t &pos) {
   while (pos < end) {
     if (in[pos++] == 0U) { return true; }

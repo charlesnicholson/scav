@@ -56,8 +56,6 @@ void check_chart_diags(Chart const &c, std::vector<Diagnostic> const &diags) {
   }
 }
 
-// Drives one network to completion. `order` permutes each pending batch, so a
-// run covers arrival orders the application is entitled to produce.
 struct Run {
   Loader loader;
   Chart chart;
@@ -65,6 +63,7 @@ struct Run {
   bool ok;
 };
 
+// Drives one network to completion, rotating each pending batch by the `order` seed.
 Run drive(std::vector<Doc> const &corpus, uint64_t order) {
   Run run;
   if (corpus.empty()) {
@@ -77,8 +76,7 @@ Run drive(std::vector<Doc> const &corpus, uint64_t order) {
   }
 
   std::vector<std::string> wanted;
-  // A cap rather than a while(true), so a loader that never drains pending
-  // fails. One round per level, clearing the deepest chain built below.
+  // Each round adds one include level; 1024 exceeds the deepest chain below.
   constexpr uint32_t MAX_ROUNDS{ 1024 };
   for (uint32_t round = 0; round < MAX_ROUNDS; ++round) {
     wanted.clear();
@@ -165,18 +163,17 @@ TEST_CASE("fuzz: any network the loader accepts is complete, or it built nothing
       { .name = "b.scav", .text = synth_doc("b", key ^ 0x11U) },
       { .name = "c.scav", .text = synth_doc("c", key ^ 0x22U) },
     };
-    // Sometimes the escaping path is real, sometimes it is a hole the
-    // application can never fill.
+    // In one seed in three the corpus also holds `../b.scav`.
     if ((rnd(key, 20) % 3U) == 0U) {
       corpus.push_back({ .name = "../b.scav", .text = synth_doc("up", key ^ 0x33U) });
     }
 
     Run run{ drive(corpus, key) };
 
-    // Whether the chart got built decides which pool a finding's span indexes,
-    // so the sweep branches on that rather than trying both.
+    // A finding's span indexes the loader's bytes when no chart was built, and the
+    // chart's bytes otherwise.
     if (run.chart.documents.empty()) {
-      // A fatal load. It must have said why, and left nothing half-built.
+      // A fatal load reports diagnostics and leaves the chart empty.
       CHECK_FALSE(run.ok);
       CHECK_FALSE(run.diags.empty());
       CHECK(run.chart.states.empty());
@@ -195,8 +192,7 @@ TEST_CASE("fuzz: any network the loader accepts is complete, or it built nothing
       CHECK(run.chart.states[inc.host.v].submachines.len == 1);
     }
 
-    // Validation must agree, and the structural checks must survive whatever
-    // the network was.
+    // Validation's State subjects name existing rows, whatever the network.
     std::vector<Diagnostic> validate_diags;
     bool const clean{ validate_chart(run.chart, validate_diags) };
     for (Diagnostic const &d : validate_diags) {
@@ -221,8 +217,7 @@ TEST_CASE("fuzz: any network the loader accepts is complete, or it built nothing
 }
 
 TEST_CASE("fuzz: arrival order never changes the model") {
-  // Swept rather than asserted once: one corpus resolved in different orders
-  // gives the same bytes.
+  // One corpus resolved in two arrival orders gives the same hash and digest.
   constexpr uint64_t SEED{ 0x5CA1'AB1E'0000'0303ULL };
   for (uint32_t i = 0; i < 200; ++i) {
     uint64_t const key{ SEED + i };
@@ -268,8 +263,7 @@ TEST_CASE("fuzz: a cycle at any length is caught rather than followed") {
 }
 
 TEST_CASE("fuzz: a deep include chain resolves without recursing") {
-  // The walks are explicit stacks because chain depth is attacker-controlled.
-  // 400 documents is well past any real chart and well past a default stack.
+  // 400 chained documents; the loader's walks use explicit stacks.
   constexpr uint32_t DEPTH{ 400 };
   std::vector<Doc> corpus;
   corpus.reserve(DEPTH);
@@ -289,7 +283,7 @@ TEST_CASE("fuzz: a deep include chain resolves without recursing") {
   CHECK(run.chart.documents.size() == DEPTH);
   CHECK(run.chart.includes.size() == DEPTH - 1);
 
-  // And the address of the deepest state is 399 segments that still resolve.
+  // The deepest state's address, 399 `nxt` segments then `S`, resolves back to it.
   StateId deepest{ INVALID };
   for (uint32_t s = 0; s < run.chart.states.size(); ++s) {
     if (run.chart.states[s].inst.v == (DEPTH - 2)) {
@@ -326,8 +320,7 @@ TEST_CASE("fuzz: an exponential DAG is capped rather than expanded") {
   Run const run{ drive(corpus, 0) };
   CHECK_FALSE(run.ok);
   CHECK(has_code(run.diags, DiagCode::IncludeExpansionTooLarge));
-  // And nothing half-built: a chart handed back is always a complete network,
-  // so stopping mid-expansion has to leave none at all.
+  // A capped expansion returns an empty chart.
   CHECK(run.chart.documents.empty());
   CHECK(run.chart.states.empty());
 }

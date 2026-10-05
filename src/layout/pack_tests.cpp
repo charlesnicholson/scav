@@ -1,6 +1,5 @@
-// Packing against hand-written rect lists: the target width worked by hand,
-// each of the four positions reached deliberately, then the properties every
-// packing has to keep whatever the shape.
+// Packing tests: hand-worked targets and positions on fixed rect lists, then the
+// invariants every packing keeps over generated shapes.
 
 #include "layout/pack.h"
 #include "layout/tests/pod_eq.h"
@@ -16,9 +15,8 @@
 
 namespace scav {
 
-// The packing with both of its last steps switchable, which `pack.cpp`
-// brackets with SCAV_INTERNAL so these tests can weigh each against what it
-// started from.
+// `pack_lr` with compaction and whitespace elimination each selectable; defined in
+// `pack.cpp` under SCAV_INTERNAL.
 Packing pack_rows(std::vector<scav_rect> const &rects,
                   int32_t sep,
                   int32_t dar_num,
@@ -31,6 +29,22 @@ Packing pack_rows(std::vector<scav_rect> const &rects,
 namespace {
 
 using namespace scav;
+
+Packing pack_lr(std::vector<scav_rect> const &rects,
+                int32_t sep,
+                int32_t dar_num,
+                int32_t dar_den,
+                Compaction compaction) {
+  Packing out;
+  scav::pack_lr(out, rects, sep, dar_num, dar_den, compaction);
+  return out;
+}
+
+Packing pack_box(std::vector<scav_rect> const &rects, int32_t sep) {
+  Packing out;
+  scav::pack_box(out, rects, sep);
+  return out;
+}
 
 std::vector<scav_rect> boxes(std::vector<std::pair<int32_t, int32_t>> const &wh) {
   std::vector<scav_rect> out;
@@ -57,15 +71,13 @@ bool overlaps(scav_rect const &a, scav_rect const &b) {
          (b.y < (a.y + a.h));
 }
 
-// The clear distance between two rects on one axis, zero where they overlap
-// on it. One of the two is at least `sep` in every packing.
+// The gap between two rects on one axis, zero where they overlap on it.
 int32_t apart(int32_t a_lo, int32_t a_len, int32_t b_lo, int32_t b_len) {
   return imax(imax(b_lo - (a_lo + a_len), a_lo - (b_lo + b_len)), 0);
 }
 
-// No two rects share a point or come closer than `sep`, and no later rect is
-// both above and left of an earlier one, which is what "order preserving" has
-// to mean for a reader.
+// Every rect lies inside the extents, no two overlap or come closer than `sep`, and
+// no later rect is both left of and at or above an earlier one.
 void check_sane(Packing const &p, int32_t sep) {
   for (uint32_t i = 0; i < p.at.size(); ++i) {
     CHECK((p.at[i].x + p.at[i].w) <= p.w);
@@ -87,8 +99,7 @@ int64_t filled(Packing const &p) {
   return used;
 }
 
-// Occupancy is monotone because compaction keeps a move only where neither
-// extent grew, so the same numerator sits over a smaller or equal box.
+// Compaction keeps the filled area and shrinks or keeps each extent.
 void check_compaction(std::vector<scav_rect> const &rects,
                       int32_t sep,
                       int32_t dar_num,
@@ -101,18 +112,15 @@ void check_compaction(std::vector<scav_rect> const &rects,
   CHECK(packed.h <= placed.h);
   CHECK(filled(packed) == filled(placed));
   CHECK((int64_t{ packed.w } * packed.h) <= (int64_t{ placed.w } * placed.h));
-  // Inside the domain before compaction stays inside it after, which is what
-  // lets `pack_best` keep asking the same question of one candidate (11.2).
+  // A packing inside the domain stays inside it after compaction.
   if ((placed.w <= COORD_MAX) && (placed.h <= COORD_MAX)) {
     CHECK(packed.w <= COORD_MAX);
     CHECK(packed.h <= COORD_MAX);
   }
 }
 
-// Whitespace elimination moves neither extent, which is what keeps it out of
-// `pack_better`'s way: every rect grows or stays, none moves back or up, and a
-// rect with no extent is left as it is. True under either compaction, the step
-// reading the structure and not the knob that built it.
+// Whitespace elimination keeps both extents; each rect grows or stays and moves
+// only right or down, and a zero-extent rect keeps its size.
 void check_expansion(std::vector<scav_rect> const &rects,
                      int32_t sep,
                      int32_t dar_num,
@@ -137,8 +145,7 @@ void check_expansion(std::vector<scav_rect> const &rects,
     }
   }
   CHECK(filled(grown) >= filled(placed));
-  // Inside the domain before the step stays inside it after, which is what
-  // lets `pack_best` keep asking the same question of one candidate (11.2).
+  // A packing inside the domain stays inside it after whitespace elimination.
   if ((placed.w <= COORD_MAX) && (placed.h <= COORD_MAX)) {
     CHECK(grown.w <= COORD_MAX);
     CHECK(grown.h <= COORD_MAX);
@@ -167,8 +174,8 @@ TEST_CASE("pack: one rect sits at the origin and is the whole extent") {
 }
 
 TEST_CASE("pack: four squares come out square, gaps paid for") {
-  // Inflated area is 4 * 110 * 60 = 26400 at DAR 1:1, so the target is
-  // isqrt(26400) = 162 and two 100-wide rects fit in a row with 10 between.
+  // Inflated area is 4 * 110 * 110 = 48400 at DAR 1:1, so the target is
+  // isqrt(48400) = 220 and two 100-wide rects fit in a row with 10 between.
   Packing const p{ pack_lr(
       boxes({ { 100, 100 }, { 100, 100 }, { 100, 100 }, { 100, 100 } }),
       10,
@@ -190,8 +197,7 @@ TEST_CASE("pack: four squares come out square, gaps paid for") {
 }
 
 TEST_CASE("pack: a bare-area target would have stacked those four in a column") {
-  // The same input with no separation: the target is the same 200-ish, and
-  // the gaps are what the inflation above pays for.
+  // At separation 0 the target is isqrt(40000) = 200, the width of two rects.
   Packing const p{ pack_lr(
       boxes({ { 100, 100 }, { 100, 100 }, { 100, 100 }, { 100, 100 } }),
       0,
@@ -203,11 +209,8 @@ TEST_CASE("pack: a bare-area target would have stacked those four in a column") 
 }
 
 TEST_CASE("pack: a rect after a wrap goes back to the row's top level") {
-  // Inflated area 6600 + 6600 + 3600 = 16800, times 16 over 10 is 26880, so
-  // the target is isqrt(26880) = 163. The second rect cannot follow the first
-  // (210 > 163) so it wraps to a subrow; the third fits at row level
-  // (100 + 10 + 50 = 160 <= 163) and goes there rather than beside the second,
-  // which would have left an unfillable notch above it.
+  // Target is isqrt(16800 * 16 / 10) = 163. The second rect (210 > 163) wraps to a
+  // subrow; the third fits at row level (100 + 10 + 50 = 160 <= 163) and goes there.
   Packing const p{
     pack_lr(boxes({ { 100, 50 }, { 100, 50 }, { 50, 50 } }), 10, 16, 10, Compaction::Off)
   };
@@ -224,8 +227,7 @@ TEST_CASE("pack: a rect after a wrap goes back to the row's top level") {
 }
 
 TEST_CASE("pack: a rect wider than the target opens a new row") {
-  // Nothing can share a row with the 900-wide rect, so the target is its own
-  // width and each of the others takes a row.
+  // The target floors at the widest rect, 900, so each rect sits under the last.
   Packing const p{
     pack_lr(boxes({ { 900, 40 }, { 900, 40 }, { 900, 40 } }), 10, 16, 10, Compaction::Off)
   };
@@ -238,10 +240,8 @@ TEST_CASE("pack: a rect wider than the target opens a new row") {
 }
 
 TEST_CASE("pack: a rect that fits neither its subrow nor its block opens a row") {
-  // Inflated area 3000 + 7200 + 2400 + 3000 = 15600, times 16 over 10 is 24960,
-  // so the target is isqrt(24960) = 157. The third rect goes back to row level
-  // and starts a block at x=120; the fourth fits neither beside it (160 + 40)
-  // nor at that block's left edge (120 + 40), so it wraps to a new row.
+  // Target is isqrt(15600 * 16 / 10) = 157. The third rect starts a block at x=120;
+  // the fourth fits neither beside it (160 + 40) nor at its left edge (120 + 40).
   Packing const p{ pack_lr(boxes({ { 40, 50 }, { 110, 50 }, { 30, 50 }, { 40, 50 } }),
                            10,
                            16,
@@ -254,7 +254,7 @@ TEST_CASE("pack: a rect that fits neither its subrow nor its block opens a row")
   CHECK(p.at[1].y == 60);
   CHECK(p.at[2].x == 120);
   CHECK(p.at[2].y == 0);
-  // The new row clears the whole of the one above it, block and subrows alike.
+  // The new row starts below the first row's lower subrow.
   CHECK(p.at[3].x == 0);
   CHECK(p.at[3].y == 120);
   CHECK(p.w == 150);
@@ -280,7 +280,7 @@ TEST_CASE("pack: the scale measure prefers the packing that scales larger") {
   // At DAR 16:10 the wide one fits a 16:10 viewport at a larger scale.
   CHECK(pack_better(wide, tall, 16, 10, false));
   CHECK_FALSE(pack_better(tall, wide, 16, 10, false));
-  // At 10:16 the preference reverses, without either extent changing.
+  // At 10:16 the preference reverses.
   CHECK(pack_better(tall, wide, 10, 16, false));
 }
 
@@ -291,9 +291,8 @@ TEST_CASE("pack: the scale measure already prefers the smaller of two similar sh
 }
 
 TEST_CASE("pack: equal scale falls to the tiebreak the profile picked") {
-  // Both are height-bound at the same height, so both scale to 1/100 and the
-  // measure cannot separate them. Only the tiebreak can, and it points the
-  // two ways round: 160x100 is exactly 16:10 while 100x100 covers less area.
+  // Both are height-bound at 100 and scale equally. The tiebreak picks the smaller
+  // area, 100x100, or with `aspect_first` the 16:10 shape, 160x100.
   Packing const matching{ .at = {}, .w = 160, .h = 100 };
   Packing const smaller{ .at = {}, .w = 100, .h = 100 };
   CHECK(pack_better(smaller, matching, 16, 10, false));
@@ -321,9 +320,8 @@ TEST_CASE("pack: sane on a spread of shapes, and twice the same") {
 }
 
 TEST_CASE("pack: a column of maximal rects saturates rather than wrapping") {
-  // Five thousand rects the domain admits one at a time. Only one fits a row,
-  // so the column runs to 2.6 billion: an int32 cursor would have wrapped
-  // through it four thousand rects in.
+  // 5000 COORD_MAX squares, one per row: the column sums to 2.6 billion and `h`
+  // saturates.
   std::vector<scav_rect> const tall(5000,
                                     { .x = 0, .y = 0, .w = COORD_MAX, .h = COORD_MAX });
 
@@ -331,21 +329,21 @@ TEST_CASE("pack: a column of maximal rects saturates rather than wrapping") {
   REQUIRE(p.at.size() == tall.size());
   CHECK(p.w == COORD_MAX);
   CHECK(p.h == PACK_SATURATED);
-  CHECK(p.h > COORD_MAX);  // the only thing a caller tests
+  CHECK(p.h > COORD_MAX);  // the test callers apply
   bool ordered{ true };
   for (uint32_t i = 1; i < p.at.size(); ++i) {
     ordered = ordered && (p.at[i].y >= p.at[i - 1].y) && (p.at[i].x >= 0);
   }
   CHECK(ordered);
 
-  // The row packer sums the other axis, and stops in the same place.
+  // `pack_box` sums widths and saturates the same way.
   Packing const row{ pack_box(tall, 0) };
   CHECK(row.w == PACK_SATURATED);
   CHECK(row.h == COORD_MAX);
 }
 
 TEST_CASE("pack: one oversized child sets the target and nothing shares its row") {
-  // The widest rect floors the target, so the other two can only stack under it.
+  // The widest rect floors the target at 1000; the other two share the subrow under it.
   std::vector<scav_rect> const in{ boxes({ { 1000, 100 }, { 100, 100 }, { 100, 100 } }) };
   Packing const p{ pack_rows(in, 10, 16, 10, Compaction::Off, false) };
   REQUIRE(p.at.size() == 3);
@@ -361,9 +359,8 @@ TEST_CASE("pack: one oversized child sets the target and nothing shares its row"
 }
 
 TEST_CASE("pack: equal heights are where the row packer wins") {
-  // `crowd`'s two concurrent regions under real text: same height, and the
-  // target holds only one of them, so `pack_lr` stacks them. The side-by-side
-  // candidate is the row packer's, and `trybox` is what finds it.
+  // Two regions of equal height: the target fits one, so `pack_lr` stacks them, and
+  // `pack_box`'s single row scores better.
   std::vector<scav_rect> const in{ boxes({ { 1888, 1594 }, { 1773, 1594 } }) };
   Packing const p{ pack_lr(in, 192, 16, 10, Compaction::Off) };
   CHECK(p.w == 1888);
@@ -376,10 +373,6 @@ TEST_CASE("pack: equal heights are where the row packer wins") {
 }
 
 TEST_CASE("pack: both last steps keep every property over a seeded spread") {
-  // Random rect lists from the position-addressed generator, so the cases are
-  // the same on every platform. Each is held to order, separation, no overlap,
-  // occupancy, the extents and the domain, before and after each step, and
-  // whitespace elimination is held to both under either compaction.
   for (uint32_t item = 0; item < 400; ++item) {
     CAPTURE(item);
     uint32_t const n{ 1 + static_cast<uint32_t>(rnd(9091, 0, item, 0) % 9) };
@@ -395,28 +388,34 @@ TEST_CASE("pack: both last steps keep every property over a seeded spread") {
     check_compaction(in, sep, 16, 10);
     check_expansion(in, sep, 16, 10, Compaction::Off);
     check_expansion(in, sep, 16, 10, Compaction::On);
-    // A second run of the same input is the same bytes, both steps included.
+    // Two runs of the same input give the same positions.
     CHECK(same(pack_lr(in, sep, 16, 10, Compaction::Off).at,
                pack_lr(in, sep, 16, 10, Compaction::Off).at));
   }
 }
 
 TEST_CASE("pack: a saturated column is left as it is") {
-  // The column the domain admits one rect at a time. A packing past the domain
-  // is no candidate, so nothing in it is worth filling and the step declines.
-  std::vector<scav_rect> const tall(64,
-                                    { .x = 0, .y = 0, .w = COORD_MAX, .h = COORD_MAX });
+  // 5000 COORD_MAX squares over a half-width rect: `h` saturates and whitespace
+  // elimination keeps placement's positions, the last rect's width included.
+  std::vector<scav_rect> tall(5000, { .x = 0, .y = 0, .w = COORD_MAX, .h = COORD_MAX });
+  tall.push_back({ .x = 0, .y = 0, .w = COORD_MAX / 2, .h = COORD_MAX });
   Packing const placed{ pack_rows(tall, 0, 16, 10, Compaction::Off, false) };
   Packing const p{ pack_lr(tall, 0, 16, 10, Compaction::Off) };
   CHECK(p.w == COORD_MAX);
-  CHECK(p.h == (64 * COORD_MAX));
+  CHECK(p.h == PACK_SATURATED);
+  CHECK(p.at.back().w == (COORD_MAX / 2));
   CHECK(same(p.at, placed.at));
+
+  // The same column's last three rects, short of saturation: the half-width rect widens.
+  std::vector<scav_rect> const short_of(tall.end() - 3, tall.end());
+  Packing const filled_out{ pack_lr(short_of, 0, 16, 10, Compaction::Off) };
+  CHECK(filled_out.h == (3 * COORD_MAX));
+  CHECK(filled_out.at.back().w == COORD_MAX);
 }
 
 TEST_CASE("pack: whitespace elimination fills a column to the drawing's width") {
-  // The commonest shape phase 2 packs: a column of rows one rect wide, the
-  // widest setting the drawing. Every narrower rect grows to that width, so
-  // the only space left inside the box is the gaps between the rows.
+  // A column of three subrows, one rect each: the narrower two grow to the widest's
+  // 2695.
   std::vector<scav_rect> const in{ boxes(
       { { 2695, 653 }, { 1434, 653 }, { 1895, 653 } }) };
   Packing const p{ pack_lr(in, 288, 16, 10, Compaction::Off) };
@@ -432,15 +431,14 @@ TEST_CASE("pack: whitespace elimination fills a column to the drawing's width") 
   CHECK(p.at[0].y == 0);
   CHECK(p.at[1].y == 941);
   CHECK(p.at[2].y == 1882);
-  // The box less the two gaps, exactly: no whitespace of any other kind left.
+  // Filled area is the box less the two 288 gaps.
   CHECK(filled(p) == (int64_t{ p.w } * (p.h - (2 * 288))));
   check_expansion(in, 288, 16, 10, Compaction::Off);
 }
 
 TEST_CASE("pack: whitespace elimination fills the notch a row-level rect left") {
-  // The case the placement comment names: the third rect takes row level and
-  // leaves a notch under it that nothing short of growing a neighbour fills.
-  // This is that growth -- 50 x 50 becomes 50 x 110, down to the row's floor.
+  // The third rect sits at row level and grows from 50 x 50 to 50 x 110, down to the
+  // row's floor.
   std::vector<scav_rect> const in{ boxes({ { 100, 50 }, { 100, 50 }, { 50, 50 } }) };
   Packing const p{ pack_lr(in, 10, 16, 10, Compaction::Off) };
   REQUIRE(p.at.size() == 3);
@@ -456,10 +454,8 @@ TEST_CASE("pack: whitespace elimination fills the notch a row-level rect left") 
 }
 
 TEST_CASE("pack: whitespace elimination shares a row's slack between its blocks") {
-  // A row 310 wide inside a 400-wide drawing, in two blocks. The 90 spare is
-  // halved between them and the second block shifts right by the first's
-  // share, so the gap between the two is still the 10 the placement gave them
-  // and the row's right edge lands exactly on the drawing's.
+  // A 310-wide row in a 400-wide drawing, in two blocks: each block gets 45 of the
+  // 90 spare, keeping the 10 gap and ending the row at the drawing's right edge.
   std::vector<scav_rect> const in{ boxes(
       { { 200, 100 }, { 200, 100 }, { 100, 100 }, { 400, 100 } }) };
   Packing const placed{ pack_rows(in, 10, 16, 10, Compaction::Off, false) };
@@ -480,8 +476,6 @@ TEST_CASE("pack: whitespace elimination shares a row's slack between its blocks"
   check_expansion(in, 10, 16, 10, Compaction::Off);
 }
 TEST_CASE("pack: the row packer levels its rects' heights") {
-  // One row, so the only whitespace is under the short ones, and every rect
-  // comes back as tall as the tallest.
   Packing const p{ pack_box(boxes({ { 40, 10 }, { 900, 300 }, { 5, 5 } }), 7) };
   REQUIRE(p.at.size() == 3);
   CHECK(p.at[0] == scav_rect{ .x = 0, .y = 0, .w = 40, .h = 300 });
@@ -493,9 +487,6 @@ TEST_CASE("pack: the row packer levels its rects' heights") {
 }
 
 TEST_CASE("pack: a rect with no extent is not grown into one") {
-  // A live submachine that sized to nothing packs as a zero rect, and filling
-  // the row around it must not give it a band a reader would look for
-  // contents in.
   std::vector<scav_rect> const in{ boxes({ { 400, 300 }, { 0, 0 }, { 200, 100 } }) };
   Packing const p{ pack_lr(in, 10, 16, 10, Compaction::Off) };
   REQUIRE(p.at.size() == 3);
@@ -505,10 +496,8 @@ TEST_CASE("pack: a rect with no extent is not grown into one") {
 }
 
 TEST_CASE("pack: compaction takes the late arrival back into the hole above it") {
-  // Inflated area 510*110 + 210*410 + 110*110 + 210*410 = 227,300, times 16
-  // over 10 is 363,680, so the target is isqrt(363680) = 620. Placement fills
-  // the row top level with the third rect and then has nowhere for the fourth
-  // but a row of its own; the hole under the third is what compaction reclaims.
+  // Target is isqrt(240400 * 16 / 10) = 620: placement puts the third rect at row
+  // level and the fourth in a new row.
   std::vector<scav_rect> const in{ boxes(
       { { 500, 100 }, { 200, 400 }, { 100, 100 }, { 200, 400 } }) };
 
@@ -537,7 +526,7 @@ TEST_CASE("pack: compaction takes the late arrival back into the hole above it")
   CHECK(p.at[3].y == 220);
   CHECK(p.w == 500);
   CHECK(p.h == 620);
-  // 39.20% of the placement's box against 70.97% of the compacted one.
+  // Occupancy rises from 39.20% to 70.97%.
   CHECK((filled(p) * (int64_t{ placed.w } * placed.h)) >
         (filled(placed) * (int64_t{ p.w } * p.h)));
   check_compaction(in, 10, 16, 10);
@@ -545,10 +534,8 @@ TEST_CASE("pack: compaction takes the late arrival back into the hole above it")
 }
 
 TEST_CASE("pack: compaction pulls a row-level rect back beside its predecessor") {
-  // `dock`'s frame under real text, and `vac`'s copy of it: three components,
-  // the middle one much the tallest. Placement puts the third at row level
-  // (1696 + 288 + 1088 = 3072 <= 3186) where it leaves a notch below it;
-  // compaction cuts the row instead, which lands it 262 further left.
+  // Placement puts the third rect at row level (1696 + 288 + 1088 = 3072 <= 3186);
+  // compaction moves it beside the second, 262 to the left.
   std::vector<scav_rect> const in{ boxes(
       { { 1696, 941 }, { 1434, 1229 }, { 1088, 653 } }) };
 
@@ -571,11 +558,6 @@ TEST_CASE("pack: compaction pulls a row-level rect back beside its predecessor")
 }
 
 TEST_CASE("pack: vac's root frame is a packing compaction cannot improve") {
-  // The four components of `vac`'s root frame under real text -- `lamp`,
-  // `PreConfig`, the `On`/`dock` pair, and the initial chain. Every position
-  // the four offer is either wider than the target or taller than the drawing,
-  // so the whitespace here is inside the component rects rather than between
-  // them, and the compaction row of the table ties with the plain one.
   std::vector<scav_rect> const in{ boxes(
       { { 3066, 2535 }, { 2842, 1050 }, { 10785, 6299 }, { 1696, 1594 } }) };
 
@@ -596,9 +578,7 @@ TEST_CASE("pack: vac's root frame is a packing compaction cannot improve") {
 }
 
 TEST_CASE("pack: compaction leaves a saturated column saturated") {
-  // The column the domain admits one rect at a time. Every position but the one
-  // placement chose puts a rect past the drawing's own width, so compaction
-  // rejects all of them without laying the column out again.
+  // 64 COORD_MAX squares in one column: compaction keeps placement's positions.
   std::vector<scav_rect> const tall(64,
                                     { .x = 0, .y = 0, .w = COORD_MAX, .h = COORD_MAX });
   Packing const placed{ pack_rows(tall, 0, 16, 10, Compaction::Off, false) };

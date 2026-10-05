@@ -1,3 +1,2 @@
-# Applications are consumers: outside src/, so the CLI and viewer cannot quietly
-# become privileged layers.
+# Applications that consume the libraries.
 add_subdirectory(cli)

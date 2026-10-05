@@ -1,28 +1,97 @@
-// The router registry. Routers cross every boundary by name; the id is an
-// index into this table and nothing more.
+// The router registry; a router id is an index into `ROUTERS`.
 
 #include "layout/router.h"
 
 #include "scav/scav_layout.h"
 #include "scav/scav_types.h"
+#include "scav_vec.h"
 
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <vector>
 
 namespace scav {
 
 namespace {
 
-// Stateless and const, so these are constant-initialised and the table below
-// cannot depend on when another translation unit's statics ran.
 constinit StraightRouter const STRAIGHT;
 constinit OrthogonalRouter const ORTHOGONAL;
 
-// Index 0 is what a caller that has no opinion gets.
+// Index 0 is the default router.
 constexpr std::array<Router const *, 2> ROUTERS{ { &ORTHOGONAL, &STRAIGHT } };
 
 }  // namespace
+
+uint32_t face_of(scav_point at, scav_rect const &r) {
+  if (at.x == r.x) { return 0; }
+  if (at.x == (r.x + r.w)) { return 1; }
+  if (at.y == r.y) { return 2; }
+  if (at.y == (r.y + r.h)) { return 3; }
+  return INVALID;
+}
+
+void loop_occupied(std::array<scav_point, 2> const &ends,
+                   scav_rect const &r,
+                   uint32_t st,
+                   int32_t clear,
+                   std::vector<OccupiedSpan> &out) {
+  std::array<uint32_t, 2> const face{ face_of(ends[0], r), face_of(ends[1], r) };
+  for (uint32_t k = 0; k < 2; ++k) {
+    if ((face[k] == INVALID) || ((k == 1) && (face[1] == face[0]))) { continue; }
+    bool const along_y{ face[k] < 2 };
+    int32_t const a{ along_y ? ends[k].y : ends[k].x };
+    int32_t const other{ along_y ? ends[1 - k].y : ends[1 - k].x };
+    int32_t const b{ (face[1 - k] == face[k]) ? other : a };
+    vec_push_back(out,
+                  { .obstacle = st,
+                    .face = face[k],
+                    .lo = imin(a, b) - clear,
+                    .len = (imax(a, b) - imin(a, b)) + (2 * clear) });
+  }
+}
+
+bool occupied_at(std::vector<OccupiedSpan> const &spans,
+                 uint32_t obstacle,
+                 uint32_t face,
+                 int32_t pos) {
+  for (OccupiedSpan const &o : spans) {
+    if ((o.obstacle == obstacle) && (o.face == face) && (pos > o.lo) &&
+        (Wide{ pos } < (Wide{ o.lo } + o.len))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool occupied_free(std::vector<OccupiedSpan> const &spans,
+                   uint32_t obstacle,
+                   uint32_t face,
+                   int32_t lo,
+                   int32_t hi,
+                   int32_t &pos) {
+  int32_t best{ pos };
+  Wide gap{ -1 };
+  auto const consider = [&](Wide v) {
+    if ((v < lo) || (v > hi)) { return; }
+    int32_t const at{ static_cast<int32_t>(v) };
+    if (occupied_at(spans, obstacle, face, at)) { return; }
+    Wide const d{ (v < pos) ? (Wide{ pos } - v) : (v - pos) };
+    if ((gap < 0) || (d < gap) || ((d == gap) && (at < best))) {
+      best = at;
+      gap = d;
+    }
+  };
+  consider(imin(imax(Wide{ pos }, Wide{ lo }), Wide{ hi }));
+  for (OccupiedSpan const &o : spans) {
+    if ((o.obstacle != obstacle) || (o.face != face)) { continue; }
+    consider(o.lo);
+    consider(Wide{ o.lo } + o.len);
+  }
+  if (gap < 0) { return false; }
+  pos = best;
+  return true;
+}
 
 Router const *router_at(uint32_t index) {
   return (index < ROUTERS.size()) ? ROUTERS[index] : nullptr;

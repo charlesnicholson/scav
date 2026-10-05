@@ -27,8 +27,7 @@ std::vector<TokKind> kinds(std::string_view text) {
   return out;
 }
 
-// The lexemes, so a test can assert what a token covered rather than only what
-// kind it was.
+// The source text of each token, End included.
 std::vector<std::string> texts(Lexed const &r) {
   std::vector<std::string> out;
   out.reserve(r.result.tokens.size());
@@ -38,8 +37,7 @@ std::vector<std::string> texts(Lexed const &r) {
   return out;
 }
 
-// A scav \u escape, built rather than written: a universal-character-name in
-// this file's own source is a question about the C++ compiler, not about scav.
+// Spells `cp` as a scav `\u` escape with four lowercase hex digits.
 std::string u_escape(uint32_t cp) {
   static constexpr std::string_view DIGITS{ "0123456789abcdef" };
   std::string out{ "\\u" };
@@ -49,9 +47,7 @@ std::string u_escape(uint32_t cp) {
   return out;
 }
 
-// Not `quoted`: the argument is a `std::string` at most call sites, so ADL puts
-// `std::quoted` in the overload set wherever <iomanip> has reached this file --
-// and it wins, being the exact match. That is a header away at all times.
+// Named apart from `std::quoted`, which ADL finds for `std::string` arguments.
 std::string in_quotes(std::string_view body) {
   std::string out{ '"' };
   out += body;
@@ -65,8 +61,8 @@ struct Decoded {
   bool ok;
 };
 
-// Lexes one literal and decodes it, so the test writes source rather than a
-// hand-computed span.
+// Lexes `literal` and decodes its first token; `ok` is true when that token is a
+// string that decodes.
 Decoded decode(std::string_view literal) {
   Lexed const r{ lex_text(literal) };
   Decoded d;
@@ -94,8 +90,7 @@ TEST_CASE("lex: an empty input is one End token") {
 }
 
 TEST_CASE("lex: a buffer too large for a token span is rejected") {
-  // A Token's off/len is uint32. lex_source is a public entry point, so it
-  // checks even though its usual caller normalized first.
+  // A Token's off/len is uint32.
   if constexpr (sizeof(size_t) > 4) {
     LexResult out;
     std::vector<Diagnostic> diags;
@@ -136,8 +131,7 @@ TEST_CASE("lex: an identifier may not start with a digit") {
 }
 
 TEST_CASE("lex: keywords are ordinary identifiers") {
-  // Reserved-word rejection is the parser's, because s/m/t are keywords only in
-  // statement-leading position.
+  // The parser rejects reserved words; s/m/t are keywords only at statement start.
   Lexed const r{ lex_text("chart state s m t choice as kind") };
   for (uint32_t i = 0; i + 1 < r.result.tokens.size(); ++i) {
     CHECK(r.result.tokens[i].kind == TokKind::Ident);
@@ -180,7 +174,7 @@ TEST_CASE("lex: an unexpected character is reported and skipped") {
   CHECK(r.diags[0].code == DiagCode::UnexpectedCharacter);
   CHECK(r.diags[0].src.off == 2);
   CHECK(r.diags[1].src.off == 6);
-  // Three identifiers survived, which is the point of recovering.
+  // All three identifiers are lexed after recovery.
   CHECK(r.result.tokens.size() == 4);
 }
 
@@ -232,8 +226,6 @@ TEST_CASE("lex: a slash that is not doubled is a path separator") {
 }
 
 TEST_CASE("lex: a block comment is rejected by name") {
-  // `/*` is not a comment form, but it is the single most likely thing someone
-  // types expecting one, so it gets a diagnostic rather than two stray tokens.
   Lexed const r{ lex_text("/* not a comment */") };
   CHECK_FALSE(r.ok);
   REQUIRE(r.diags.size() == 1);
@@ -243,7 +235,6 @@ TEST_CASE("lex: a block comment is rejected by name") {
 }
 
 TEST_CASE("lex: a block comment is skipped, so its body is not lexed as tokens") {
-  // One diagnostic beats a cascade of nonsense from the text inside it.
   Lexed const r{ lex_text("state A, /* } , @ ! */ state B,") };
   CHECK_FALSE(r.ok);
   CHECK(r.diags.size() == 1);
@@ -265,8 +256,7 @@ TEST_CASE("lex: an unterminated block comment reports once and stops") {
 }
 
 TEST_CASE("lex: a nested block comment still reports exactly once") {
-  // No nesting rule to get wrong, because there is no nesting: the scan stops at
-  // the first `*/`, and what follows is ordinary source.
+  // The scan stops at the first `*/`; what follows lexes as ordinary source.
   Lexed const r{ lex_text("/* a /* b */") };
   CHECK_FALSE(r.ok);
   CHECK(r.diags.size() == 1);
@@ -285,7 +275,7 @@ TEST_CASE("lex: the block-comment check does not shadow the real comment form") 
   CHECK(kinds("*/") ==
         std::vector<TokKind>{ TokKind::Star, TokKind::Slash, TokKind::End });
 
-  // And inside a string it is text, which is what a label needs.
+  // Inside a string, `/*` is text.
   Lexed const in_string{ lex_text(R"("/* verbatim */")") };
   CHECK(in_string.ok);
   CHECK(in_string.diags.empty());
@@ -311,8 +301,6 @@ TEST_CASE("lex: an unterminated string stops the scan but still ends the stream"
   Lexed const r{ lex_text(R"(state "oops)") };
   CHECK_FALSE(r.ok);
   CHECK(first_code(r.diags) == DiagCode::UnterminatedString);
-  // The End sentinel is owed even on the failure path, or lookahead has nothing
-  // to stop at.
   REQUIRE_FALSE(r.result.tokens.empty());
   CHECK(r.result.tokens.back().kind == TokKind::End);
 }
@@ -371,14 +359,11 @@ TEST_CASE("decode: an unknown escape is rejected rather than passed through") {
   CHECK_FALSE(d.ok);
   CHECK(first_code(d.diags) == DiagCode::UnknownEscape);
   CHECK(d.text.empty());
-  // \r is deliberately absent: normalization folds line endings, so a literal
-  // carriage return would survive the fold the rest of the file went through.
   CHECK(first_code(decode(R"("a\rb")").diags) == DiagCode::UnknownEscape);
 }
 
 TEST_CASE("decode: a span ending mid-escape is rejected rather than read past") {
-  // The lexer cannot produce this, but the decoder takes an arbitrary span, so
-  // the guard is what keeps a hand-built one from reading past its end.
+  // The lexer never produces this span; its body `ab\` ends mid-escape.
   std::string_view const bytes{ R"("ab\")" };
   std::vector<scav_byte> out;
   std::vector<Diagnostic> diags;
@@ -402,15 +387,12 @@ TEST_CASE("decode: a surrogate escape names the fix instead of encoding garbage"
         DiagCode::EscapedSurrogate);
   CHECK(first_code(decode(in_quotes(u_escape(0xDFFF))).diags) ==
         DiagCode::EscapedSurrogate);
-  // No pairing either: an astral character is written directly, so there is one
-  // spelling of it rather than two.
+  // An escaped surrogate pair is rejected too.
   CHECK(first_code(decode(in_quotes(u_escape(0xD83D) + u_escape(0xDE00))).diags) ==
         DiagCode::EscapedSurrogate);
 }
 
 TEST_CASE("decode: an escape decoding to a decomposed sequence is NFC-folded") {
-  // The source bytes were folded on read, but \u runs after that. Without this
-  // the pool would hold two spellings of one string.
   Decoded const d{ decode(in_quotes("e" + u_escape(0x0301))) };
   CHECK(d.ok);
   CHECK(d.text == "\xc3\xa9");
@@ -445,8 +427,6 @@ TEST_CASE("decode: a blank line in a raw string is clamped, not rejected") {
 }
 
 TEST_CASE("decode: a line indented less than the closing delimiter is an error") {
-  // Silently clamping would change the text the author wrote, which is exactly
-  // what a raw string exists to prevent.
   Decoded const d{ decode("\"\"\"\n    one\n  two\n    \"\"\"") };
   CHECK_FALSE(d.ok);
   CHECK(first_code(d.diags) == DiagCode::RawStringUnderIndented);
@@ -465,8 +445,7 @@ TEST_CASE("decode: text on the opening line is kept as written") {
 }
 
 TEST_CASE("decode: a raw string keeps a trailing blank content line") {
-  // Only the closing delimiter's own line is dropped; a blank line before it is
-  // content the author asked for.
+  // Only the closing delimiter's line is dropped; a blank line before it is kept.
   Decoded const d{ decode("\"\"\"\n  one\n\n  \"\"\"") };
   CHECK(d.ok);
   CHECK(d.text == "one\n");
@@ -519,8 +498,6 @@ TEST_CASE("lex_footprint: grows with the token count and never with nothing") {
 }
 
 TEST_CASE("lex: the whole stream is materialized, not pulled") {
-  // Asserted rather than assumed: every token exists before the parser sees any,
-  // which is what lets the two be timed and fuzzed apart.
   Lexed const r{ lex_text("chart c { state A, }") };
   CHECK(r.result.tokens.size() == 8);
   CHECK(sizeof(Token) == 12);

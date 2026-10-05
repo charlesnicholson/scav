@@ -9,11 +9,6 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[3]
 CHARTS = Path("test_data/charts")  # relative to REPO_ROOT, scav's cwd, so dumps name documents that way
 
-TIER0 = ["through_box", "box_overlap", "flush", "through_region", "retrace",
-         "label_over_box", "label_over_route"]
-TERMS = ["bends", "corridor", "crossings", "excess_len", "adjacency", "label",
-         "label_near", "aspect", "area", "crowding", "length", "transit_bends",
-         "whitespace"]
 
 
 @dataclass
@@ -173,9 +168,9 @@ def model_summary(doc: dict) -> dict:
 def cost_of(g: dict) -> dict:
     c = g["cost"]
     return {"t0": c["t0_violations"], "t1": None, "t2": c["t2"],
-            "tier0": {k: c[k] for k in TIER0},
-            "terms": {k: c[k] for k in TERMS},
-            "shares_bp": dict(zip(TERMS, c["shares_bp"]))}
+            "tier0": dict(c["tier0"]),
+            "terms": dict(c["tier2"]), "shares_bp": dict(c["shares_bp"]),
+            "em_power": dict(c["em_power"])}
 
 
 def downs_from_pins(rests_on: str) -> set:
@@ -193,7 +188,10 @@ def geometry(scav: Scav, name: str, flags=(), scale="text", with_svg=True) -> tu
            "pin_list": pin_list(g["rests_on"]),
            "box": g["chart"], "hash": {"structural": g["structural_hash"],
                                       "coordinate": g["coordinate_hash"]},
-           "cost": cost_of(g), "label_leader": g["label_leader"]}
+           "cost": cost_of(g), "profile": g["profile"],
+           "label_leader": g["profile"]["label_leader"],
+           "occupied": [{"state": o[0], "face": o[1], "lo": o[2], "hi": o[2] + o[3]}
+                        for o in g["occupied"]]}
     placed = dict(zip(g["placed_subject"], g["placed"]))
     prims = parse_svg(scav.render(name, flags)) if with_svg else None
     by = {}
@@ -209,6 +207,9 @@ def geometry(scav: Scav, name: str, flags=(), scale="text", with_svg=True) -> tu
             "id": i, "name": s["name"], "label": s["label"], "path": paths[i], "kind": s["kind"],
             "parent_sub": s["parent"], "submachines": s["submachines"], "live": s["live"],
             "rect": g["state"][i], "before": g["state_before"][i], "after": g["state_after"][i],
+            "lead": g["state_lead"][i], "trail": g["state_trail"][i],
+            "loop": g["state_loop"][i], "loop_place": g["state_loop_place"][i],
+            "ruled": g["state_ruled"][i], "corner": g["state_corner"][i],
             "text": [p["text"] for p in draw if p["el"] == "text"],
             "draw": draw})
     rec["subs"] = []
@@ -225,7 +226,7 @@ def geometry(scav: Scav, name: str, flags=(), scale="text", with_svg=True) -> tu
             "live": t["live"], "points": g["route"][i] if i < len(g["route"]) else [],
             "ports": [{"at": [p[0], p[1]], "side": p[2], "depth": p[3]}
                       for p in (g["port"][i] if i < len(g["port"]) else [])],
-            "label_box": placed.get(i),
+            "label_box": placed.get(i), "clear": g["path_clear"][i],
             "draw": by.get(("trans", i), [])})
     return rec, doc
 

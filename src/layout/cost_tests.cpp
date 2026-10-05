@@ -1,6 +1,4 @@
-// Scoring against hand-written geometry: two rects and one route are enough
-// to assert a single term, with no model beyond the entities they belong to
-// and no pipeline run to produce them.
+// Cost-term tests on hand-written rects and routes over minimal charts.
 
 #include "layout/cost.h"
 
@@ -25,9 +23,7 @@
 
 namespace scav {
 
-// The containment walk, the grid and the three sweeps `cost.cpp` brackets with
-// SCAV_INTERNAL, declared here rather than in a header so the shipping build
-// keeps them internal.
+// Test-only prototypes of the SCAV_INTERNAL functions in `cost.cpp`.
 Ancestry cost_flatten_ancestry(Chart const &c);
 bool cost_ancestor(Chart const &c, Ancestry const &an, StateId ancestor, StateId of);
 ChildGrid cost_child_grid(Chart const &c, SizedLayout const &z);
@@ -79,8 +75,7 @@ Routes routes_of(Chart const &c, std::vector<std::vector<scav_point>> const &lin
   return r;
 }
 
-// The flat segment list `cost_terms` builds, so a sweep taking one can be
-// handed a route rather than a hand-numbered table.
+// Splits `r` into the flat segment list `cost_terms` builds, in transition order.
 std::vector<Piece> pieces_of(Routes const &r) {
   std::vector<Piece> out;
   for (uint32_t t = 0; t < r.route.size(); ++t) {
@@ -102,7 +97,7 @@ TEST_CASE("cost: a straight route between two boxes costs its length and the cha
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c) };
   z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 40 };
@@ -126,7 +121,7 @@ TEST_CASE("cost: a corner in a polyline is one bend") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c) };
   Routes const r{
@@ -134,7 +129,7 @@ TEST_CASE("cost: a corner in a polyline is one bend") {
   };
   CHECK(cost_terms(c, decompose(c), z, r, {}, profile()).bends == 1);
 
-  // Three points on one line change no direction, so they are not a bend.
+  // Three collinear points make no bend.
   Routes const straight{
     routes_of(c, { { { .x = 0, .y = 0 }, { .x = 50, .y = 0 }, { .x = 100, .y = 0 } } })
   };
@@ -143,8 +138,8 @@ TEST_CASE("cost: a corner in a polyline is one bend") {
 
 namespace {
 
-// Src in the root and Dst two composites down, so Src -> Dst only passes through Arm;
-// then Dst -> Src, and Src -> Arm, which ends at Arm.
+// Src in the root, Dst inside Moving inside Arm: Src -> Dst passes through Arm only.
+// Then Dst -> Src, and Src -> Arm.
 struct Transit {
   Chart c;
   StateId src, arm, moving, dst;
@@ -161,9 +156,9 @@ Transit transit_chart() {
   out.moving = build_state(c, arm_m, "Moving", StateKind::Normal, {});
   SubmachineId const travel{ build_submachine(c, out.moving, "travel", {}) };
   out.dst = build_state(c, travel, "Dst", StateKind::Normal, {});
-  build_trans(c, out.src, out.dst, TransKind::External, {});
-  build_trans(c, out.dst, out.src, TransKind::External, {});
-  build_trans(c, out.src, out.arm, TransKind::External, {});
+  build_trans(c, out.src, out.dst, TransKind::Default, {});
+  build_trans(c, out.dst, out.src, TransKind::Default, {});
+  build_trans(c, out.src, out.arm, TransKind::Default, {});
   out.z = blank(c);
   out.z.state[out.src.v] = { .x = 0, .y = 100, .w = 100, .h = 60 };
   out.z.state[out.arm.v] = { .x = 200, .y = 0, .w = 600, .h = 400 };
@@ -193,7 +188,7 @@ TEST_CASE("cost: a crossing route's bend in the common ancestor costs nothing ex
   CostTerms const t{ transit_terms(k, { jog_at(150) }) };
   CHECK(t.bends == 2);
   CHECK(t.transit_bends == 0);
-  // On Arm's border is not inside it.
+  // A bend on Arm's border is outside Arm.
   CHECK(transit_terms(k, { jog_at(200) }).transit_bends == 0);
 }
 
@@ -202,7 +197,7 @@ TEST_CASE("cost: a crossing route's bend in a state it only passes through costs
   CostTerms const t{ transit_terms(k, { jog_at(250) }) };
   CHECK(t.bends == 2);
   CHECK(t.transit_bends == 2);
-  // Scored on top of the bends themselves.
+  // Each transit bend adds `w_transit_bends` to t2.
   scav_profile const p{ profile() };
   CHECK((cost_of(t, p).t2 - cost_of(transit_terms(k, { jog_at(150) }), p).t2) ==
         (2 * int64_t{ p.w_transit_bends }));
@@ -220,15 +215,14 @@ TEST_CASE("cost: a crossing route's bend in an end's own machine costs nothing e
   CostTerms const t{ transit_terms(k, { jog_at(350) }) };
   CHECK(t.bends == 2);
   CHECK(t.transit_bends == 0);
-  // Inside the end itself.
+  // One bend inside Dst itself.
   CHECK(transit_terms(k,
                       { { { .x = 100, .y = 130 },
                           { .x = 450, .y = 130 },
                           { .x = 450, .y = 230 },
                           { .x = 400, .y = 230 } } })
             .transit_bends == 0);
-  // Src -> Arm ends at the state the other routes pass through, so inside it
-  // is inside its own end.
+  // Src -> Arm: its bends inside Arm are inside its own end.
   CHECK(transit_terms(k,
                       { {},
                         {},
@@ -246,8 +240,8 @@ TEST_CASE("cost: two routes that properly cross count once") {
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
   StateId const e{ build_state(c, root, "E", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, d, e, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, d, e, TransKind::Default, {});
 
   SizedLayout z{ blank(c) };
   Routes const r{ routes_of(c,
@@ -264,13 +258,13 @@ TEST_CASE("cost: two routes that properly cross count once") {
 
 namespace {
 
-// `n` transitions between two states, which is all `corridor` reads of a model.
+// `n` transitions from A to B.
 Chart edges(uint32_t n) {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  for (uint32_t i = 0; i < n; ++i) { build_trans(c, a, b, TransKind::External, {}); }
+  for (uint32_t i = 0; i < n; ++i) { build_trans(c, a, b, TransKind::Default, {}); }
   return c;
 }
 
@@ -287,7 +281,7 @@ TEST_CASE(
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  for (uint32_t i = 0; i < 4; ++i) { build_trans(c, a, b, TransKind::External, {}); }
+  for (uint32_t i = 0; i < 4; ++i) { build_trans(c, a, b, TransKind::Default, {}); }
 
   SizedLayout const z{ blank(c) };
   Routes const r{ routes_of(
@@ -298,7 +292,7 @@ TEST_CASE(
         { { .x = 1000, .y = 1000 }, { .x = 1100, .y = 1000 } } }) };
   SplitGraph const g{ decompose(c) };
   std::vector<uint8_t> party;
-  CostTerms const t{ cost_terms(cost_context(c), c, g, z, r, {}, profile(), &party) };
+  CostTerms const t{ cost_terms(cost_context(c, g), c, g, z, r, {}, profile(), &party) };
   CHECK(t.crossings == 1);
   CHECK(t.bends == 1);
   REQUIRE(party.size() == 4);
@@ -316,9 +310,14 @@ TEST_CASE(
         { { .x = 0, .y = 1000 }, { .x = 1000, .y = 1000 } },
         { { .x = 0, .y = 1096 }, { .x = 1000, .y = 1096 } } }) };
   SplitGraph const g4{ decompose(four) };
-  CostTerms const u{
-    cost_terms(cost_context(four), four, g4, blank(four), shared, {}, profile(), &party)
-  };
+  CostTerms const u{ cost_terms(cost_context(four, g4),
+                                four,
+                                g4,
+                                blank(four),
+                                shared,
+                                {},
+                                profile(),
+                                &party) };
   CHECK(u.bends == 0);
   CHECK(u.crossings == 0);
   CHECK(u.excess_len == 0);
@@ -337,8 +336,8 @@ TEST_CASE("cost: party marks every transition while the drawing breaks Tier 0") 
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const other{ build_state(c, root, "X", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c) };
   z.state[a.v] = { .x = 0, .y = 0, .w = 20, .h = 2000 };
@@ -349,15 +348,15 @@ TEST_CASE("cost: party marks every transition while the drawing breaks Tier 0") 
                               { { .x = 20, .y = 1500 }, { .x = 400, .y = 1500 } } }) };
   SplitGraph const g{ decompose(c) };
   std::vector<uint8_t> party;
-  CostTerms t{ cost_terms(cost_context(c), c, g, z, r, {}, profile(), &party) };
+  CostTerms t{ cost_terms(cost_context(c, g), c, g, z, r, {}, profile(), &party) };
   CHECK(t.through_box == 1);
   REQUIRE(party.size() == 2);
   CHECK(party[0] != 0);
   CHECK(party[1] != 0);
 
-  // The stranger moved clear leaves both straight, unpriced and unmarked.
+  // X moved clear: no Tier-0 count, and neither route is marked.
   z.state[other.v] = { .x = 150, .y = 3000, .w = 100, .h = 100 };
-  t = cost_terms(cost_context(c), c, g, z, r, {}, profile(), &party);
+  t = cost_terms(cost_context(c, g), c, g, z, r, {}, profile(), &party);
   CHECK(cost_of(t, profile()).t0_violations == 0);
   REQUIRE(party.size() == 2);
   CHECK(party[0] == 0);
@@ -366,16 +365,14 @@ TEST_CASE("cost: party marks every transition while the drawing breaks Tier 0") 
 
 TEST_CASE("cost: two routes ending as one line are not charged for the run they share") {
   Chart const c{ edges(2) };
-  // Both turn up onto x=500 and finish at the same point, so the 20 they share
-  // is one line fanning in rather than two lines side by side.
+  // Both turn onto x=500 and end at one point; the 20 they share there costs nothing.
   CHECK(corridor_of(
             c,
             { { { .x = 0, .y = 60 }, { .x = 500, .y = 60 }, { .x = 500, .y = 100 } },
               { { .x = 0, .y = 80 }, { .x = 500, .y = 80 }, { .x = 500, .y = 100 } } }) ==
         0);
 
-  // One unit short of the same point: the same 20 units of one line, now with
-  // two ends on it.
+  // The second ends one unit past the first's end; the 20 they share on x=500 is charged.
   CHECK(corridor_of(
             c,
             { { { .x = 0, .y = 60 }, { .x = 500, .y = 60 }, { .x = 500, .y = 100 } },
@@ -385,8 +382,7 @@ TEST_CASE("cost: two routes ending as one line are not charged for the run they 
 
 TEST_CASE("cost: a shared endpoint alone exempts nothing") {
   Chart const c{ edges(2) };
-  // The two reach (200,300) at right angles, so neither last leg joins the
-  // other's run and the 100 they share upstream is two lines on one line.
+  // Both end at (200,300) at right angles; the 100 they share along y=100 is charged.
   CHECK(corridor_of(
             c,
             { { { .x = 0, .y = 100 }, { .x = 200, .y = 100 }, { .x = 200, .y = 300 } },
@@ -410,7 +406,7 @@ TEST_CASE("cost: a run upstream of the merge is charged and the merge is not") {
                                                    { .x = 500, .y = 80 },
                                                    { .x = 500, .y = end_y } } };
   };
-  // 200 along y=0 before either turns off it, and 20 where they finish as one.
+  // The 200 shared along y=0 is charged; the 20 shared on x=500 only when the ends differ.
   CHECK(corridor_of(c, lines(100)) == 200);
   CHECK(corridor_of(c, lines(101)) == 220);
 }
@@ -423,9 +419,8 @@ TEST_CASE("cost: two routes leaving as one line are charged for it") {
       { { .x = start_x, .y = 0 }, { .x = 150, .y = 0 }, { .x = 150, .y = -100 } }
     };
   };
-  // A fan-out is not the exemption (11.9.3): these two leave one state and
-  // part, so sharing the start buys nothing. The run is 150 either way, where
-  // one unit of offset used to be free against charged.
+  // Routes leaving one state on one line are charged: 150 from a shared start,
+  // 149 with the starts one unit apart.
   CHECK(corridor_of(c, lines(0)) == 150);
   CHECK(corridor_of(c, lines(1)) == 149);
 }
@@ -456,13 +451,12 @@ TEST_CASE("cost: two routes with the same polyline are one trunk end to end") {
 
 TEST_CASE("cost: a route arriving as another's last leg is trunk, its head is not") {
   Chart const c{ edges(2) };
-  // A degraded net is a straight line (11.5); along another's final leg it is
-  // the arrival they share, not a second lane.
+  // The second route is the first's final leg alone: trunk, uncharged.
   CHECK(corridor_of(c,
                     { { { .x = 0, .y = 0 }, { .x = 200, .y = 0 }, { .x = 200, .y = 100 } },
                       { { .x = 200, .y = 0 }, { .x = 200, .y = 100 } } }) == 0);
-  // The head is charged now (11.9.3): two routes leaving one state as one line
-  // go somewhere ambiguous. The 200 along y=0 is that fan-out.
+  // The second route is the first's opening leg alone; the 200 they share on y=0 is
+  // charged.
   CHECK(corridor_of(c,
                     { { { .x = 0, .y = 0 }, { .x = 200, .y = 0 }, { .x = 200, .y = 100 } },
                       { { .x = 0, .y = 0 }, { .x = 200, .y = 0 } } }) == 200);
@@ -470,8 +464,8 @@ TEST_CASE("cost: a route arriving as another's last leg is trunk, its head is no
 
 TEST_CASE("cost: a run the two find again after they part is charged") {
   Chart const c{ edges(2) };
-  // 100 along y=0 out of the shared start, charged now (11.9.3), and 100 more
-  // along y=100 where they meet again -- two lanes on one line either way.
+  // The 100 shared along y=0 from the common start and the 100 shared along y=100
+  // where they meet again are both charged.
   CHECK(corridor_of(c,
                     { { { .x = 0, .y = 0 },
                         { .x = 200, .y = 0 },
@@ -487,8 +481,8 @@ TEST_CASE("cost: a run the two find again after they part is charged") {
 
 TEST_CASE("cost: a run against the trunk is charged and the trunk is not") {
   Chart const c{ edges(2) };
-  // The second crosses x=400 on its way round and joins it later; the 50 it
-  // spends on the trunk before joining it is one lane over another.
+  // The second runs 50 along the trunk at x=400 before looping round to join it;
+  // that 50 is charged.
   CHECK(
       corridor_of(c,
                   { { { .x = 300, .y = 0 }, { .x = 400, .y = 0 }, { .x = 400, .y = 100 } },
@@ -501,11 +495,44 @@ TEST_CASE("cost: a run against the trunk is charged and the trunk is not") {
                       { .x = 400, .y = 100 } } }) == 50);
 }
 
+TEST_CASE("cost: two routes on one line with different ends are a Tier-0 shared run") {
+  Chart const c{ edges(2) };
+  SizedLayout const z{ blank(c) };
+  auto const terms = [&c, &z](std::vector<std::vector<scav_point>> const &lines) {
+    return cost_terms(c, decompose(c), z, routes_of(c, lines), {}, profile());
+  };
+  // Different starts and ends, 100 shared along x=200.
+  CostTerms const apart{ terms({ { { .x = 0, .y = 0 },
+                                   { .x = 200, .y = 0 },
+                                   { .x = 200, .y = 300 },
+                                   { .x = 400, .y = 300 } },
+                                 { { .x = 0, .y = 100 },
+                                   { .x = 200, .y = 100 },
+                                   { .x = 200, .y = 200 },
+                                   { .x = 400, .y = 200 } } }) };
+  CHECK(apart.shared_run == 1);
+  CHECK(apart.corridor == 100);
+  CHECK(cost_of(apart, profile()).t0_violations == 1);
+
+  // A fan-in along its final leg.
+  CostTerms const fan_in{ terms(
+      { { { .x = 0, .y = 0 }, { .x = 200, .y = 0 }, { .x = 200, .y = 300 } },
+        { { .x = 100, .y = 100 }, { .x = 200, .y = 100 }, { .x = 200, .y = 300 } } }) };
+  CHECK(fan_in.shared_run == 0);
+  CHECK(fan_in.corridor == 0);
+
+  // A fan-out along its first leg: priced by `corridor`, permitted by Tier 0.
+  CostTerms const fan_out{ terms(
+      { { { .x = 0, .y = 0 }, { .x = 200, .y = 0 }, { .x = 200, .y = 100 } },
+        { { .x = 0, .y = 0 }, { .x = 100, .y = 0 }, { .x = 100, .y = 100 } } }) };
+  CHECK(fan_out.shared_run == 0);
+  CHECK(fan_out.corridor == 100);
+  CHECK(cost_of(fan_out, profile()).t0_violations == 0);
+}
+
 TEST_CASE("cost: a degraded net's diagonal is no one's merge leg") {
   Chart const c{ edges(2) };
-  // A degraded net is a straight line (11.5), so a trunk can be reached over one.
-  // The common suffix is still a trunk; the diagonals into it are not, so the
-  // 200 the two share along y=200 is charged and the 100 they share is not.
+  // Only the shared final leg on x=400 is trunk; the 200 shared along y=200 is charged.
   CHECK(corridor_of(c,
                     { { { .x = 0, .y = 200 },
                         { .x = 300, .y = 200 },
@@ -522,14 +549,14 @@ TEST_CASE("cost: only the excess over the direct distance is charged") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c) };
-  // Straight: length equals the direct distance, so nothing is charged.
+  // Straight: length equals the direct distance, excess 0.
   Routes const direct{ routes_of(c, { { { .x = 0, .y = 0 }, { .x = 300, .y = 0 } } }) };
   CHECK(cost_terms(c, decompose(c), z, direct, {}, profile()).excess_len == 0);
 
-  // A detour of 100 each way over a 300 span costs exactly what it added.
+  // A detour 100 off the line over a 300 span is charged its added length.
   Routes const around{
     routes_of(c, { { { .x = 0, .y = 0 }, { .x = 150, .y = 100 }, { .x = 300, .y = 0 } } })
   };
@@ -578,7 +605,7 @@ TEST_CASE("cost: an edge through a stranger's box counts, through its own does n
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const other{ build_state(c, root, "X", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c) };
   z.state[a.v] = { .x = 0, .y = 0, .w = 20, .h = 20 };
@@ -587,8 +614,7 @@ TEST_CASE("cost: an edge through a stranger's box counts, through its own does n
   Routes const r{ routes_of(c, { { { .x = 10, .y = 10 }, { .x = 410, .y = 10 } } }) };
   CHECK(cost_terms(c, decompose(c), z, r, {}, profile()).through_box == 1);
 
-  // The same route with the stranger moved out of the way, and the route
-  // still leaving its own two endpoint boxes, which are carved out (11.14).
+  // X moved clear of the route; the route's own endpoint boxes are carved out.
   z.state[other.v] = { .x = 150, .y = 500, .w = 100, .h = 100 };
   CHECK(cost_terms(c, decompose(c), z, r, {}, profile()).through_box == 0);
 }
@@ -600,22 +626,20 @@ TEST_CASE(
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const other{ build_state(c, root, "X", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c) };
   z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 40 };
   z.state[b.v] = { .x = 400, .y = 0, .w = 100, .h = 40 };
   z.state[other.v] = { .x = 200, .y = 20, .w = 100, .h = 100 };
-  // Along the stranger's top edge: nothing enters it, so only this sees it.
+  // Along X's top edge.
   Routes const along{ routes_of(c, { { { .x = 100, .y = 20 }, { .x = 400, .y = 20 } } }) };
   CostTerms const t{ cost_terms(c, decompose(c), z, along, {}, profile()) };
   CHECK(t.through_box == 0);
   CHECK(t.flush == 1);
   CHECK(cost_of(t, profile()).t0_violations == 1);
 
-  // Clear of it by the band a route keeps inside a state is clear; one unit
-  // nearer is on it, because a reader cannot tell a line a unit off a border
-  // from the border (11.10g).
+  // A route `border_band` from the border is clear; one unit nearer is flush.
   int32_t const band{ border_band(profile()) };
   REQUIRE(band > 1);
   Routes const clear{
@@ -627,7 +651,7 @@ TEST_CASE(
   };
   CHECK(cost_terms(c, decompose(c), z, near, {}, profile()).flush == 1);
 
-  // Along its own endpoint's border counts as well: a reader sees the border.
+  // A run along its own endpoint's border is flush as well.
   Routes const own{ routes_of(c,
                               { { { .x = 50, .y = 0 },
                                   { .x = 100, .y = 0 },
@@ -637,14 +661,47 @@ TEST_CASE(
   CHECK(cost_terms(c, decompose(c), z, own, {}, profile()).flush == 1);
 }
 
+TEST_CASE(
+    "cost: flush counts a run nearer than pad to a border, inside the state or out") {
+  // `Box` holds A and B; `A -> B` runs along Box's top border at each offset from it,
+  // negative above it and positive inside it.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const box{ build_state(c, root, "Box", StateKind::Normal, {}) };
+  SubmachineId const inner{ build_submachine(c, box, {}, {}) };
+  StateId const a{ build_state(c, inner, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, inner, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::Default, {});
+
+  scav_profile const p{ profile() };
+  SizedLayout z{ blank(c) };
+  z.state[box.v] = { .x = 0, .y = 0, .w = 2000, .h = 1000 };
+  z.sub[inner.v] = { .x = p.pad,
+                     .y = p.pad,
+                     .w = 2000 - (2 * p.pad),
+                     .h = 1000 - (2 * p.pad) };
+  z.state[a.v] = { .x = 400, .y = 600, .w = 200, .h = 200 };
+  z.state[b.v] = { .x = 1400, .y = 600, .w = 200, .h = 200 };
+  for (int32_t const off : { -p.pad, 1 - p.pad, p.pad - 1, p.pad }) {
+    CAPTURE(off);
+    Routes const r{ routes_of(c,
+                              { { { .x = 500, .y = 600 },
+                                  { .x = 500, .y = off },
+                                  { .x = 1500, .y = off },
+                                  { .x = 1500, .y = 600 } } }) };
+    bool const near{ (off > -p.pad) && (off < p.pad) };
+    CHECK(cost_terms(c, decompose(c), z, r, {}, p).flush == (near ? 1 : 0));
+  }
+}
+
 TEST_CASE("cost: a route that turns straight back along itself is a Tier-0 violation") {
-  // Down to a port and back up the same line reads as two routes meeting, not
-  // one turning; a square turn and a U through a jog are both still turns.
+  // A leg that reverses along the previous leg is a retrace; a square turn and a U
+  // through a jog are not.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
   SizedLayout z{ blank(c) };
   z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 40 };
   z.state[b.v] = { .x = 400, .y = 0, .w = 100, .h = 40 };
@@ -669,11 +726,83 @@ TEST_CASE("cost: a route that turns straight back along itself is a Tier-0 viola
   CHECK(cost_terms(c, decompose(c), z, turns, {}, profile()).retrace == 0);
 }
 
+TEST_CASE("cost: a route that crosses itself is a Tier-0 violation") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::Default, {});
+  scav_profile p{ profile() };
+  p.pad = 8;  // under every gap between these routes and the boxes
+  SizedLayout z{ blank(c) };
+  z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 40 };
+  z.state[b.v] = { .x = 400, .y = 0, .w = 100, .h = 40 };
+
+  // Right, down, left, then up across the first leg.
+  Routes const knot{ routes_of(c,
+                               { { { .x = 100, .y = 20 },
+                                   { .x = 300, .y = 20 },
+                                   { .x = 300, .y = 100 },
+                                   { .x = 200, .y = 100 },
+                                   { .x = 200, .y = -50 },
+                                   { .x = 450, .y = -50 },
+                                   { .x = 450, .y = 0 } } }) };
+  CostTerms const t{ cost_terms(c, decompose(c), z, knot, {}, p) };
+  CHECK(t.self_crossing == 1);
+  CHECK(t.retrace == 0);
+  CHECK(cost_of(t, p).t0_violations == 1);
+
+  Routes const square{ routes_of(c,
+                                 { { { .x = 100, .y = 20 },
+                                     { .x = 300, .y = 20 },
+                                     { .x = 300, .y = 100 },
+                                     { .x = 450, .y = 100 },
+                                     { .x = 450, .y = 40 } } }) };
+  CHECK(cost_terms(c, decompose(c), z, square, {}, p).self_crossing == 0);
+}
+
+TEST_CASE("cost: an external route between two regions that crosses their divider") {
+  // `On` holds regions `main` and `aux` side by side; `A` in `main` goes to `B` in `aux`.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const on{ build_state(c, root, "On", StateKind::Normal, {}) };
+  SubmachineId const main_sub{ build_submachine(c, on, "main", {}) };
+  SubmachineId const aux_sub{ build_submachine(c, on, "aux", {}) };
+  StateId const a{ build_state(c, main_sub, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, aux_sub, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+
+  SizedLayout z{ blank(c) };
+  z.state[on.v] = { .x = 0, .y = 0, .w = 400, .h = 200 };
+  z.sub[main_sub.v] = { .x = 10, .y = 10, .w = 180, .h = 180 };
+  z.sub[aux_sub.v] = { .x = 210, .y = 10, .w = 180, .h = 180 };
+  z.state[a.v] = { .x = 40, .y = 60, .w = 100, .h = 40 };
+  z.state[b.v] = { .x = 240, .y = 140, .w = 100, .h = 40 };
+  auto const regions = [&](Routes const &r) {
+    return cost_terms(c, decompose(c), z, r, {}, profile()).through_region;
+  };
+
+  // Out of `On` on the left, back in on the left, then across `main` and the divider.
+  Routes const across{ routes_of(c,
+                                 { { { .x = 40, .y = 80 },
+                                     { .x = -50, .y = 80 },
+                                     { .x = -50, .y = 160 },
+                                     { .x = 240, .y = 160 } } }) };
+  CHECK(regions(across) == 1);
+  // Out of `main` downward, round below `On` and up into `aux`.
+  CHECK(regions(routes_of(c,
+                          { { { .x = 90, .y = 100 },
+                              { .x = 90, .y = 260 },
+                              { .x = 290, .y = 260 },
+                              { .x = 290, .y = 180 } } })) == 0);
+  // A transition of the default kind crosses the divider by design.
+  c.transitions[0].kind = TransKind::Default;
+  CHECK(regions(across) == 0);
+}
+
 TEST_CASE("cost: a route through a region neither end is in is a Tier-0 violation") {
-  // `On` holds two concurrent regions side by side, and a transition leaves
-  // `Ready` in the left one for `X` outside. Crossing the right region is
-  // crossing a state nobody is in; `through_box` excuses it because `On` is
-  // an ancestor of the source.
+  // `On` holds regions `main` and `aux`; `Ready` in `main` goes to `X` outside.
+  // Crossing `aux` is a `through_region` violation; `through_box` skips ancestor `On`.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const on{ build_state(c, root, "On", StateKind::Normal, {}) };
@@ -682,7 +811,7 @@ TEST_CASE("cost: a route through a region neither end is in is a Tier-0 violatio
   StateId const ready{ build_state(c, main_sub, "Ready", StateKind::Normal, {}) };
   StateId const idle{ build_state(c, aux_sub, "Idle", StateKind::Normal, {}) };
   StateId const x{ build_state(c, root, "X", StateKind::Normal, {}) };
-  build_trans(c, ready, x, TransKind::External, {});
+  build_trans(c, ready, x, TransKind::Default, {});
 
   SizedLayout z{ blank(c) };
   z.state[on.v] = { .x = 0, .y = 0, .w = 400, .h = 200 };
@@ -695,10 +824,12 @@ TEST_CASE("cost: a route through a region neither end is in is a Tier-0 violatio
   // Straight out through `aux`, missing `Idle` itself.
   Routes const through{ routes_of(c,
                                   { { { .x = 140, .y = 80 }, { .x = 600, .y = 80 } } }) };
-  CostTerms const t{ cost_terms(c, decompose(c), z, through, {}, profile()) };
+  scav_profile ring{ profile() };
+  ring.pad = 10;  // the fixture's ring
+  CostTerms const t{ cost_terms(c, decompose(c), z, through, {}, ring) };
   CHECK(t.through_box == 0);
   CHECK(t.through_region == 1);
-  CHECK(cost_of(t, profile()).t0_violations == 1);
+  CHECK(cost_of(t, ring).t0_violations == 1);
 
   // Out of `main` downward and round below `On`: its own region, then outside.
   Routes const round{ routes_of(c,
@@ -707,6 +838,96 @@ TEST_CASE("cost: a route through a region neither end is in is a Tier-0 violatio
                                     { .x = 650, .y = 260 },
                                     { .x = 650, .y = 100 } } }) };
   CHECK(cost_terms(c, decompose(c), z, round, {}, profile()).through_region == 0);
+
+  // `On` made a child of its own region `main`: the climb from `Ready` cycles until the
+  // step cap ends it.
+  c.states[on.v].parent = main_sub;
+  CHECK(cost_terms(c, decompose(c), z, through, {}, profile()).through_region == 1);
+}
+
+TEST_CASE("cost: a route along its owner's border beside a sibling region crosses it") {
+  // `On` stacks `main` over `aux`; `Ready` in `main` goes to `X`, level with `aux`.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const on{ build_state(c, root, "On", StateKind::Normal, {}) };
+  SubmachineId const main_sub{ build_submachine(c, on, "main", {}) };
+  SubmachineId const aux_sub{ build_submachine(c, on, "aux", {}) };
+  StateId const ready{ build_state(c, main_sub, "Ready", StateKind::Normal, {}) };
+  StateId const x{ build_state(c, root, "X", StateKind::Normal, {}) };
+  build_trans(c, ready, x, TransKind::Default, {});
+
+  SizedLayout z{ blank(c) };
+  z.state[on.v] = { .x = 0, .y = 0, .w = 400, .h = 200 };
+  z.sub[main_sub.v] = { .x = 20, .y = 10, .w = 360, .h = 80 };
+  z.sub[aux_sub.v] = { .x = 20, .y = 110, .w = 360, .h = 80 };
+  z.state[ready.v] = { .x = 60, .y = 30, .w = 100, .h = 40 };
+  z.state[x.v] = { .x = -300, .y = 130, .w = 100, .h = 40 };
+  auto const regions = [&](Routes const &r) {
+    return cost_terms(c, decompose(c), z, r, {}, profile()).through_region;
+  };
+
+  // Down the pad ring past the divider, outside both region rects, then out: two pieces.
+  CHECK(regions(routes_of(c,
+                          { { { .x = 60, .y = 50 },
+                              { .x = 10, .y = 50 },
+                              { .x = 10, .y = 150 },
+                              { .x = -200, .y = 150 } } })) == 2);
+  // Out of `On` level with `main`, then down outside it.
+  CHECK(regions(routes_of(c,
+                          { { { .x = 60, .y = 50 },
+                              { .x = -100, .y = 50 },
+                              { .x = -100, .y = 150 },
+                              { .x = -200, .y = 150 } } })) == 0);
+}
+
+TEST_CASE("cost: a region is tested where the descent reaches its owner") {
+  // `Shell` holds `On`, which holds regions `main` and `aux`; `Ready` in `main` goes to
+  // `X` outside.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const shell{ build_state(c, root, "Shell", StateKind::Normal, {}) };
+  SubmachineId const in{ build_submachine(c, shell, "in", {}) };
+  StateId const on{ build_state(c, in, "On", StateKind::Normal, {}) };
+  SubmachineId const main_sub{ build_submachine(c, on, "main", {}) };
+  SubmachineId const aux_sub{ build_submachine(c, on, "aux", {}) };
+  StateId const ready{ build_state(c, main_sub, "Ready", StateKind::Normal, {}) };
+  StateId const x{ build_state(c, root, "X", StateKind::Normal, {}) };
+  build_trans(c, ready, x, TransKind::Default, {});
+
+  SizedLayout z{ blank(c) };
+  z.state[shell.v] = { .x = -10, .y = -10, .w = 420, .h = 220 };
+  z.sub[in.v] = { .x = -5, .y = -5, .w = 410, .h = 210 };
+  z.state[on.v] = { .x = 0, .y = 0, .w = 400, .h = 200 };
+  z.sub[main_sub.v] = { .x = 10, .y = 10, .w = 180, .h = 180 };
+  z.sub[aux_sub.v] = { .x = 210, .y = 10, .w = 180, .h = 180 };
+  z.state[ready.v] = { .x = 40, .y = 60, .w = 100, .h = 40 };
+  z.state[x.v] = { .x = 600, .y = 60, .w = 100, .h = 40 };
+  auto const regions = [&](Routes const &r) {
+    return cost_terms(c, decompose(c), z, r, {}, profile()).through_region;
+  };
+  Routes const through{ routes_of(c,
+                                  { { { .x = 140, .y = 80 }, { .x = 600, .y = 80 } } }) };
+  Routes const below{ routes_of(c,
+                                { { { .x = 90, .y = 100 },
+                                    { .x = 90, .y = 300 },
+                                    { .x = 650, .y = 300 },
+                                    { .x = 650, .y = 100 } } }) };
+  CHECK(regions(through) == 1);
+  CHECK(regions(below) == 0);
+
+  // `aux` hanging 200 below its owner is entered at y 300 by a piece that misses `On`.
+  z.sub[aux_sub.v].h = 380;
+  CHECK(regions(below) == 0);
+  z.sub[aux_sub.v].h = 180;
+
+  // Under a dead `Shell`, `On` is detached and its regions are tested outright.
+  c.states[shell.v].live = 0;
+  CHECK(regions(through) == 1);
+
+  // A dead owner's regions are tested by none.
+  c.states[shell.v].live = 1;
+  c.states[on.v].live = 0;
+  CHECK(regions(through) == 0);
 }
 
 TEST_CASE("cost: a placed box over a state neither endpoint is under breaks Tier 0") {
@@ -715,20 +936,22 @@ TEST_CASE("cost: a placed box over a state neither endpoint is under breaks Tier
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const other{ build_state(c, root, "X", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c) };
   z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 100 };
   z.state[b.v] = { .x = 400, .y = 0, .w = 100, .h = 100 };
-  z.state[other.v] = { .x = 200, .y = -200, .w = 100, .h = 100 };
+  z.state[other.v] = { .x = 200, .y = -150, .w = 100, .h = 100 };
   Routes r{ routes_of(c, { { { .x = 100, .y = 50 }, { .x = 400, .y = 50 } } }) };
-  r.placed = { { .x = 200, .y = -190, .w = 60, .h = 20 } };
+  r.placed = { { .x = 200, .y = -60, .w = 60, .h = 20 } };  // 90 above its route
   scav_path_box const box{ .subject = 0, .w = 60, .h = 20, .order = 0 };
   scav_spaces const s{ .path_box = &box, .n_path_box = 1 };
-  CostTerms const over{ cost_terms(c, decompose(c), z, r, s, profile()) };
+  scav_profile near{ profile() };
+  near.pad = 16;  // under the route's 100-unit gap to X
+  CostTerms const over{ cost_terms(c, decompose(c), z, r, s, near) };
   CHECK(over.label_over_box == 1);
   CHECK(over.label == 0);
-  CHECK(cost_of(over, profile()).t0_violations == 1);
+  CHECK(cost_of(over, near).t0_violations == 1);
 
   z.state[other.v] = { .x = 200, .y = 500, .w = 100, .h = 100 };
   CHECK(cost_terms(c, decompose(c), z, r, s, profile()).label_over_box == 0);
@@ -744,7 +967,7 @@ TEST_CASE("cost: inside the composite it runs in, only the text bands cost") {
   SubmachineId const inner{ build_submachine(c, outer, "main", {}) };
   StateId const a{ build_state(c, inner, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, inner, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c) };
   z.state[outer.v] = { .x = 0, .y = 0, .w = 600, .h = 200 };
@@ -772,9 +995,9 @@ TEST_CASE(
   SubmachineId const inner{ build_submachine(c, outer, "main", {}) };
   StateId const a{ build_state(c, inner, "A", StateKind::Normal, {}) };
   StateId const away{ build_state(c, root, "Away", StateKind::Normal, {}) };
-  build_trans(c, outer, a, TransKind::External, {});
-  build_trans(c, a, outer, TransKind::External, {});
-  build_trans(c, outer, away, TransKind::External, {});
+  build_trans(c, outer, a, TransKind::Default, {});
+  build_trans(c, a, outer, TransKind::Default, {});
+  build_trans(c, outer, away, TransKind::Default, {});
 
   SizedLayout z{ blank(c) };
   z.state[outer.v] = { .x = 0, .y = 0, .w = 600, .h = 200 };
@@ -803,8 +1026,8 @@ TEST_CASE("cost: a placed box over another transition's route breaks Tier 0") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, b, a, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, b, a, TransKind::Default, {});
 
   SizedLayout z{ blank(c) };
   z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 100 };
@@ -815,10 +1038,9 @@ TEST_CASE("cost: a placed box over another transition's route breaks Tier 0") {
   scav_path_box const box{ .subject = 0, .w = 60, .h = 20, .order = 0 };
   scav_spaces const s{ .path_box = &box, .n_path_box = 1 };
 
-  // Straddling its own route is free and straddling the other one is not, so
-  // the two rects differ only in which line they cross.
+  // Straddling either route counts: its own (y=50) or the other (y=80).
   r.placed = { { .x = 200, .y = 40, .w = 60, .h = 20 } };
-  CHECK(cost_terms(c, decompose(c), z, r, s, profile()).label_over_route == 0);
+  CHECK(cost_terms(c, decompose(c), z, r, s, profile()).label_over_route == 1);
 
   r.placed = { { .x = 200, .y = 70, .w = 60, .h = 20 } };
   CostTerms const over{ cost_terms(c, decompose(c), z, r, s, profile()) };
@@ -826,7 +1048,7 @@ TEST_CASE("cost: a placed box over another transition's route breaks Tier 0") {
   CHECK(over.label == 0);
   CHECK(cost_of(over, profile()).t0_violations == 1);
 
-  r.placed = { { .x = 200, .y = 82, .w = 60, .h = 20 } };  // beside it, a line clear
+  r.placed = { { .x = 200, .y = 82, .w = 60, .h = 20 } };  // 2 units below the other route
   CHECK(cost_terms(c, decompose(c), z, r, s, profile()).label_over_route == 0);
 }
 
@@ -835,16 +1057,15 @@ TEST_CASE("cost: a box nearer a foreign route than its own is charged the shortf
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, b, a, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, b, a, TransKind::Default, {});
 
   SizedLayout z{ blank(c) };
   z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 200 };
   z.state[b.v] = { .x = 400, .y = 0, .w = 100, .h = 200 };
   scav_path_box const box{ .subject = 0, .w = 60, .h = 20, .order = 0 };
   scav_spaces const s{ .path_box = &box, .n_path_box = 1 };
-  // The box rides its own leg at y 150; the foreign leg's height above it is
-  // the only thing that changes between the cases.
+  // The box sits on its own leg at y=150; the cases vary only the foreign leg's y.
   auto const scored = [&](int32_t foreign_y) {
     Routes r{ routes_of(
         c,
@@ -854,12 +1075,11 @@ TEST_CASE("cost: a box nearer a foreign route than its own is charged the shortf
     return cost_terms(c, decompose(c), z, r, s, profile()).label_near;
   };
 
-  CHECK(scored(120) == 10);  // half a line of text nearer the stranger than it may be
-  CHECK(scored(110) == 0);   // one whole line away, which is the margin it owes
+  CHECK(scored(120) == 10);  // foreign leg 10 above the box: shortfall 20 - 10
+  CHECK(scored(110) == 0);   // one box height away, the required margin
   CHECK(scored(90) == 0);
 
-  // Strip 1: the box's own leg is one height away, so the stranger has to be
-  // one height further out again, and here it is not.
+  // Strip 1: own leg 20 below the box, foreign leg 20 above it; shortfall 20 + 20 - 20.
   Routes strip1{ routes_of(c,
                            { { { .x = 100, .y = 150 }, { .x = 400, .y = 150 } },
                              { { .x = 400, .y = 90 }, { .x = 100, .y = 90 } } }) };
@@ -867,12 +1087,47 @@ TEST_CASE("cost: a box nearer a foreign route than its own is charged the shortf
   CHECK(cost_terms(c, decompose(c), z, strip1, s, profile()).label_near == 20);
 }
 
+TEST_CASE("cost: a placed box past the leader from its own route breaks Tier 0") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::Default, {});
+
+  SizedLayout z{ blank(c) };
+  z.state[a.v] = { .x = 0, .y = 300, .w = 100, .h = 100 };
+  z.state[b.v] = { .x = 400, .y = 300, .w = 100, .h = 100 };
+  Routes r{ routes_of(c, { { { .x = 100, .y = 150 }, { .x = 400, .y = 150 } } }) };
+  scav_path_box const box{ .subject = 0, .w = 60, .h = 20, .order = 0 };
+  scav_spaces const s{ .path_box = &box, .n_path_box = 1 };
+  int32_t const leader{ label_leader(profile()) };
+  auto const scored = [&](scav_rect at) {
+    r.placed = { at };
+    return cost_terms(c, decompose(c), z, r, s, profile());
+  };
+  auto const above = [](int32_t gap) {  // `gap` above the route
+    return scav_rect{ .x = 200, .y = 130 - gap, .w = 60, .h = 20 };
+  };
+
+  CHECK(scored(above(leader - 1)).label_far == 0);
+  CHECK(scored(above(leader)).label_far == 0);
+  CostTerms const far{ scored(above(leader + 1)) };
+  CHECK(far.label_far == 1);
+  CHECK(cost_of(far, profile()).t0_violations == 1);
+  // Past the route's end, and diagonal off it: the gap is Chebyshev.
+  CHECK(scored({ .x = 401 + leader, .y = 140, .w = 60, .h = 20 }).label_far == 1);
+  CHECK(scored({ .x = 400 + leader, .y = 130 - leader, .w = 60, .h = 20 }).label_far == 0);
+  // An unnamed box owns no route and counts 0.
+  r.placed = { above(10 * leader) };
+  CHECK(cost_terms(c, decompose(c), z, r, {}, profile()).label_far == 0);
+}
+
 TEST_CASE("cost: with no other route to be near, no box is charged") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c) };
   Routes r{ routes_of(c, { { { .x = 100, .y = 150 }, { .x = 400, .y = 150 } } }) };
@@ -887,7 +1142,7 @@ TEST_CASE("cost: a placed box the space table does not name owns no route") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c) };
   Routes r{ routes_of(c, { { { .x = 100, .y = 150 }, { .x = 400, .y = 150 } } }) };
@@ -896,15 +1151,15 @@ TEST_CASE("cost: a placed box the space table does not name owns no route") {
     return cost_terms(c, decompose(c), z, r, s, profile());
   };
 
-  // Named, the line is its own and free; unnamed, it is a stranger's, and no
-  // leg of its own means no nearness to price either way.
+  // Named or unnamed, a line through the box counts. With no leg of its own,
+  // `label_near` is 0.
   scav_path_box const named{ .subject = 0, .w = 60, .h = 20, .order = 0 };
-  CHECK(scored({ .path_box = &named, .n_path_box = 1 }).label_over_route == 0);
+  CHECK(scored({ .path_box = &named, .n_path_box = 1 }).label_over_route == 1);
   CHECK(scored({}).label_over_route == 1);
   CHECK(scored({}).label_near == 0);
 
-  // A table too short to reach the box, and one naming a transition that is not
-  // there, leave it a stranger's the same way.
+  // A table too short to reach the box, or naming a missing transition, also
+  // leaves the line foreign.
   CHECK(scored({ .path_box = &named, .n_path_box = 0 }).label_over_route == 1);
   scav_path_box const past{ .subject = 7, .w = 60, .h = 20, .order = 0 };
   CHECK(scored({ .path_box = &past, .n_path_box = 1 }).label_over_route == 1);
@@ -916,20 +1171,21 @@ TEST_CASE("cost: a box whose own transition has no route is charged nothing") {
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   build_trans(c, a, a, TransKind::Internal, {});  // no route: drawn in A's rect
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c) };
-  // The box belongs to the routeless transition and sits beside the other's
-  // line, which is exactly the arrangement the term would charge for.
+  // The box belongs to the routeless transition and sits near the other's line.
   Routes r{ routes_of(c, { {}, { { .x = 100, .y = 150 }, { .x = 400, .y = 150 } } }) };
   r.placed = { { .x = 200, .y = 120, .w = 60, .h = 20 } };
   scav_path_box const box{ .subject = 0, .w = 60, .h = 20, .order = 0 };
   scav_spaces const s{ .path_box = &box, .n_path_box = 1 };
 
-  // No leg of its own to be nearer than, so there is no shortfall to measure.
   CostTerms const t{ cost_terms(c, decompose(c), z, r, s, profile()) };
   CHECK(t.label_near == 0);
   CHECK(t.label == 0);
+
+  r.placed = { { .x = 200, .y = -2000, .w = 60, .h = 20 } };  // far from every route
+  CHECK(cost_terms(c, decompose(c), z, r, s, profile()).label_far == 0);
 }
 
 TEST_CASE("cost: two placed boxes over each other are one label cost") {
@@ -937,7 +1193,7 @@ TEST_CASE("cost: two placed boxes over each other are one label cost") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c) };
   z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 100 };
@@ -964,12 +1220,10 @@ TEST_CASE("cost: the weights turn terms into one integer, compared by tier") {
   t.area = 1000;
   Cost const scored{ cost_of(t, p) };
   CHECK(scored.t0_violations == 0);
-  // A crossing is a count and 1000 square grid units is a fraction of one em
-  // squared, which ceils to one rather than away (11.6).
+  // Crossings score as a count; 1000 square grid units round up to one em squared.
   CHECK(scored.t2 == ((int64_t{ p.w_crossings } * 2) + int64_t{ p.w_area }));
 
-  // Tier 0 dominates whatever Tier 2 says, because the tiers are compared in
-  // order and never summed.
+  // Tiers compare lexicographically: one Tier-0 violation outranks any Tier-2 sum.
   CostTerms violating;
   violating.box_overlap = 1;
   Cost const bad{ cost_of(violating, p) };
@@ -986,8 +1240,7 @@ TEST_CASE("cost: every Tier-2 term is scored in the unit the profile names it") 
     return cost_of(t, p).t2;
   };
 
-  // A count is already a count; a length is ems and an area ems squared, and
-  // the division ceils, so one grid unit of either still costs a whole one.
+  // Counts score as is; lengths convert to ems and areas to ems squared, rounding up.
   CHECK(only(&CostTerms::bends, 1) == int64_t{ p.w_bends });
   CHECK(only(&CostTerms::crossings, 1) == int64_t{ p.w_crossings });
   CHECK(only(&CostTerms::adjacency, 1) == int64_t{ p.w_adjacency });
@@ -1002,14 +1255,14 @@ TEST_CASE("cost: every Tier-2 term is scored in the unit the profile names it") 
   CHECK(only(&CostTerms::transit_bends, 1) == int64_t{ p.w_transit_bends });
   CHECK(only(&CostTerms::whitespace, 1) == int64_t{ p.w_whitespace });
 
-  // A whole unit each way, and one grid unit past it.
+  // One em, or one em squared, costs one unit; one grid unit more costs two.
   CHECK(only(&CostTerms::corridor, em) == int64_t{ p.w_corridor });
   CHECK(only(&CostTerms::corridor, em + 1) == (2 * int64_t{ p.w_corridor }));
   CHECK(only(&CostTerms::length, em) == int64_t{ p.w_length });
   CHECK(only(&CostTerms::length, em + 1) == (2 * int64_t{ p.w_length }));
   CHECK(only(&CostTerms::area, em * em) == int64_t{ p.w_area });
   CHECK(only(&CostTerms::area, (em * em) + 1) == (2 * int64_t{ p.w_area }));
-  // Whitespace ships unpriced, so its unit is read at a weight of its own.
+  // The shipped `w_whitespace` is 0; these checks price it at 3.
   scav_profile priced{ p };
   priced.w_whitespace = 3;
   auto const whitespace = [&priced](int64_t v) {
@@ -1021,7 +1274,7 @@ TEST_CASE("cost: every Tier-2 term is scored in the unit the profile names it") 
   CHECK(whitespace(em * em) == 3);
   CHECK(whitespace((em * em) + 1) == 6);
 
-  // Nothing scored is still nothing, which is what makes an unlaid chart zero.
+  // Zero terms score zero.
   CHECK(cost_of(CostTerms{}, p).t2 == 0);
   CHECK(only(&CostTerms::corridor, 0) == 0);
   CHECK(only(&CostTerms::area, 0) == 0);
@@ -1029,7 +1282,7 @@ TEST_CASE("cost: every Tier-2 term is scored in the unit the profile names it") 
 
 TEST_CASE("cost: the shipped weights sum a hand-built term vector") {
   scav_profile const p{ profile() };
-  REQUIRE(p.font_size_grid == 192);  // the ceilings below are read against it
+  REQUIRE(p.font_size_grid == 192);  // the ceilings below divide by this em
   CostTerms t;
   t.bends = 3;
   t.corridor = 400;  // 3 ems
@@ -1056,8 +1309,7 @@ TEST_CASE("cost: the shipped weights sum a hand-built term vector") {
 }
 
 TEST_CASE("cost: an em of one grid unit leaves every length where it stood") {
-  // The smallest font_size_grid the profile's bound allows, which is also the
-  // divisor that makes the conversion an identity.
+  // font_size_grid 1, the profile's lower bound, makes the em conversion the identity.
   scav_profile p{ profile() };
   p.font_size_grid = 1;
   REQUIRE(profile_validate(p));
@@ -1086,8 +1338,7 @@ TEST_CASE("cost: the shares divide the sum into floored basis points") {
   t.area = 100000;  // three em squared at w_area against one bend at w_bends
   int64_t total{ 0 };
   for (int64_t const bp : cost_shares(t, p)) { total += bp; }
-  // Floored per term, so a row is at most the whole and short of it by under
-  // one basis point per term that scored anything.
+  // Each share floors: the sum is at most 10000, short by under one per scoring term.
   CHECK(total <= 10000);
   CHECK(total > (10000 - static_cast<int64_t>(TIER2_TERMS)));
 
@@ -1095,22 +1346,20 @@ TEST_CASE("cost: the shares divide the sum into floored basis points") {
 }
 
 TEST_CASE("cost: a hint outranks whatever Tier 2 adds up to") {
-  // Tier 1 sits between the forbidden and the priced, so the two are compared
-  // on it before either sum is looked at.
+  // Tier 1 compares after Tier 0 and before Tier 2.
   Cost const hinted{ .t0_violations = 0, .t1_hints = 1, .t2 = 1000000 };
   Cost const unhinted{ .t0_violations = 0, .t1_hints = 2, .t2 = 0 };
   CHECK(cost_less(hinted, unhinted));
   CHECK_FALSE(cost_less(unhinted, hinted));
 
-  // Equal hints and the Tier-2 sum decides after all.
+  // With equal hints, Tier 2 decides.
   Cost const same{ .t0_violations = 0, .t1_hints = 1, .t2 = 1000001 };
   CHECK(cost_less(hinted, same));
 }
 
 namespace {
 
-// Two concurrent submachines of one state joined by one transition, which is
-// the whole of what `adjacency` reads of a model (11.8).
+// Two concurrent regions of one state, joined by one transition.
 struct Regions {
   Chart c;
   SubmachineId left{ INVALID }, right{ INVALID };
@@ -1124,7 +1373,7 @@ Regions regions(StateKind src_kind, StateKind dst_kind) {
   out.right = build_submachine(out.c, owner, "right", {});
   StateId const a{ build_state(out.c, out.left, "A", src_kind, {}) };
   StateId const b{ build_state(out.c, out.right, "B", dst_kind, {}) };
-  build_trans(out.c, a, b, TransKind::External, {});
+  build_trans(out.c, a, b, TransKind::Default, {});
   return out;
 }
 
@@ -1143,8 +1392,8 @@ TEST_CASE("cost: two regions an arrow joins are charged for being apart") {
   scav_profile const p{ profile() };
   scav_rect const at{ .x = 0, .y = 0, .w = 100, .h = 100 };
 
-  // Overlapping on one axis and no more than sub_sep apart on the other is the
-  // arrangement a direct arrow needs; one unit further apart is not.
+  // Regions overlapping on one axis and at most `sub_sep` apart on the other
+  // score 0; one unit further apart scores 1.
   CHECK(adjacency_of(r, at, { .x = 100 + p.sub_sep, .y = 0, .w = 100, .h = 100 }) == 0);
   CHECK(adjacency_of(r, at, { .x = 101 + p.sub_sep, .y = 0, .w = 100, .h = 100 }) == 1);
   CHECK(adjacency_of(r, at, { .x = 0, .y = 100 + p.sub_sep, .w = 100, .h = 100 }) == 0);
@@ -1154,11 +1403,10 @@ TEST_CASE("cost: two regions an arrow joins are charged for being apart") {
   CHECK(adjacency_of(r, { .x = 100 + p.sub_sep, .y = 0, .w = 100, .h = 100 }, at) == 0);
   CHECK(adjacency_of(r, { .x = 0, .y = 100 + p.sub_sep, .w = 100, .h = 100 }, at) == 0);
 
-  // Diagonal is neither: two regions meeting at a corner share no face for the
-  // arrow to cross.
+  // Regions 300 apart on both axes, overlapping on neither, score 1.
   CHECK(adjacency_of(r, at, { .x = 400, .y = 400, .w = 100, .h = 100 }) == 1);
 
-  // The one term the weights turn into a Tier-2 cost, nothing else being scored.
+  // With only `adjacency` scored, the Tier-2 cost is `w_adjacency`.
   SizedLayout z{ blank(r.c) };
   z.sub[r.left.v] = at;
   z.sub[r.right.v] = { .x = 400, .y = 400, .w = 100, .h = 100 };
@@ -1168,8 +1416,7 @@ TEST_CASE("cost: two regions an arrow joins are charged for being apart") {
 }
 
 TEST_CASE("cost: a fan-out across two regions is not charged for being apart") {
-  // Adjacency above two regions is not achievable, so a fork or a join at
-  // either end of the crossing takes the pair out of the term (11.8).
+  // A fork or join at either end of the transition exempts the pair from `adjacency`.
   scav_rect const at{ .x = 0, .y = 0, .w = 100, .h = 100 };
   scav_rect const away{ .x = 400, .y = 400, .w = 100, .h = 100 };
   CHECK(adjacency_of(regions(StateKind::Normal, StateKind::Normal), at, away) == 1);
@@ -1178,7 +1425,7 @@ TEST_CASE("cost: a fan-out across two regions is not charged for being apart") {
   CHECK(adjacency_of(regions(StateKind::Normal, StateKind::Fork), at, away) == 0);
   CHECK(adjacency_of(regions(StateKind::Normal, StateKind::Join), at, away) == 0);
 
-  // Another pseudostate is not one of the two, so its crossing is priced.
+  // Any other pseudostate end, here a choice, is charged.
   CHECK(adjacency_of(regions(StateKind::Choice, StateKind::Normal), at, away) == 1);
 }
 
@@ -1188,18 +1435,18 @@ TEST_CASE("cost: a route that leaves a box across its far side is inside it") {
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const other{ build_state(c, root, "X", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c) };
   z.state[a.v] = { .x = 0, .y = 0, .w = 20, .h = 20 };
   z.state[b.v] = { .x = 400, .y = 0, .w = 20, .h = 20 };
   z.state[other.v] = { .x = 100, .y = 0, .w = 100, .h = 100 };
-  // Starting on the stranger's top border, which is not inside it, and cutting
-  // out through the right one: the only one of the four sides it crosses.
+  // Starts on X's top border and leaves through its right side, the only side it
+  // crosses.
   Routes const r{ routes_of(c, { { { .x = 150, .y = 0 }, { .x = 250, .y = 50 } } }) };
   CHECK(cost_terms(c, decompose(c), z, r, {}, profile()).through_box == 1);
 
-  // Along that same border rather than through it, which is not entry.
+  // Along X's top border.
   Routes const grazing{ routes_of(c, { { { .x = 100, .y = 0 }, { .x = 250, .y = 0 } } }) };
   CHECK(cost_terms(c, decompose(c), z, grazing, {}, profile()).through_box == 0);
 }
@@ -1213,15 +1460,14 @@ TEST_CASE("cost: a tombstone is not a box, an obstacle or a label collision") {
   SubmachineId const dropped{ build_submachine(c, b, "dropped", {}) };
   StateId const p{ build_state(c, dropped, "P", StateKind::Normal, {}) };
   StateId const q{ build_state(c, dropped, "Q", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c) };
   z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 100 };
   z.state[b.v] = { .x = 400, .y = 0, .w = 100, .h = 100 };
-  // Over A, over the route, and under the placed box, so one state answers all
-  // three loops at once.
+  // Gone overlaps A, the route and the placed box.
   z.state[gone.v] = { .x = 80, .y = 10, .w = 200, .h = 60 };
-  // Out of everything else's way, and over each other.
+  // P and Q overlap each other, clear of the rest.
   z.state[p.v] = { .x = 0, .y = 900, .w = 100, .h = 100 };
   z.state[q.v] = { .x = 50, .y = 950, .w = 100, .h = 100 };
   Routes r{ routes_of(c, { { { .x = 100, .y = 50 }, { .x = 400, .y = 50 } } }) };
@@ -1235,11 +1481,11 @@ TEST_CASE("cost: a tombstone is not a box, an obstacle or a label collision") {
   CHECK(live.through_box == 1);
   CHECK(live.label_over_box == 1);
 
-  // A dead submachine's children are no longer siblings of each other.
+  // A dead submachine's children are not paired as siblings.
   c.submachines[dropped.v].live = 0;
   CHECK(scored().box_overlap == 1);
 
-  // And a dead state is no box at all, first or second of its pair.
+  // With Gone dead, all three terms drop to zero.
   c.states[gone.v].live = 0;
   CostTerms const buried{ scored() };
   CHECK(buried.box_overlap == 0);
@@ -1254,7 +1500,7 @@ TEST_CASE("cost: a box in the composite's trailing band costs as its title does"
   SubmachineId const inner{ build_submachine(c, outer, "main", {}) };
   StateId const a{ build_state(c, inner, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, inner, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c) };
   z.state[outer.v] = { .x = 0, .y = 0, .w = 600, .h = 200 };
@@ -1273,9 +1519,6 @@ TEST_CASE("cost: a box in the composite's trailing band costs as its title does"
 }
 
 TEST_CASE("cost: a chart with no geometry columns scores as nothing") {
-  // The columns are what one build reads of another's output, and a chart that
-  // was never laid out has none of them: every term reads zero rather than
-  // whatever the empty vectors happen to be.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   build_state(c, root, "A", StateKind::Normal, {});
@@ -1294,8 +1537,7 @@ TEST_CASE("cost: a chart with no geometry columns scores as nothing") {
   CHECK(t.box_overlap == 0);
   CHECK(cost_of(t, profile()).t2 == 0);
 
-  // A column that is there with no row behind it reads the same way: the point
-  // column's length is its own, and a chart with no route has none.
+  // A registered point column with no rows also scores zero.
   REQUIRE(column_register(c,
                           "scav.geom.point",
                           ElemKind::Point,
@@ -1310,8 +1552,8 @@ TEST_CASE("cost: a chart with no geometry columns scores as nothing") {
   CHECK(empty.area == 0);
   CHECK(cost_of(empty, profile()).t2 == 0);
 
-  // The rect and span columns the same way, on a chart with neither a state
-  // nor a transition to have put a row in them.
+  // Registered state rect and route span columns score zero on a chart with no
+  // states or transitions.
   Chart bare;
   build_chart(bare, "t", {});
   REQUIRE(column_register(bare,
@@ -1338,14 +1580,13 @@ TEST_CASE("cost: a chart with no geometry columns scores as nothing") {
 }
 
 TEST_CASE("cost: a chart that was never laid out scores nothing") {
-  // Two siblings and a transition, and not one geometry column: the sibling
-  // pairs and the route table are both indexed by ordinal, so scoring this
-  // reads past the columns unless the geometry is answered for as a whole.
+  // Two siblings and a transition with no geometry columns; scoring returns zero
+  // terms when any column is shorter than its entities.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   CostTerms const unlaid{ cost_columns(c, decompose(c), profile()) };
   CHECK(unlaid.bends == 0);
@@ -1361,8 +1602,7 @@ TEST_CASE("cost: a chart that was never laid out scores nothing") {
   CHECK(unlaid.box_overlap == 0);
   CHECK(cost_of(unlaid, profile()).t2 == 0);
 
-  // Rects but no route table, which is the same gap one column over: the
-  // chart rect is there to be scored and is not, because nothing else is.
+  // Rects with no route table also score zero, the chart rect included.
   SizedLayout z{ blank(c) };
   z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 40 };
   z.state[b.v] = { .x = 300, .y = 0, .w = 100, .h = 40 };
@@ -1373,8 +1613,7 @@ TEST_CASE("cost: a chart that was never laid out scores nothing") {
   CHECK(routeless.box_overlap == 0);
   CHECK(cost_of(routeless, profile()).t2 == 0);
 
-  // Every rect column is read by entity ordinal, so any one of them stopping
-  // short is the same gap: the geometry that scores, minus one column.
+  // Clearing any one rect column zeroes every term.
   Routes const r{ routes_of(c, { { { .x = 100, .y = 20 }, { .x = 300, .y = 20 } } }) };
   CHECK(cost_terms(c, decompose(c), z, r, {}, profile()).area == (400LL * 40));
   SizedLayout no_state{ z };
@@ -1396,7 +1635,7 @@ TEST_CASE("cost: a route reaching past the points scores nothing") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c) };
   z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 40 };
@@ -1404,8 +1643,7 @@ TEST_CASE("cost: a route reaching past the points scores nothing") {
   z.chart = { .x = 0, .y = 0, .w = 400, .h = 40 };
   Routes r{ routes_of(c, { { { .x = 100, .y = 20 }, { .x = 300, .y = 20 } } }) };
 
-  // One point more than the route was given, so the last segment would be read
-  // from past the end of the point column.
+  // The span claims one point past the end of the point column; every term reads zero.
   r.route[0].len += 1;
   CostTerms const past{ cost_terms(c, decompose(c), z, r, {}, profile()) };
   CHECK(past.bends == 0);
@@ -1413,7 +1651,7 @@ TEST_CASE("cost: a route reaching past the points scores nothing") {
   CHECK(past.aspect == 0);
   CHECK(cost_of(past, profile()).t2 == 0);
 
-  // The same geometry with the span it actually has, scored as it always was.
+  // With the correct span, the route scores normally.
   r.route[0].len -= 1;
   CostTerms const t{ cost_terms(c, decompose(c), z, r, {}, profile()) };
   CHECK(t.bends == 0);
@@ -1437,8 +1675,8 @@ TEST_CASE("cost: a chart already at the desired ratio pays no aspect") {
   CHECK(fitting.aspect == 0);
   CHECK(fitting.area == ((16LL * 40) * (10LL * 40)));
 
-  // One unit off the ratio is one unit of the term, weighted like any other --
-  // and both the deviation and the area are ems before the weight applies.
+  // One grid unit wider adds `dar_den` to `aspect`; aspect converts to ems and area to
+  // ems squared before weighting.
   z.chart.w += 1;
   CostTerms const off{ cost_terms(c, decompose(c), z, {}, {}, p) };
   CHECK(off.aspect == p.dar_den);
@@ -1464,7 +1702,7 @@ Composite composite_chart() {
   k.a = build_state(k.c, k.inner, "A", StateKind::Normal, {});
   k.b = build_state(k.c, k.inner, "B", StateKind::Normal, {});
   k.leaf = build_state(k.c, root, "Leaf", StateKind::Normal, {});
-  build_trans(k.c, k.a, k.b, TransKind::External, {});
+  build_trans(k.c, k.a, k.b, TransKind::Default, {});
   return k;
 }
 
@@ -1495,12 +1733,13 @@ CostTerms composite_terms(Composite const &k,
 TEST_CASE("cost: whitespace is a composite's hole less its children's rects") {
   Composite k{ composite_chart() };
   scav_profile const p{ profile() };
-  // Tight: the hole is 220 by 60 and all of it but the gap between A and B is theirs.
+  // Tight: the hole is 220 by 60; A and B fill all but the 20-wide gap between them.
   CHECK(composite_terms(k, composite_sizing(k, 240, 130), p).whitespace == 20 * 60);
   CHECK(composite_terms(k, composite_sizing(k, 440, 330), p).whitespace ==
         (420 * 260) - (2 * 100 * 60));
 
-  // A tombstone holds nothing, and a state with no live region is no composite.
+  // A dead child's rect counts as whitespace; a state whose only region is dead
+  // scores no whitespace.
   SizedLayout const tight{ composite_sizing(k, 240, 130) };
   k.c.states[k.b.v].live = 0;
   CHECK(composite_terms(k, tight, p).whitespace == (20 * 60) + (100 * 60));
@@ -1509,7 +1748,7 @@ TEST_CASE("cost: whitespace is a composite's hole less its children's rects") {
   CHECK(composite_terms(k, tight, p).whitespace == 0);
   k.c.submachines[k.inner.v].live = 1;
 
-  // Disjoint inside the chart when Tier 0 holds, so capped at its area.
+  // Whitespace is capped at the chart's area.
   SizedLayout small{ tight };
   small.chart = { .x = 0, .y = 0, .w = 10, .h = 10 };
   CHECK(composite_terms(k, small, p).whitespace == 100);
@@ -1518,14 +1757,14 @@ TEST_CASE("cost: whitespace is a composite's hole less its children's rects") {
 TEST_CASE("cost: a padded composite costs more than the same composite tight") {
   Composite const k{ composite_chart() };
   scav_profile p{ profile() };
-  REQUIRE(p.font_size_grid == 192);  // the ceilings below are read against it
+  REQUIRE(p.font_size_grid == 192);  // the ceilings below divide by this em
   p.w_whitespace = 1;
   CostTerms const tight{ composite_terms(k, composite_sizing(k, 240, 130), p) };
   CostTerms const padded{ composite_terms(k, composite_sizing(k, 440, 330), p) };
   CHECK(padded.whitespace > tight.whitespace);
   REQUIRE(padded.area == tight.area);
   REQUIRE(padded.aspect == tight.aspect);
-  // One chart either way, so the whole difference is whitespace: 1 em squared against 3.
+  // Same chart rect and route: the difference is whitespace, 1 em squared against 3.
   CHECK(cost_of(tight, p).t2 < cost_of(padded, p).t2);
   CHECK((cost_of(padded, p).t2 - cost_of(tight, p).t2) == 2);
 }
@@ -1548,7 +1787,7 @@ TEST_CASE("cost: the containment walk nests a descendant's interval in its own")
   CHECK(an.tout[inner.v] <= an.tout[outer.v]);
   CHECK(an.tout[beside.v] == an.tin[beside.v]);  // a leaf's interval is a point
 
-  // The two comparisons answer what the climb answers, every way round.
+  // `cost_ancestor` agrees with `ancestor_or_self` for every ordered pair.
   for (StateId const a : { outer, beside, inner, leaf }) {
     for (StateId const b : { outer, beside, inner, leaf }) {
       CAPTURE(a.v);
@@ -1569,9 +1808,9 @@ TEST_CASE("cost: a state outside every children span answers by the climb") {
   StateId const lost{ build_state(c, root, "Lost", StateKind::Normal, {}) };
   SubmachineId const under{ build_submachine(c, lost, "under", {}) };
   StateId const below{ build_state(c, under, "Below", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  // The span stops one short of `Lost`, so the walk reaches neither it nor what
-  // it holds; `parent` still says where the two of them are.
+  build_trans(c, a, b, TransKind::Default, {});
+  // The root's child span stops before `Lost`, so the walk skips `Lost` and
+  // `Below`; their `parent` links stay intact.
   --c.submachines[root.v].children.len;
 
   Ancestry const an{ cost_flatten_ancestry(c) };
@@ -1581,7 +1820,7 @@ TEST_CASE("cost: a state outside every children span answers by the climb") {
   CHECK(cost_ancestor(c, an, lost, below));
   CHECK_FALSE(cost_ancestor(c, an, below, lost));
 
-  // Both are off the descent, so Tier 0 tests them where they stand.
+  // Tier 0 tests both detached states at their own rects.
   SizedLayout z{ blank(c) };
   z.state[a.v] = { .x = 0, .y = 0, .w = 20, .h = 20 };
   z.state[b.v] = { .x = 400, .y = 0, .w = 20, .h = 20 };
@@ -1599,7 +1838,7 @@ TEST_CASE("cost: a live state a tombstone stands over is still an obstacle") {
   StateId const gone{ build_state(c, root, "Gone", StateKind::Normal, {}) };
   SubmachineId const under{ build_submachine(c, gone, "under", {}) };
   StateId const hidden{ build_state(c, under, "Hidden", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
   c.states[gone.v].live = 0;
 
   Ancestry const an{ cost_flatten_ancestry(c) };
@@ -1609,18 +1848,18 @@ TEST_CASE("cost: a live state a tombstone stands over is still an obstacle") {
   SizedLayout z{ blank(c) };
   z.state[a.v] = { .x = 0, .y = 0, .w = 20, .h = 20 };
   z.state[b.v] = { .x = 400, .y = 0, .w = 20, .h = 20 };
-  // The tombstone's rect is zero, so it says nothing about where Hidden sits.
+  // Gone keeps a zero rect; Hidden alone sits on the route.
   z.state[hidden.v] = { .x = 150, .y = -50, .w = 100, .h = 100 };
   Routes const r{ routes_of(c, { { { .x = 10, .y = 10 }, { .x = 410, .y = 10 } } }) };
   CostTerms const t{ cost_terms(c, decompose(c), z, r, {}, profile()) };
   CHECK(t.through_box == 1);
-  CHECK(t.box_overlap == 0);  // the tombstone is not a box, and Hidden is alone
+  CHECK(t.box_overlap == 0);  // Gone is dead and Hidden has no sibling
 }
 
 namespace {
 
-// `n` boxes on a diagonal and one over all of them, so the frame's grid is
-// more than one cell and one child sits in every cell of it.
+// `n` 40-unit boxes 100 apart on a diagonal, and `bar` over all of them; `bar` lies in
+// every cell of the frame's grid.
 Chart diagonal_chart(uint32_t n, SizedLayout &z, std::vector<StateId> &all, StateId &bar) {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
@@ -1674,7 +1913,7 @@ TEST_CASE("cost: overlapping siblings come out of the frame's grid, once a pair"
   Chart const c{ diagonal_chart(24, z, all, bar) };  // too many children to scan
   CHECK(cost_box_overlaps(c, z, cost_child_grid(c, z)) == 24);
 
-  // Moved off them, `bar` meets nothing, and the others never meet each other.
+  // With `bar` moved clear, no pair overlaps.
   z.state[bar.v] = { .x = 5000, .y = 5000, .w = 40, .h = 40 };
   CHECK(cost_box_overlaps(c, z, cost_child_grid(c, z)) == 0);
 }
@@ -1692,9 +1931,8 @@ TEST_CASE("cost: overlapping siblings of a small frame are scanned, once a pair"
 
 namespace {
 
-// 11.8's shape: one state holding two concurrent regions, each with a child,
-// and the two endpoints of the transition outside it. Every child rect lies
-// inside its parent's, which is what the descent prunes on.
+// One state holding two concurrent regions, each with one child, between the
+// transition's endpoints; each child rect lies inside its parent's.
 struct Concurrent {
   Chart c;
   StateId owner{ INVALID }, spinning{ INVALID }, dark{ INVALID };
@@ -1713,7 +1951,7 @@ Concurrent concurrent_chart() {
   SubmachineId const light{ build_submachine(c, out.owner, "light", {}) };
   out.dark = build_state(c, light, "Dark", StateKind::Normal, {});
   out.dst = build_state(c, root, "Stopped", StateKind::Normal, {});
-  build_trans(c, out.src, out.dst, TransKind::External, {});
+  build_trans(c, out.src, out.dst, TransKind::Default, {});
 
   out.z = blank(c);
   out.z.state[out.src.v] = { .x = 0, .y = 80, .w = 40, .h = 40 };
@@ -1745,8 +1983,8 @@ TEST_CASE("cost: a piece in the root frame is charged for the grandchildren it e
 
 TEST_CASE("cost: a piece leaving one region is charged for its sibling's child") {
   Concurrent r{ concurrent_chart() };
-  // The transition now runs out of the first region, so the owner encloses its
-  // source and is carved out -- and the sibling region's child is not.
+  // With Spinning as the source, the owner encloses it and is carved out; Dark is
+  // still charged.
   r.c.transitions[0].src = r.spinning;
   Routes const route{ routes_of(r.c,
                                 { { { .x = 220, .y = 100 }, { .x = 600, .y = 100 } } }) };
@@ -1768,23 +2006,23 @@ TEST_CASE("cost: the carve-out excuses a box over an endpoint, not what it holds
   StateId const src{ build_state(c, main, "Src", StateKind::Normal, {}) };
   StateId const stranger{ build_state(c, main, "Stranger", StateKind::Normal, {}) };
   StateId const dst{ build_state(c, root, "Dst", StateKind::Normal, {}) };
-  build_trans(c, src, dst, TransKind::External, {});
+  build_trans(c, src, dst, TransKind::Default, {});
 
   SizedLayout z{ blank(c) };
   z.state[outer.v] = { .x = 0, .y = 0, .w = 400, .h = 200 };
   z.state[src.v] = { .x = 20, .y = 60, .w = 60, .h = 80 };
   z.state[stranger.v] = { .x = 150, .y = 60, .w = 60, .h = 80 };
   z.state[dst.v] = { .x = 600, .y = 80, .w = 40, .h = 40 };
-  // Out of the source, through its sibling, and out of the composite the two
-  // of them share: three boxes entered, one of them charged.
+  // From Src's border through Stranger and out of Outer: Outer is carved out and
+  // Stranger is charged.
   Routes const route{ routes_of(c,
                                 { { { .x = 80, .y = 100 }, { .x = 600, .y = 100 } } }) };
   CHECK(cost_terms(c, decompose(c), z, route, {}, profile()).through_box == 1);
 }
 
 TEST_CASE("cost: a degraded diagonal crosses what the axis-aligned sweep cannot") {
-  // The band sweep pairs a vertical with the horizontals inside its span and
-  // never two of a kind; a diagonal is in neither set and goes against all.
+  // The band sweep pairs each vertical with the horizontals in its span; a diagonal
+  // is tested against every piece.
   std::vector<Piece> const mixed{
     { .a = { .x = 0, .y = 50 }, .b = { .x = 100, .y = 50 }, .trans = 0, .k = 0 },
     { .a = { .x = 50, .y = 0 }, .b = { .x = 50, .y = 100 }, .trans = 1, .k = 0 },
@@ -1804,8 +2042,7 @@ TEST_CASE("cost: a degraded diagonal crosses what the axis-aligned sweep cannot"
   std::vector<uint32_t> two(2, 0);
   CHECK(cost_crossings(crossed, two) == 1);
 
-  // Two horizontals on one line are collinear, and a pair of one transition's
-  // own legs is not a crossing however they meet.
+  // Neither collinear horizontals nor two legs of one transition count as crossings.
   std::vector<Piece> const parallel{
     { .a = { .x = 0, .y = 0 }, .b = { .x = 100, .y = 0 }, .trans = 0, .k = 0 },
     { .a = { .x = 50, .y = 0 }, .b = { .x = 150, .y = 0 }, .trans = 1, .k = 0 },
@@ -1825,8 +2062,8 @@ TEST_CASE("cost: collinear pieces meet in one bucket, and a trunk empties it") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   // One bucket, the horizontals at y = 0, sharing [50, 100]; the two verticals
   // sit at different x and so in buckets of their own.
@@ -1836,13 +2073,13 @@ TEST_CASE("cost: collinear pieces meet in one bucket, and a trunk empties it") {
         { { .x = 50, .y = 0 }, { .x = 150, .y = 0 }, { .x = 150, .y = 40 } } }) };
   CHECK(cost_corridor(apart, pieces_of(apart)) == 50);
 
-  // The same run, with the two finishing at one point: that is the trunk.
+  // Two runs along y=0 ending at one point: the 100 they share is trunk.
   Routes const merged{ routes_of(c,
                                  { { { .x = 0, .y = 0 }, { .x = 150, .y = 0 } },
                                    { { .x = 50, .y = 0 }, { .x = 150, .y = 0 } } }) };
   CHECK(cost_corridor(merged, pieces_of(merged)) == 0);
 
-  // Perpendicular legs share no line at all, whatever they touch.
+  // Perpendicular legs share no line.
   Routes const crossing{ routes_of(c,
                                    { { { .x = 0, .y = 0 }, { .x = 150, .y = 0 } },
                                      { { .x = 50, .y = -40 }, { .x = 50, .y = 40 } } }) };
@@ -1862,34 +2099,34 @@ TEST_CASE("cost: crowding charges two tight lanes their overlap scaled by the sh
   // Two horizontals of different transitions, 1000 overlapped, half an em apart:
   // half the overlap.
   CHECK(cost_crowding({ seg(0, 0, 1000, 0, 0), seg(0, 96, 1000, 96, 1) }, em) == 500);
-  // Just inside an em apart charges almost nothing; an em apart, nothing at all.
+  // 191 apart charges 5; an em apart charges 0.
   CHECK(cost_crowding({ seg(0, 0, 1000, 0, 0), seg(0, 191, 1000, 191, 1) }, em) == 5);
   CHECK(cost_crowding({ seg(0, 0, 1000, 0, 0), seg(0, 192, 1000, 192, 1) }, em) == 0);
-  // Verticals are the same question on the other axis.
+  // Verticals score the same way on the other axis.
   CHECK(cost_crowding({ seg(0, 0, 0, 1000, 0), seg(48, 0, 48, 1000, 1) }, em) == 750);
-  // The overlap is what is charged, not either length.
+  // Only the 400-unit overlap counts: 400 * 96 / 192.
   CHECK(cost_crowding({ seg(0, 0, 1000, 0, 0), seg(600, 96, 3000, 96, 1) }, em) == 200);
 }
 
 TEST_CASE("cost: crowding leaves what is not a tight lane to the terms that price it") {
   int32_t const em{ 192 };
-  // Collinear is `corridor`'s, so the two terms never charge one pair twice.
+  // Collinear pairs score in `corridor` alone.
   CHECK(cost_crowding({ seg(0, 0, 1000, 0, 0), seg(0, 0, 1000, 0, 1) }, em) == 0);
-  // One transition's own two legs are one route, not two lanes.
+  // Two legs of one transition score 0.
   CHECK(cost_crowding({ seg(0, 0, 1000, 0, 0), seg(0, 96, 1000, 96, 0) }, em) == 0);
-  // Perpendicular is a crossing or nothing.
+  // Perpendicular pairs score no crowding.
   CHECK(cost_crowding({ seg(0, 0, 1000, 0, 0), seg(500, 50, 500, 900, 1) }, em) == 0);
-  // Parallel and tight but not alongside: end to end, or merely touching.
+  // Parallel and tight with no overlap: end to end, or touching at x=1000.
   CHECK(cost_crowding({ seg(0, 0, 1000, 0, 0), seg(2000, 96, 3000, 96, 1) }, em) == 0);
   CHECK(cost_crowding({ seg(0, 0, 1000, 0, 0), seg(1000, 96, 3000, 96, 1) }, em) == 0);
-  // A degenerate piece has no axis; a zero em prices nothing rather than dividing.
+  // A degenerate piece has no axis and scores 0; a zero em scores 0.
   CHECK(cost_crowding({ seg(5, 5, 5, 5, 0), seg(5, 50, 900, 50, 1) }, em) == 0);
   CHECK(cost_crowding({ seg(0, 0, 1000, 0, 0), seg(0, 96, 1000, 96, 1) }, 0) == 0);
 }
 
 TEST_CASE("cost: crowding is continuous with corridor at the line they share") {
-  // The design claim of 11.6, pinned: as two lanes close to one line, crowding
-  // approaches the shared length `corridor` would charge them at zero.
+  // As two lanes close to one line, crowding approaches the shared length
+  // `corridor` charges at zero separation.
   int32_t const em{ 192 };
   Wide last{ 0 };
   for (int32_t apart = 191; apart >= 1; --apart) {
@@ -1898,7 +2135,7 @@ TEST_CASE("cost: crowding is continuous with corridor at the line they share") {
     CHECK(now >= last);  // closer never charges less
     last = now;
   }
-  CHECK(last == 994);  // one unit apart: 1000 * 191 / 192, a hair short of 1000
+  CHECK(last == 994);  // one unit apart: 1000 * 191 / 192, floored
 }
 
 TEST_CASE("cost: crowding sums every tight pair, and order does not matter") {
@@ -1914,16 +2151,13 @@ TEST_CASE("cost: crowding sums every tight pair, and order does not matter") {
 }
 
 TEST_CASE("cost: a transition whose route vanished is a Tier 0 violation") {
-  // Every Tier-2 term scores an undrawn route perfect -- no bends, no length, no
-  // excess, no crowding -- so a search that can reach one prefers it. Seen:
-  // a composite's transition to its own child, collapsed onto one point by an
-  // arrangement that put the child flush against the composite's wall (11.6).
+  // `vanished` counts transitions with a segment to draw and fewer than two route points.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, b, a, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, b, a, TransKind::Default, {});
 
   SizedLayout z{ blank(c) };
   z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 40 };
@@ -1937,8 +2171,7 @@ TEST_CASE("cost: a transition whose route vanished is a Tier 0 violation") {
                                   { { .x = 300, .y = 30 }, { .x = 100, .y = 30 } } }) };
   CHECK(cost_terms(c, decompose(c), z, drawn, {}, p).vanished == 0);
 
-  // One collapsed to a single point: it scores nothing in Tier 2, which is the
-  // trap, and Tier 0 is what refuses it.
+  // A route collapsed to one point scores nothing in Tier 2 and one Tier-0 violation.
   Routes const collapsed{ routes_of(
       c,
       { { { .x = 100, .y = 10 }, { .x = 300, .y = 10 } }, { { .x = 300, .y = 30 } } }) };
@@ -1948,7 +2181,7 @@ TEST_CASE("cost: a transition whose route vanished is a Tier 0 violation") {
   CHECK(
       cost_less(cost_of(cost_terms(c, decompose(c), z, drawn, {}, p), p), cost_of(t, p)));
 
-  // And none at all is the same defect.
+  // An empty route is vanished too.
   Routes const empty{
     routes_of(c, { { { .x = 100, .y = 10 }, { .x = 300, .y = 10 } }, {} })
   };
@@ -1957,8 +2190,8 @@ TEST_CASE("cost: a transition whose route vanished is a Tier 0 violation") {
 
 namespace {
 
-// Every term by brute force over every pair, the oracle for the indexed scorer. It
-// shares only `overlaps`, `along_border`, `chebyshev_gap` and the containment walk.
+// Every term by brute force over every pair, the oracle for the indexed scorer. Of
+// `cost.cpp` it calls only the containment walk.
 namespace reference {
 
 Wide orient2d(scav_point a, scav_point b, scav_point c) {
@@ -2028,9 +2261,12 @@ struct Trunk {
   bool merged_tail{ false };
 };
 
-Trunk trunk_of(std::vector<scav_point> const &pts, scav_span a, scav_span b) {
+Trunk trunk_of(std::vector<scav_point> const &pts,
+               scav_span a,
+               scav_span b,
+               uint32_t cap = 2) {
   Trunk out;
-  uint32_t const shortest{ imin(imin(a.len, b.len), 2U) };
+  uint32_t const shortest{ imin(imin(a.len, b.len), cap) };
   while ((out.tail < shortest) &&
          same(pts[(a.off + a.len - 1) - out.tail], pts[(b.off + b.len - 1) - out.tail])) {
     ++out.tail;
@@ -2045,6 +2281,45 @@ Trunk trunk_of(std::vector<scav_point> const &pts, scav_span a, scav_span b) {
 
 bool trunk_piece(Trunk const &t, uint32_t len, uint32_t k) {
   return ((k + t.tail) >= len) || (t.merged_tail && ((k + t.tail + 1) == len));
+}
+
+// The span of `pts` reversed into `out`, so a common head reads as a common tail.
+scav_span reversed(std::vector<scav_point> const &pts,
+                   scav_span s,
+                   std::vector<scav_point> &out) {
+  scav_span const at{ .off = static_cast<uint32_t>(out.size()), .len = s.len };
+  for (uint32_t k = s.len; k-- > 0;) { out.push_back(pts[s.off + k]); }
+  return at;
+}
+
+// Whether segments `ku` of `u` and `kv` of `v` both lie in the two routes' common head or
+// common tail, uncapped, with the leg out of or into it where those legs share a run.
+bool fan_pair(Routes const &r, uint32_t u, uint32_t ku, uint32_t v, uint32_t kv) {
+  scav_span const a{ r.route[u] };
+  scav_span const b{ r.route[v] };
+  Trunk const tail{ trunk_of(r.points, a, b, ~0U) };
+  if (trunk_piece(tail, a.len, ku) && trunk_piece(tail, b.len, kv)) { return true; }
+  std::vector<scav_point> back;
+  scav_span const ra{ reversed(r.points, a, back) };
+  scav_span const rb{ reversed(r.points, b, back) };
+  Trunk const head{ trunk_of(back, ra, rb, ~0U) };
+  return trunk_piece(head, a.len, a.len - 2 - ku) &&
+         trunk_piece(head, b.len, b.len - 2 - kv);
+}
+
+// Pairs of different transitions' collinear segments sharing a run outside `fan_pair`.
+int32_t shared_runs(Routes const &r, std::vector<Piece> const &pieces) {
+  int32_t total{ 0 };
+  for (uint32_t i = 0; i < pieces.size(); ++i) {
+    for (uint32_t j = i + 1; j < pieces.size(); ++j) {
+      Piece const &u{ pieces[i] };
+      Piece const &v{ pieces[j] };
+      if (u.trans == v.trans) { continue; }
+      if (shared_run(u.a, u.b, v.a, v.b) <= 0) { continue; }
+      if (!fan_pair(r, u.trans, u.k, v.trans, v.k)) { ++total; }
+    }
+  }
+  return total;
 }
 
 uint32_t direction(scav_point a, scav_point b) {
@@ -2163,19 +2438,76 @@ int32_t box_overlaps(Chart const &c, SizedLayout const &z) {
   return total;
 }
 
-int32_t through_boxes(Chart const &c,
-                      SizedLayout const &z,
-                      Ancestry const &an,
-                      std::vector<Piece> const &pieces) {
-  int32_t total{ 0 };
+// Region `m`'s rect grown across to its owner's box and along to the midpoints of the gaps
+// to its live sibling regions; its rect alone without siblings.
+scav_rect region_cell(Chart const &c, SizedLayout const &z, uint32_t m) {
+  scav_rect const &r{ z.sub[m] };
+  StateId const owner{ c.submachines[m].owner };
+  if (owner.v == INVALID) { return r; }
+  scav_rect const &b{ z.state[owner.v] };
+  int32_t lo_x{ r.x };
+  int32_t hi_x{ r.x + r.w };
+  int32_t lo_y{ r.y };
+  int32_t hi_y{ r.y + r.h };
+  Span const subs{ c.states[owner.v].submachines };
+  for (uint32_t k = 0; k < subs.len; ++k) {
+    uint32_t const o{ c.submachine_ids[subs.off + k].v };
+    if ((o == m) || (c.submachines[o].live == 0)) { continue; }
+    scav_rect const &q{ z.sub[o] };
+    if (((q.y + q.h) <= r.y) || (q.y >= (r.y + r.h))) {
+      lo_x = std::min(lo_x, b.x);
+      hi_x = std::max(hi_x, b.x + b.w);
+      if ((q.y + q.h) <= r.y) {
+        lo_y = std::min(lo_y, q.y + q.h + ((r.y - (q.y + q.h)) / 2));
+      } else {
+        hi_y = std::max(hi_y, r.y + r.h + ((q.y - (r.y + r.h)) / 2));
+      }
+    } else if (((q.x + q.w) <= r.x) || (q.x >= (r.x + r.w))) {
+      lo_y = std::min(lo_y, b.y);
+      hi_y = std::max(hi_y, b.y + b.h);
+      if ((q.x + q.w) <= r.x) {
+        lo_x = std::min(lo_x, q.x + q.w + ((r.x - (q.x + q.w)) / 2));
+      } else {
+        hi_x = std::max(hi_x, r.x + r.w + ((q.x - (r.x + r.w)) / 2));
+      }
+    }
+  }
+  return { .x = lo_x, .y = lo_y, .w = hi_x - lo_x, .h = hi_y - lo_y };
+}
+
+// `through_box`, and `through_region` per piece entering a live region of a state the
+// descent reaches or of a detached one, where neither end lies in the region: its
+// `region_cell`, or its rect where an end is the region's owner.
+void through(Chart const &c,
+             SizedLayout const &z,
+             Ancestry const &an,
+             std::vector<Piece> const &pieces,
+             CostTerms &t) {
   for (Piece const &piece : pieces) {
     Transition const &tr{ c.transitions[piece.trans] };
     scav_rect const reach{ span_rect(piece.a, piece.b) };
+    bool foreign{ false };
     auto const charge = [&](uint32_t st) {
       if (enters(piece.a, piece.b, z.state[st]) && !cost_ancestor(c, an, { st }, tr.src) &&
           !cost_ancestor(c, an, { st }, tr.dst)) {
-        ++total;
+        ++t.through_box;
       }
+      Span const subs{ c.states[st].submachines };
+      bool src_side{ false };
+      bool dst_side{ false };
+      for (uint32_t i = 0; i < subs.len; ++i) {
+        uint32_t const m{ c.submachine_ids[subs.off + i].v };
+        bool const own{ (tr.src.v == st) || (tr.dst.v == st) };
+        scav_rect const cell{ own ? z.sub[m] : region_cell(c, z, m) };
+        if ((c.submachines[m].live == 0) || !enters(piece.a, piece.b, cell)) { continue; }
+        bool const has_src{ within(c, tr.src, m) };
+        bool const has_dst{ within(c, tr.dst, m) };
+        foreign = foreign || (!has_src && !has_dst);
+        src_side = src_side || (has_src && !has_dst);
+        dst_side = dst_side || (has_dst && !has_src);
+      }
+      // An external route's piece entering both its ends' regions crosses their divider.
+      foreign = foreign || ((tr.kind == TransKind::External) && src_side && dst_side);
     };
     for (uint32_t const st : an.detached) { charge(st); }
     std::vector<uint32_t> stack;
@@ -2195,8 +2527,8 @@ int32_t through_boxes(Chart const &c,
         }
       }
     }
+    t.through_region += foreign ? 1 : 0;
   }
-  return total;
 }
 
 // `s` and every state enclosing it, `s` first.
@@ -2303,6 +2635,16 @@ CostTerms terms(Chart const &c,
         if (((in % 2) == 1) && (out == (8 - in))) { ++t.retrace; }
       }
     }
+    for (uint32_t i = 0; (i + 1) < route.len; ++i) {
+      for (uint32_t j = i + 2; (j + 1) < route.len; ++j) {
+        if (crosses(r.points[route.off + i],
+                    r.points[route.off + i + 1],
+                    r.points[route.off + j],
+                    r.points[route.off + j + 1])) {
+          ++t.self_crossing;
+        }
+      }
+    }
   }
   for (uint32_t tr = 0; tr < c.transitions.size(); ++tr) {
     if ((tr < g.trans_segments.size()) && (g.trans_segments[tr].len != 0) &&
@@ -2312,6 +2654,7 @@ CostTerms terms(Chart const &c,
   }
   t.crossings = crossings(pieces, crossings_of);
   t.corridor = corridor(r, pieces);
+  t.shared_run = shared_runs(r, pieces);
   t.crowding = crowding(pieces, p.font_size_grid);
 
   for (uint32_t tr = 0; tr < c.transitions.size(); ++tr) {
@@ -2363,11 +2706,16 @@ CostTerms terms(Chart const &c,
            at = enclosing_state(c, at)) {
         if (at.v == tr.dst.v) { host = at.v; }
       }
+      if ((tr.src == tr.dst) && (tr.kind != TransKind::Default)) { host = tr.src.v; }
     }
     for (uint32_t st = 0; st < c.states.size(); ++st) {
       if (c.states[st].live == 0) { continue; }
-      bool const bands{ overlaps(r.placed[i], z.before[st]) ||
-                        overlaps(r.placed[i], z.after[st]) };
+      // Bands with zero width or height are ignored.
+      auto const wall = [&](std::vector<scav_rect> const &v) {
+        return (st < v.size()) && (v[st].w > 0) && (v[st].h > 0) &&
+               overlaps(r.placed[i], v[st]);
+      };
+      bool const bands{ wall(z.before) || wall(z.after) || wall(z.lead) || wall(z.trail) };
       if (st == host) {
         if (bands) { ++t.label_over_box; }
       } else if (encloses[st] == 2) {
@@ -2381,13 +2729,14 @@ CostTerms terms(Chart const &c,
     for (Piece const &piece : pieces) {
       scav_rect const seg{ span_rect(piece.a, piece.b) };
       Wide const away{ chebyshev_gap(r.placed[i], seg) };
+      if (overlaps(r.placed[i], seg)) { ++t.label_over_route; }
       if (piece.trans == subject) {
         own = (own < 0) ? away : imin(own, away);
         continue;
       }
       other = (other < 0) ? away : imin(other, away);
-      if (overlaps(r.placed[i], seg)) { ++t.label_over_route; }
     }
+    if (own > label_leader(p)) { ++t.label_far; }
     if ((own >= 0) && (other >= 0)) {
       Wide const shortfall{ (own + height) - other };
       if (shortfall > 0) { t.label_near += shortfall; }
@@ -2395,24 +2744,21 @@ CostTerms terms(Chart const &c,
     if (subject != INVALID) { mark(c.transitions[subject].src, 0); }
   }
 
-  for (SplitSegment const &seg : g.segments) {
-    if (seg.separator == 0) { continue; }
-    Transition const &tr{ c.transitions[seg.trans.v] };
+  for (SplitPort const &port : g.ports) {
+    if ((port.sub.v == INVALID) || (port.into.v == INVALID)) { continue; }
+    Transition const &tr{ c.transitions[port.trans.v] };
     StateKind const src_kind{ c.states[tr.src.v].kind };
     StateKind const dst_kind{ c.states[tr.dst.v].kind };
     if ((src_kind == StateKind::Fork) || (src_kind == StateKind::Join) ||
         (dst_kind == StateKind::Fork) || (dst_kind == StateKind::Join)) {
       continue;
     }
-    SubmachineId const from{ g.ports[seg.src_port].sub };
-    SubmachineId const to{ g.ports[seg.dst_port].sub };
-    if ((from.v == INVALID) || (to.v == INVALID)) { continue; }
-    if (!adjacent(z.sub[from.v], z.sub[to.v], p.sub_sep)) { ++t.adjacency; }
+    if (!adjacent(z.sub[port.sub.v], z.sub[port.into.v], p.sub_sep)) { ++t.adjacency; }
   }
 
   Ancestry const an{ cost_flatten_ancestry(c) };
   t.box_overlap = box_overlaps(c, z);
-  t.through_box = through_boxes(c, z, an, pieces);
+  through(c, z, an, pieces, t);
   for (Piece const &piece : pieces) {
     for (uint32_t st = 0; st < c.states.size(); ++st) {
       if ((c.states[st].live != 0) &&
@@ -2422,20 +2768,34 @@ CostTerms terms(Chart const &c,
       }
     }
   }
-  for (Piece const &piece : pieces) {
-    Transition const &trans{ c.transitions[piece.trans] };
-    scav_rect const reach{ span_rect(piece.a, piece.b) };
-    for (uint32_t m = 0; m < c.submachines.size(); ++m) {
-      if ((c.submachines[m].live == 0) || (c.submachines[m].owner.v == INVALID)) {
-        continue;
-      }
-      scav_rect const &region{ z.sub[m] };
-      if (!overlaps(reach, grow(region, 1)) || !enters(piece.a, piece.b, region)) {
-        continue;
-      }
-      if (within(c, trans.src, m) || within(c, trans.dst, m)) { continue; }
-      ++t.through_region;
-      break;
+  for (uint32_t tr = 0; tr < c.transitions.size(); ++tr) {
+    scav_span const route{ r.route[tr] };
+    if (!inner_loop(c, tr) || (route.len < 2)) { continue; }
+    uint32_t const st{ c.transitions[tr].dst.v };
+    scav_rect const box{ z.state[st] };
+    uint32_t const ruled{ (st < s.n_box_state) ? s.box_state[st].ruled : 0U };
+    auto const drawn = [&](scav_point at) {
+      bool const border{ (((at.x == box.x) || (at.x == box.x + box.w)) &&
+                          (at.y >= box.y) && (at.y <= box.y + box.h)) ||
+                         (((at.y == box.y) || (at.y == box.y + box.h)) &&
+                          (at.x >= box.x) && (at.x <= box.x + box.w)) };
+      auto const row = [st](std::vector<scav_rect> const &v) {
+        return (st < v.size()) ? v[st] : scav_rect{};
+      };
+      scav_rect const b{ row(z.before) };
+      scav_rect const a{ row(z.after) };
+      scav_rect const l{ row(z.lead) };
+      scav_rect const w{ row(z.trail) };
+      bool const across_x{ (at.x >= b.x) && (at.x <= b.x + b.w) };
+      bool const across_y{ (at.y >= l.y) && (at.y <= l.y + l.h) };
+      return border ||
+             (((ruled & 1U) != 0) && (b.h > 0) && across_x && (at.y == b.y + b.h)) ||
+             (((ruled & 2U) != 0) && (a.h > 0) && across_x && (at.y == a.y)) ||
+             (((ruled & 4U) != 0) && (l.w > 0) && across_y && (at.x == l.x + l.w)) ||
+             (((ruled & 8U) != 0) && (w.w > 0) && across_y && (at.x == w.x));
+    };
+    if (!drawn(r.points[route.off]) || !drawn(r.points[route.off + route.len - 1])) {
+      ++t.loop_unanchored;
     }
   }
   return t;
@@ -2443,19 +2803,20 @@ CostTerms terms(Chart const &c,
 
 }  // namespace reference
 
-constexpr uint32_t TERMS{ 18 };
+constexpr uint32_t TERMS{ 19 };
 
 std::array<int64_t, TERMS> terms_of(CostTerms const &t) {
-  return { t.bends,    t.corridor,      t.crossings,     t.excess_len,  t.adjacency,
-           t.label,    t.label_near,    t.aspect,        t.area,        t.crowding,
-           t.length,   t.transit_bends, t.whitespace,    t.through_box, t.box_overlap,
-           t.vanished, t.flush,         t.through_region };
+  return { t.bends,    t.corridor,      t.crossings,      t.excess_len,  t.adjacency,
+           t.label,    t.label_near,    t.aspect,         t.area,        t.crowding,
+           t.length,   t.transit_bends, t.whitespace,     t.through_box, t.box_overlap,
+           t.vanished, t.flush,         t.through_region, t.label_far };
 }
 
 constexpr std::array<char const *, TERMS> TERM_NAMES{
-  "bends",      "corridor",    "crossings",   "excess_len", "adjacency", "label",
-  "label_near", "aspect",      "area",        "crowding",   "length",    "transit_bends",
-  "whitespace", "through_box", "box_overlap", "vanished",   "flush",     "through_region"
+  "bends",    "corridor",      "crossings",      "excess_len",  "adjacency",
+  "label",    "label_near",    "aspect",         "area",        "crowding",
+  "length",   "transit_bends", "whitespace",     "through_box", "box_overlap",
+  "vanished", "flush",         "through_region", "label_far"
 };
 
 // The first term the two disagree on, or empty.
@@ -2466,13 +2827,15 @@ std::string first_difference(CostTerms const &got, CostTerms const &want) {
     if (a[i] != b[i]) { return TERM_NAMES[i]; }
   }
   if (got.retrace != want.retrace) { return "retrace"; }
+  if (got.self_crossing != want.self_crossing) { return "self_crossing"; }
+  if (got.shared_run != want.shared_run) { return "shared_run"; }
   if (got.label_over_box != want.label_over_box) { return "label_over_box"; }
   if (got.label_over_route != want.label_over_route) { return "label_over_route"; }
+  if (got.loop_unanchored != want.loop_unanchored) { return "loop_unanchored"; }
   return {};
 }
 
-// Coordinates on a lattice of five with an occasional unit nudge, straddling zero, so
-// shared borders, collinear legs and negative lane keys are common.
+// Seeded coordinates on a lattice of 5 in [-60, 60], a quarter nudged by -2..2.
 struct Lattice {
   uint64_t s;
   uint32_t next(uint32_t n) {
@@ -2537,7 +2900,7 @@ Chart random_chart(Lattice &r) {
   for (uint32_t i = 0; i < trans; ++i) {
     StateId const src{ alive[r.next(static_cast<uint32_t>(alive.size()))] };
     StateId const dst{ alive[r.next(static_cast<uint32_t>(alive.size()))] };
-    build_trans(c, src, dst, TransKind::External, {});
+    build_trans(c, src, dst, TransKind::Default, {});
   }
   for (StateId const st : states) {
     if (dead[st.v] != 0) { c.states[st.v].live = 0; }
@@ -2548,8 +2911,8 @@ Chart random_chart(Lattice &r) {
   return c;
 }
 
-// One candidate's geometry over `c`, all drawn at random; some routes end on another's
-// last points, so trunks come up.
+// Random geometry, routes and boxes for `c`; a quarter of routes after the first end on
+// an earlier route's last one or two points.
 struct Candidate {
   SizedLayout z;
   Routes r;
@@ -2608,8 +2971,8 @@ Candidate random_candidate(Chart const &c, Lattice &r) {
   return out;
 }
 
-// `k` moved by `by` on both axes. The lattice straddles zero, so a shift changes which
-// lane-key bytes agree and so which sort passes run.
+// `k` moved by `by` on both axes, which changes which lane-key bytes agree and
+// which radix passes run.
 Candidate shifted(Candidate k, int32_t by) {
   auto const rect = [by](scav_rect &x) {
     x.x += by;
@@ -2655,7 +3018,7 @@ TEST_CASE("cost: the indexed terms are the direct scans' over seeded random char
   for (uint32_t trial = 0; (trial < 600) && (mismatches == 0); ++trial) {
     Chart const c{ random_chart(r) };
     SplitGraph const g{ decompose(c) };
-    CostContext const ctx{ cost_context(c) };
+    CostContext const ctx{ cost_context(c, g) };
     for (uint32_t cand = 0; cand < 4; ++cand) {
       constexpr std::array<int32_t, 4> MOVE{ 0, 1000, 0, -1000 };
       Candidate const k{ shifted(random_candidate(c, r), MOVE[cand]) };
@@ -2691,8 +3054,7 @@ TEST_CASE("cost: the indexed terms are the direct scans' over seeded random char
 }
 
 TEST_CASE("cost: the indexed terms are the direct scans' at the edges") {
-  // One composite holding two siblings and a region, and one state outside it,
-  // so a label can sit in the composite both ends share.
+  // Outer encloses both ends of A -> B; Far lies outside it.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const outer{ build_state(c, root, "Outer", StateKind::Normal, {}) };
@@ -2700,17 +3062,17 @@ TEST_CASE("cost: the indexed terms are the direct scans' at the edges") {
   StateId const a{ build_state(c, inner, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, inner, "B", StateKind::Normal, {}) };
   StateId const far{ build_state(c, root, "Far", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, b, far, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, b, far, TransKind::Default, {});
   SplitGraph const g{ decompose(c) };
-  CostContext const ctx{ cost_context(c) };
-  // A band of five and an em of twenty.
+  CostContext const ctx{ cost_context(c, g) };
+  // A band of twelve and an em of twenty.
   scav_profile p{ profile() };
   p.node_sep = 30;
   p.pad = 12;
   p.font_size_grid = 20;
   int32_t const near{ border_band(p) - 1 };
-  REQUIRE(near == 4);
+  REQUIRE(near == 11);
 
   SizedLayout z{ blank(c) };
   z.state[outer.v] = { .x = 0, .y = 0, .w = 400, .h = 200 };
@@ -2734,8 +3096,8 @@ TEST_CASE("cost: the indexed terms are the direct scans' at the edges") {
   CHECK(agree(routes_of(c, { { { .x = 90, .y = 90 } }, { { .x = 190, .y = 90 } } }), {})
             .vanished == 2);
 
-  // Along A's top border out to just past the band, each on a cell edge of the grid of
-  // grown states; then a lone point on the border.
+  // Along A's top border, out to one unit past the band either side; then single-point
+  // routes on A's and B's top borders.
   for (int32_t const off : { 0, near, near + 1, -near, -(near + 1) }) {
     CAPTURE(off);
     Routes const along{ routes_of(
@@ -2794,7 +3156,7 @@ TEST_CASE("cost: the indexed terms are the direct scans' at the edges") {
 
 TEST_CASE("cost: a thread's kept buffers carry nothing from one chart to the next") {
   // A, then B, then A on this thread, each against a fresh thread's score; the random
-  // pairs grow and shrink every buffer between calls.
+  // pairs resize the kept buffers between calls.
   auto const fresh =
       [](Chart const &c, SplitGraph const &g, Candidate const &k, scav_profile const &p) {
         CostTerms out;
@@ -2835,24 +3197,24 @@ TEST_CASE("cost: a thread's kept buffers carry nothing from one chart to the nex
 }
 
 TEST_CASE("cost: a context built once scores every candidate as one built for it") {
-  // The context also comes out as it went in.
   Lattice r{ 7 };
   for (uint32_t trial = 0; trial < 40; ++trial) {
     CAPTURE(trial);
     Chart const c{ random_chart(r) };
     SplitGraph const g{ decompose(c) };
-    CostContext const ctx{ cost_context(c) };
+    CostContext const ctx{ cost_context(c, g) };
     bool agree{ true };
     for (uint32_t cand = 0; cand < 12; ++cand) {
       Candidate const k{ random_candidate(c, r) };
       scav_profile const p{ random_profile(r) };
       scav_spaces const s{ k.spaces() };
       CostTerms const held{ cost_terms(ctx, c, g, k.z, k.r, s, p) };
-      CostTerms const fresh{ cost_terms(cost_context(c), c, g, k.z, k.r, s, p) };
+      CostTerms const fresh{ cost_terms(cost_context(c, g), c, g, k.z, k.r, s, p) };
       agree = agree && first_difference(held, fresh).empty();
     }
     CHECK(agree);
-    CostContext const again{ cost_context(c) };
+    // Scoring leaves `ctx` equal to a fresh build, its grid cells unfilled.
+    CostContext const again{ cost_context(c, g) };
     CHECK(ctx.an.tin == again.an.tin);
     CHECK(ctx.an.tout == again.an.tout);
     CHECK(ctx.an.detached == again.an.detached);

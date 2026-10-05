@@ -1,10 +1,11 @@
 #ifndef SCAV_LAYOUT_ROUTER_H_INCLUDED
 #define SCAV_LAYOUT_ROUTER_H_INCLUDED
 
-// The router boundary: one frame's obstacles and nets in, one polyline per net
-// out. Internal, so no `scav_` prefix; the ABI sees a router by name (11.5).
+// The router boundary: one frame's obstacles and nets in, one polyline per net out.
+// Internal; the ABI selects a router by name.
 
 #include "scav/scav_core.h"
+#include "scav/scav_layout.h"
 #include "scav/scav_layout_c.h"
 #include "scav/scav_types.h"
 #include "scav_int.h"
@@ -14,54 +15,77 @@
 
 namespace scav {
 
-// The room a route keeps from a box it passes.
-constexpr int32_t route_clearance(scav_profile const &p) {
-  return imax(p.node_sep / 3, 1);
-}
-
-// How far inside the state it is drawn in a route keeps: half the ring a box's
-// contents sit inside, capped by the clearance, so a child at `pad` keeps its
-// own bumper. A segment parallel to a border and nearer than this reads as
-// the border itself (11.10g).
-constexpr int32_t border_band(scav_profile const &p) {
-  return imax(imin(route_clearance(p), p.pad) / 2, 1);
-}
-
-// An end at a box centre names that box, so a router can move the point onto
-// its border instead.
+// An end that names a box sits at its centre; a router may move it onto the border.
 struct RouteNet {
   scav_point src{}, dst{};
   uint32_t src_obstacle{ INVALID }, dst_obstacle{ INVALID };  // -> obstacles
   uint32_t waypoint_off{ 0 }, waypoint_len{ 0 };  // -> waypoints, phase 1's corridor
-  // Which face this end leaves by -- 0 left, 1 right, 2 top, 3 bottom -- or
-  // INVALID to let the router choose. A caller sets these when the choice is
-  // being searched rather than ruled (11.10e).
+  // Named face per end: 0 left, 1 right, 2 top, 3 bottom; INVALID lets the router choose.
   uint32_t src_face{ INVALID }, dst_face{ INVALID };
-  // 1 seats a straight leg between two parallel faces at the lower end of the
-  // run both faces can seat, not between their centres.
+  // 1 seats a straight leg between parallel faces at the low end of the run both faces
+  // seat; 0 seats it midway between the face centres.
   uint32_t lean{ 0 };
+  // A loop's reach: its corridor runs this far out from each of its two seats, on its
+  // points' face, else its box's least-used face unless one is named.
+  int32_t loop{ 0 };
+  int32_t src_clear{ 0 }, dst_clear{ 0 };     // the least straight run at each end
+  uint32_t trans{ INVALID }, seg{ INVALID };  // the caller's ids, read only by the trace
+  uint32_t apart{ INVALID };                  // -> an earlier net this one keeps clear of
+  // -> obstacles: the box a loop between two points on its border runs off.
+  uint32_t loop_box{ INVALID };
+  // Per end naming no box, 1 where its leg runs straight to `src_stub` or `dst_stub` and
+  // the route meets that point along the leg's line.
+  uint32_t src_stubbed{ 0 }, dst_stubbed{ 0 };
+  scav_point src_stub{}, dst_stub{};
 };
+
+// Face of `r` that `at` lies on: 0 left, 1 right, 2 top, 3 bottom, else INVALID. Corners
+// resolve as in `ortho_ring`.
+uint32_t face_of(scav_point at, scav_rect const &r);
+
+// Appends to `out` the run between a loop's `ends` on each face of `r` they touch, padded
+// by `clear`, as spans of obstacle `st`.
+void loop_occupied(std::array<scav_point, 2> const &ends,
+                   scav_rect const &r,
+                   uint32_t st,
+                   int32_t clear,
+                   std::vector<OccupiedSpan> &out);
+
+// Whether `pos` lies inside a span on `face` of `obstacle`.
+bool occupied_at(std::vector<OccupiedSpan> const &spans,
+                 uint32_t obstacle,
+                 uint32_t face,
+                 int32_t pos);
+
+// `pos` moved to the nearest coordinate in `[lo, hi]` that `occupied_at` rejects, ties to
+// the lower; false and `pos` unchanged when none is.
+bool occupied_free(std::vector<OccupiedSpan> const &spans,
+                   uint32_t obstacle,
+                   uint32_t face,
+                   int32_t lo,
+                   int32_t hi,
+                   int32_t &pos);
 
 struct RouteInput {
   scav_rect region{};                // the frame's rect; a route stays inside it
-  std::vector<scav_rect> obstacles;  // every box overlapping the region
-  // Parallel to `obstacles`, or empty for none of them: a box whose glyph is
-  // inscribed in it rather than filling it -- a disc or a diamond -- which an
-  // axis-aligned route reaches only at the midpoint of a face. Layout knows it
-  // from the kind; a router only needs the consequence.
+  std::vector<scav_rect> obstacles;  // the boxes and walls routes keep out of
+  // Parallel to `obstacles`, or empty for none: nonzero for a disc or diamond inscribed
+  // in its box, which a route meets only at a face midpoint.
   std::vector<uint8_t> inscribed;
-  // Parallel to `obstacles`, or empty for zero throughout: the corner arc of
-  // the shape drawn in that box, which is border a seat must stay out of
-  // because nothing is drawn under it. Layout knows it from the kind and the
-  // extent; a router only needs the inset.
+  // Parallel to `obstacles`, or empty for all zero: the corner arc radius of the shape
+  // drawn in that box, which seats are held off.
   std::vector<int32_t> corner;
-  std::vector<RouteNet> nets;  // in (transition, ordinal) order
+  uint32_t first_wall{ INVALID };  // obstacles from this index on are walls; INVALID: none
+  std::vector<RouteNet> nets;      // in (transition, ordinal) order
   std::vector<scav_point> waypoints;
   scav_profile profile{};
-  // The box the frame's routes are drawn inside, or zero-sized for the root:
-  // a route keeps off its border rather than running along it, and an end on
-  // that border -- a port -- leaves it square (11.10g).
+  // The box the frame's routes are drawn inside, zero-sized for the root. Routes keep
+  // out of its `border_band`; an end in that band leaves square to the border.
   scav_rect enclosure{};
+  std::vector<OccupiedSpan> occupied;  // inner loops' legs on box faces
+  // Walls a route meets only along its border or an end's stub: the gaps between the
+  // frame's region and its sibling regions.
+  std::vector<scav_rect> gaps;
 };
 
 enum class RouteFailure : int32_t {
@@ -72,12 +96,10 @@ enum class RouteFailure : int32_t {
 };
 
 struct RouteMetrics {
-  int32_t bends{ 0 };
-  int64_t length{ 0 };
   RouteFailure failed{ RouteFailure::None };
-  // Routed, but only after giving up the clearance it wanted (11.5), so this
-  // shape may run flush against a box. Not a failure.
+  // 1 when routed only at zero clearance; the shape may run flush against a box.
   int32_t reseated{ 0 };
+  int32_t occupied{ 0 };  // ends left inside an occupied span, with no free position
 };
 
 struct RouteOutput {
@@ -87,12 +109,11 @@ struct RouteOutput {
 };
 
 struct RouterName {
-  char const *bytes;  // a literal: static storage, so it outlives every caller
+  char const *bytes;  // a string literal, valid for the program's lifetime
   uint32_t len;
 };
 
-// Stateless and const, so two routers differ only in the shape they return.
-// `out` is the caller's and the callee clears it, so one is reused per frame.
+// Stateless and const; `route` clears the caller-owned `out` before filling it.
 class Router {
  public:
   Router() = default;
@@ -102,17 +123,15 @@ class Router {
   Router &operator=(Router &&) = delete;
   virtual ~Router() = default;
 
-  // Both are hashed layout inputs (6). Bytes and a length, not a
-  // `string_view`, which is outside this library's header subset (6).
+  // Both are hashed layout inputs.
   [[nodiscard]] virtual RouterName name() const = 0;
   [[nodiscard]] virtual uint32_t version() const = 0;
 
-  // How far outside `region` this router needs lanes; the caller grows the region
-  // by exactly this. A box on the frame's own edge has no room otherwise.
+  // How far the caller grows `region` on every side for this router's lanes.
   [[nodiscard]] virtual int32_t margin(scav_profile const & /*p*/) const { return 0; }
 
-  // Bit f where naming face f at end `end` (0 source, 1 destination) of
-  // `in.nets[net]` can change the route. Reads `in` but not that end's own face.
+  // Bit f set where naming face f at end `end` (0 source, 1 destination) of
+  // `in.nets[net]` can change the route; independent of that end's own named face.
   [[nodiscard]] virtual uint32_t effective_faces(RouteInput const & /*in*/,
                                                  uint32_t /*net*/,
                                                  uint32_t /*end*/) const {
@@ -124,8 +143,8 @@ class Router {
   virtual void route(RouteInput const &in, RouteOutput &out) const = 0;
 };
 
-// Threads phase 1's corridor and takes both ends where phase 3 put them: no
-// obstacle set, no opinion of its own.
+// Joins each net's `src`, corridor waypoints and `dst` with straight segments; ignores
+// obstacles.
 class StraightRouter final : public Router {
  public:
   [[nodiscard]] RouterName name() const override {
@@ -135,8 +154,7 @@ class StraightRouter final : public Router {
   void route(RouteInput const &in, RouteOutput &out) const override;
 };
 
-// A separated orthogonal visibility graph per frame and A* over it, so an edge
-// through a box is unrepresentable rather than priced (11.5).
+// A* over a separated orthogonal visibility graph per frame whose edges stay out of boxes.
 class OrthogonalRouter final : public Router {
  public:
   [[nodiscard]] RouterName name() const override {
@@ -151,9 +169,6 @@ class OrthogonalRouter final : public Router {
 };
 
 Router const *router_at(uint32_t index);  // null past the end
-
-// Shared, so every router counts a bend and a length the same way.
-void measure(std::vector<scav_point> const &points, scav_span at, RouteMetrics &out);
 
 }  // namespace scav
 

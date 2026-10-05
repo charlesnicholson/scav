@@ -1,5 +1,4 @@
-// Hand-transcribed charts, written the way someone would write them, where
-// synthetic input has uniform branching and no accidental structure.
+// Parser tests over the hand-transcribed charts in test_charts.h.
 
 #include "core/tests/test_charts.h"
 #include "core/tests/test_support.h"
@@ -52,8 +51,6 @@ TEST_CASE("corpus: every statement's span lands inside the document") {
       CHECK_MESSAGE(s.src.len > 0, c.name);
       CHECK_MESSAGE(static_cast<size_t>(s.src.off) + s.src.len <= len, c.name);
     }
-    // Asserted here as well as in validation, so the parser never hands over a
-    // span the validator would reject.
     CHECK(r.pd.doc.text == make_span(0, len));
   }
 }
@@ -135,8 +132,7 @@ TEST_CASE("corpus: vac is the chart the design specifies") {
   CHECK(count_of(r.pd, StmtKind::Trans) == 6);
   CHECK(count_of(r.pd, StmtKind::Attr) == 3);
 
-  // The cross-document endpoint is an ordinary path, because an include alias
-  // is an ordinary state name.
+  // The cross-document endpoint is an ordinary path through the include alias.
   bool found_battery_low{ false };
   for (uint32_t const stmt : stmts_of(r.pd, StmtKind::Trans)) {
     if (str(r.pd, trans_at(r.pd, stmt).label) != "battery low") { continue; }
@@ -183,8 +179,6 @@ TEST_CASE("corpus: tcp keeps its long hierarchical edges as written") {
 }
 
 TEST_CASE("corpus: tcp's duplicate names in different submachines are distinct rows") {
-  // `Open` exists in both halves. Addressing is by path, so there is no
-  // display-name-versus-identifier split to invent.
   Parsed const r{ parse(TCP) };
   REQUIRE(r.ok);
   uint32_t opens{ 0 };
@@ -244,13 +238,11 @@ TEST_CASE("corpus: ota's list attribute keeps its order") {
 }
 
 TEST_CASE("corpus: reformatting a chart onto one line changes nothing but the spans") {
-  // Newlines carry nothing, which is what makes byte-identical output
-  // the printer's job rather than the format's.
   for (CorpusChart const &c : corpus()) {
     Parsed const spread{ parse(c.text) };
     REQUIRE(spread.ok);
 
-    // Crude on purpose -- it only has to be whitespace-equivalent.
+    // Drops `//` comments and turns newlines and tabs outside strings into spaces.
     std::string flat;
     bool in_string{ false };
     for (uint32_t i = 0; i < c.text.size(); ++i) {
@@ -280,8 +272,6 @@ TEST_CASE("corpus: reformatting a chart onto one line changes nothing but the sp
 }
 
 TEST_CASE("corpus: parsing the same bytes twice yields identical structure") {
-  // Determinism discipline is in force from the first commit, and a
-  // parser that depends on nothing but its input is where that starts.
   for (CorpusChart const &c : corpus()) {
     Parsed const first{ parse(c.text) };
     Parsed const second{ parse(c.text) };

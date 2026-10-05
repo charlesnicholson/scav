@@ -1,5 +1,4 @@
-// Split out so doctest's implementation is compiled exactly once per test
-// executable and no test source has to remember the define.
+// Doctest's implementation and `main`, linked into every test executable.
 
 #define DOCTEST_CONFIG_IMPLEMENT
 #include "doctest.h"

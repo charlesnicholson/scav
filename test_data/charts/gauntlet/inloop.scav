@@ -1,0 +1,15 @@
+// Internal self-transitions on a leaf, on a described leaf and on a composite: each
+// leaves its state's inner face and returns to it, with its label beside it, inside.
+chart inloop "loops drawn inside their states" {
+  state Idle,
+  state Busy "a description above its loops",
+  state Box { state Inner, trans * -> Inner },
+
+  trans * -> Idle,
+  trans Idle -> Busy "start",
+  trans Busy -> Box "hand over",
+  trans internal Idle -> Idle "poll",
+  trans internal Busy -> Busy "tick",
+  trans local Busy -> Busy "tock",
+  trans internal Box -> Box "refresh",
+}

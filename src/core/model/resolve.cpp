@@ -16,15 +16,15 @@ namespace scav {
 
 namespace {
 
-// The live child of `m` named `name`, or INVALID. A `$` spelling matches each
-// unnamed candidate's segment through the helper chart_path_of prints with.
+// The live child of `m` named `name`, or INVALID. A `$` name matches an unnamed
+// child's model_state_segment spelling.
 StateId find_in_submachine(Chart const &c, SubmachineId m, std::string_view name) {
   Span const kids{ c.submachines[m.v].children };
   bool const synthetic{ !name.empty() && (name[0] == '$') };
   std::string spelled;
   for (uint32_t i = 0; i < kids.len; ++i) {
     StateId const id{ c.state_ids[kids.off + i] };
-    if (id.v >= c.states.size()) { continue; }  // validation's finding, not ours
+    if (id.v >= c.states.size()) { continue; }  // out of range; validation reports it
     State const &s{ c.states[id.v] };
     if (s.live == 0) { continue; }
     if (synthetic) {
@@ -39,8 +39,8 @@ StateId find_in_submachine(Chart const &c, SubmachineId m, std::string_view name
   return { INVALID };
 }
 
-// A state an include synthesized whose target is not attached; descending into
-// one gives CrossesInclude, since its interior is in another file.
+// True when `id` hosts an include with no attached target; descending into it
+// is CrossesInclude.
 bool is_unresolved_alias(Chart const &c, StateId id) {
   for (Include const &inc : c.includes) {
     if ((inc.host == id) && (inc.target.v == INVALID)) { return true; }
@@ -129,8 +129,6 @@ ResolveStatus model_resolve_segments(Chart const &c,
     if (cur.v == INVALID) { return ResolveStatus::NotFound; }
   }
 
-  // The last segment names a state, so there is nothing left for a qualifier
-  // to select.
   ResolveSeg const &last{ segs[count - 1] };
   if (!last.qualifier.empty() || (last.ordinal != INVALID)) {
     return ResolveStatus::BadQualifier;

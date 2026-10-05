@@ -42,7 +42,6 @@ ColumnId column_register(Chart &c,
   if ((elem_size == 0) || (elem_align == 0) || ((elem_size % elem_align) != 0)) {
     return { INVALID };
   }
-  // Re-registering a name is a caller bug, not an upsert.
   if (column_find(c, name).v != INVALID) { return { INVALID }; }
 
   ColumnId const id{ narrow_clamp<uint32_t>(c.columns.size()) };

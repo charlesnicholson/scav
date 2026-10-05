@@ -1,0 +1,14 @@
+// An external transition into a composite that carries a header and an internal loop:
+// the route leaves through a side clear of the header and the loop's room.
+chart headed "an external transition into a decorated composite" {
+  state Box "a header over the contents" {
+    state Idle,
+    state Busy { state Work, trans * -> Work, trans internal Work -> Work "tick" },
+    trans * -> Idle,
+    trans Idle -> Busy "start",
+  },
+
+  trans * -> Box,
+  trans internal Box -> Box "audit",
+  trans external Box/Idle -> Box/Busy/Work "rerun",
+}

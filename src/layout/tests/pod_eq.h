@@ -1,9 +1,7 @@
 #ifndef SCAV_LAYOUT_TESTS_POD_EQ_H_INCLUDED
 #define SCAV_LAYOUT_TESTS_POD_EQ_H_INCLUDED
 
-// The C structs carry no operators and tests compare them field-wise. Here
-// rather than in `geom.h` so the library's own vocabulary stays without them,
-// and here rather than in each test file so five copies cannot disagree.
+// Field-wise `operator==` for the C structs, for tests.
 
 #include "scav/scav_layout_c.h"
 
@@ -29,9 +27,7 @@ constexpr bool operator==(scav_port_slot const &a, scav_port_slot const &b) {
          (a.boundary_depth == b.boundary_depth);
 }
 
-// Element-wise, because the operators above are `scav`'s and the structs are
-// the C ABI's: argument-dependent lookup from inside `std` looks in the global
-// namespace and does not find them, so `vector == vector` will not compile.
+// Element-wise equality of two vectors of C structs, by the operators above.
 template <typename T>
 bool same_rows(std::vector<T> const &a, std::vector<T> const &b) {
   if (a.size() != b.size()) { return false; }

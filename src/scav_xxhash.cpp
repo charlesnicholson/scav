@@ -1,6 +1,3 @@
-// Rotation goes through `<bit>`: `__builtin_rotl` is not standard C++ and a
-// hand-rolled shift pair is UB at a rotation of zero.
-
 #include "scav_xxhash.h"
 
 #include "scav/scav_types.h"
@@ -51,8 +48,7 @@ uint32_t xxhash32(scav_byte const *bytes, size_t len, uint32_t seed) {
     h = seed + PRIME5;
   }
 
-  // Mixing the length in is what separates two inputs that differ only in
-  // trailing structure. Truncating past 4 GiB is the reference behaviour.
+  // Adds the length mod 2^32, as the reference does.
   h += static_cast<uint32_t>(len & 0xFFFF'FFFFU);
 
   for (; (end - at) >= 4; at += 4) { h = std::rotl(h + (lane(at) * PRIME3), 17) * PRIME4; }

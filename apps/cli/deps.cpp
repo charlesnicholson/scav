@@ -1,5 +1,4 @@
-// The document network as a make/ninja depfile, so a build re-renders chart A
-// when a document it includes changes. This is `gcc -M`.
+// `scav deps`: the document network as a make/ninja depfile, like `gcc -M`.
 
 #include "cli.h"
 
@@ -14,8 +13,7 @@ namespace cli {
 
 namespace {
 
-// make and ninja read the same escapes here: a space is `\ `, a hash starts a
-// comment, and a dollar opens a variable in both dialects.
+// Escapes a path for make and ninja: space and `#` take a backslash, `$` doubles.
 void append_depfile_path(std::string &out, std::string_view path) {
   for (char const ch : path) {
     switch (ch) {
@@ -32,16 +30,14 @@ void append_depfile_path(std::string &out, std::string_view path) {
 
 int run_deps(char const *path, char const *target) {
   Loaded net;
-  // Structural validity is `check`'s question: a network that resolved is enough
-  // to name its files.
+  // Loads without validating.
   load_and_report(path, false, net);
   if (net.code == EXIT_UNUSABLE) { return EXIT_UNUSABLE; }
 
   std::string out;
   append_depfile_path(out, (target != nullptr) ? target : path);
   out += ':';
-  // Document order comes from the include graph rather than from arrival, so the
-  // line is the same however the documents were fetched.
+  // Documents are in include-graph order, independent of fetch order.
   for (Document const &doc : net.chart.documents) {
     out += ' ';
     append_depfile_path(out, chart_string(net.chart, doc.path));

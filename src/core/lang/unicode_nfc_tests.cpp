@@ -141,8 +141,8 @@ TEST_CASE("nfc: a singleton decomposition is replaced and not restored") {
 }
 
 TEST_CASE("nfc: a blocked mark does not reach past the one in front of it") {
-  // Same combining class, so the second is blocked from the base even though
-  // the base could compose with it in isolation.
+  // U+0328 (class 202) orders before U+0301 (class 230) and composes with `a`;
+  // U+0105 has no composite with U+0301.
   CHECK(nfc({ 'a', 0x0328, 0x0301 }) == cps({ 0x0105, 0x0301 }));
   CHECK(nfc({ 'a', 0x0301, 0x0328 }) == cps({ 0x0105, 0x0301 }));
 }
@@ -163,8 +163,7 @@ TEST_CASE("nfc: Hangul composes and decomposes algorithmically") {
 }
 
 TEST_CASE("nfc: every Hangul syllable round-trips through its jamo") {
-  // 11,172 syllables, none of which has a table entry -- if the arithmetic is
-  // wrong anywhere it is wrong here.
+  // All 11,172 syllables; Hangul composes by arithmetic with no table entries.
   constexpr uint32_t S_BASE{ 0xAC00 };
   constexpr uint32_t COUNT{ 19 * 21 * 28 };
   for (uint32_t i = 0; i < COUNT; ++i) {
@@ -187,19 +186,18 @@ TEST_CASE("nfc: normalizing an already-normalized string reports no change") {
   CHECK_FALSE(unicode_nfc_normalize({ 'a', 'b', 'c' }, out));
   CHECK(unicode_nfc_normalize({ 'e', 0x0301 }, out));
   CHECK(out == cps({ 0x00E9 }));
-  // A precomposed character followed by a lower-class mark is *not* already
-  // NFC: it decomposes, reorders, and recomposes around the other mark.
+  // A precomposed character followed by a lower-class mark changes: it
+  // decomposes, reorders and recomposes around the other mark.
   CHECK(unicode_nfc_normalize({ 0x00E9, 0x0328 }, out));
   CHECK(out == cps({ 0x0119, 0x0301 }));
-  // One that really is unchanged, down the same slow path.
+  // An NFC sequence through the same decompose path reports no change.
   CHECK_FALSE(unicode_nfc_normalize({ 0x00E9, 0x0301 }, out));
 }
 
 TEST_CASE("nfc: idempotent on the conformance suite") {
   uint32_t at{ 0 };
   for (uint32_t i = 0; i < NFC_VECTOR_LENS.size(); ++i) {
-    // Widened once, so the shift and mask are uint32_t throughout and neither a
-    // cast nor an int promotion is left for a compiler to object to.
+    // Widened to uint32_t once, so the shift and mask need no cast.
     uint32_t const packed{ NFC_VECTOR_LENS[i] };
     uint32_t const src_len{ packed >> 8U };
     uint32_t const exp_len{ packed & 0xFFU };
@@ -227,8 +225,7 @@ TEST_CASE("nfc: idempotent on the conformance suite") {
                    << ", want " << describe(expected));
     }
 
-    // NFC is idempotent, which the suite does not state as a row but which any
-    // composition bug breaks.
+    // NFC is idempotent: normalizing the output again gives the expectation.
     std::vector<uint32_t> again;
     unicode_nfc_normalize(produced, again);
     if (again != expected) {

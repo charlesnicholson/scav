@@ -24,9 +24,7 @@ LineCol at(std::string_view text, size_t offset) {
 }  // namespace
 
 TEST_CASE("diag: every code has its own message") {
-  // Exhaustive up to the last enumerator, so adding a code without a message
-  // fails here rather than shipping "unknown diagnostic" to a user. A new code
-  // is appended past the last one, and this bound moves with it.
+  // `RouteDegraded` is the last enumerator.
   for (uint32_t i = 0; i <= static_cast<uint32_t>(DiagCode::RouteDegraded); ++i) {
     std::string const message{ diag_message(static_cast<DiagCode>(i)) };
     CHECK(message != "unknown diagnostic");
@@ -39,7 +37,7 @@ TEST_CASE("diag: has_errors is false only when nothing but Ok is present") {
   CHECK_FALSE(diag_has_errors({}));
   CHECK_FALSE(diag_has_errors({ { .code = DiagCode::Ok, .doc = {}, .src = {} } }));
   CHECK(diag_has_errors({ { .code = DiagCode::ExpectedChart, .doc = {}, .src = {} } }));
-  // Any non-Ok anywhere, not just the first row.
+  // A non-Ok code in any row counts.
   CHECK(diag_has_errors({ { .code = DiagCode::Ok, .doc = {}, .src = {} },
                           { .code = DiagCode::ExpectedBlock, .doc = {}, .src = {} } }));
 }
@@ -62,19 +60,15 @@ TEST_CASE("diag: a newline advances the line and resets the column") {
 }
 
 TEST_CASE("diag: the column counts characters, not bytes") {
-  // Continuation bytes are the tail of a character already counted, or every
-  // non-ASCII label would report a column past where it visibly sits.
+  // UTF-8 continuation bytes add no column.
   std::string_view const text{ "\xc3\xa9\xc3\xa9x" };  // e-acute, e-acute, x
   CHECK(at(text, 4).column == 3);
   CHECK(at(text, 2).column == 2);
-  // An offset inside a character reports the next column. Lexer spans start on
-  // a boundary, so this is pinned rather than relied on.
+  // An offset inside a character reports the next column.
   CHECK(at(text, 1).column == 2);
 }
 
 TEST_CASE("diag: an offset past the end clamps to the end") {
-  // A diagnostic at EOF is ordinary -- "unterminated string" points there -- so
-  // this reports the last position rather than walking off the buffer.
   std::string_view const text{ "ab\ncd" };
   CHECK(at(text, 99).line == 2);
   CHECK(at(text, 99).column == 3);
@@ -118,8 +112,7 @@ TEST_CASE("diag: a hash is always eight lowercase hex digits") {
 
 namespace {
 
-// One document loaded from memory, which is all a diagnostic needs to be
-// positioned against.
+// One document loaded from memory, with its chart and diagnostics.
 struct Rendered {
   Loader loader;
   Chart chart;
@@ -252,8 +245,6 @@ TEST_CASE("diag: a chart finding with no root submachine falls back to the name"
 }
 
 TEST_CASE("diag: a finding that already carries a span is positioned by that span") {
-  // A producer running before the entity existed fills `src`, so the reader must
-  // not walk to the subject and report the statement's position instead.
   Rendered r;
   load_one(r, "chart c {\n  state A,\n}\n", "solo.scav");
   StateId a{ INVALID };
@@ -296,8 +287,6 @@ TEST_CASE("diag: a statement span cleared by mutation degrades to the triple") {
 }
 
 TEST_CASE("diag: an unnamed document still positions, under the caller's name") {
-  // A chart built from a buffer nobody named keeps its offsets, so the line and
-  // column survive even though the document has no path to quote.
   Rendered r;
   load_one(r, "chart c {\n  state A,\n}\n", "solo.scav");
   REQUIRE(r.chart.documents.size() == 1);

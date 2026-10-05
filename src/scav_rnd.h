@@ -1,15 +1,13 @@
 #ifndef SCAV_RND_H_INCLUDED
 #define SCAV_RND_H_INCLUDED
 
-// Position-addressed randomness: the value at a coordinate rather than the next
-// value of a stream, so nothing about it depends on who asks or in what order.
+// Position-addressed randomness: each value is a pure function of its coordinate.
 
 #include <cstdint>
 
 namespace scav {
 
-// The splitmix64 finalizer, constants as published. Unsigned multiplication
-// wraps by definition, which is the mixing step.
+// The splitmix64 finalizer with the published constants; multiplies wrap mod 2^64.
 constexpr uint64_t splitmix64(uint64_t z) {
   z ^= z >> 30U;
   z *= UINT64_C(0xBF58'476D'1CE4'E5B9);
@@ -19,8 +17,8 @@ constexpr uint64_t splitmix64(uint64_t z) {
   return z;
 }
 
-// Each round is a bijection and each fold adds one argument's bits, so holding
-// three arguments fixed leaves the fourth mapped one to one onto the output.
+// Three splitmix64 rounds over the coordinate. With any three arguments fixed, the
+// fourth maps one to one onto the output.
 constexpr uint64_t rnd(uint64_t seed, uint32_t phase, uint32_t item, uint32_t step) {
   uint64_t const seeded{ splitmix64(seed) };
   uint64_t const placed{ splitmix64(

@@ -28,8 +28,7 @@ struct Lowerer {
   bool clean;
 };
 
-// Never below double the capacity: an exact reserve every round replaces
-// geometric growth with one reallocation per round, which is quadratic.
+// Grows the capacity to the larger of `want` and double, when `want` exceeds it.
 template <typename T>
 void reserve_at_least(std::vector<T> &v, size_t want) {
   if (want <= v.capacity()) { return; }
@@ -37,8 +36,7 @@ void reserve_at_least(std::vector<T> &v, size_t want) {
   v.reserve((want > doubled) ? want : doubled);
 }
 
-// The entity a lowering diagnostic would name was never created, so the payload
-// is the statement's span, rebased into the chart's pool.
+// Reports `code` at statement `row`'s chart span and marks `lo` unclean.
 void report(Lowerer &lo, DiagCode code, uint32_t row) {
   lo.clean = false;
   lo.diags->push_back(
@@ -55,7 +53,7 @@ StmtId global_stmt(Lowerer const &lo, uint32_t row) { return { lo.stmt_base + ro
 // includes; a state block's is its implicit submachine.
 struct Ctx {
   ElemRef subject;   // attr statements attach here
-  SubmachineId sub;  // INVALID where the block earned no implicit submachine
+  SubmachineId sub;  // INVALID when the block has no implicit submachine
   StateId state;     // valid only for a state block: explicit submachines' owner
 };
 
@@ -65,8 +63,7 @@ struct Frame {
   Ctx ctx;
 };
 
-// True when a state block holds anything needing a submachine. Answered before
-// the walk, which puts the implicit submachine at ordinal 0.
+// True when state block `row` holds a state, transition or include.
 bool needs_implicit_submachine(ParsedDocument const &pd, uint32_t row) {
   Span const kids{ pd.stmt_children[row] };
   for (uint32_t i = 0; i < kids.len; ++i) {
@@ -98,8 +95,6 @@ void lower_attr(Lowerer &lo, uint32_t row, ElemRef subject) {
       composed += bare;
       return std::string_view{ composed };
     }() };
-    // Stamped from the returned index before the next append, which would
-    // shift it.
     auto const append = [&](std::string_view value) {
       if (uint32_t const at{ build_attr(*lo.c, subject, key, value) }; at != INVALID) {
         lo.c->attrs[at].stmt = global_stmt(lo, row);
@@ -131,7 +126,7 @@ SubmachineId instantiate_root(Lowerer &lo, InstJob const &job, uint32_t root_row
   return model_append_submachine_row(
       *lo.c,
       { .owner = job.host,
-        .ordinal = 0,  // assigned for real by the containment rebuild
+        .ordinal = 0,  // set by the containment rebuild
         .name = {},
         .label = string_pool_add(lo.c->strings, pd_str(lo, stmt.label)),
         .children = {},
@@ -141,8 +136,8 @@ SubmachineId instantiate_root(Lowerer &lo, InstJob const &job, uint32_t root_row
         .live = 1 });
 }
 
-// The entity pass. Fills `trans` in document order, each carrying its lexical
-// submachine, and `incs` with the include rows whose target the caller owes.
+// Appends one instantiation's entity rows; fills `trans` in document order, each
+// with its lexical submachine, and `incs` with include rows awaiting a target.
 void lower_entities(Lowerer &lo,
                     InstJob const &job,
                     uint32_t root_row,
@@ -194,7 +189,7 @@ void lower_entities(Lowerer &lo,
             return model_append_submachine_row(
                 *lo.c,
                 { .owner = id,
-                  .ordinal = 0,  // assigned for real by the containment rebuild
+                  .ordinal = 0,  // set by the containment rebuild
                   .name = {},
                   .label = {},
                   .children = {},
@@ -214,8 +209,7 @@ void lower_entities(Lowerer &lo,
       }
 
       case StmtKind::Submachine: {
-        // A submachine's children are states, so it belongs in a state's
-        // block and nowhere else.
+        // A submachine outside a state block is MisplacedStatement.
         if (ctx.state.v == INVALID) {
           report(lo, DiagCode::MisplacedStatement, row);
           break;
@@ -224,7 +218,7 @@ void lower_entities(Lowerer &lo,
         SubmachineId const id{ model_append_submachine_row(
             *lo.c,
             { .owner = ctx.state,
-              .ordinal = 0,  // assigned for real by the containment rebuild
+              .ordinal = 0,  // set by the containment rebuild
               .name = string_pool_add(lo.c->strings, pd_str(lo, m.name)),
               .label = string_pool_add(lo.c->strings, pd_str(lo, m.label)),
               .children = {},
@@ -279,16 +273,14 @@ void lower_entities(Lowerer &lo,
       case StmtKind::Attr: lower_attr(lo, row, ctx.subject); break;
 
       case StmtKind::Chart:
-        // The grammar admits one chart and only as the root, so reaching here
-        // means the parser produced something it should not have.
+        // A nested chart statement; the parser emits a chart only at the root.
         report(lo, DiagCode::MisplacedStatement, row);
         break;
     }
   }
 }
 
-// An endpoint that is a path. Wildcards never reach here.
-// `segs` is the caller's so one buffer serves every endpoint in the pass.
+// Resolves a path endpoint from `scope` into `out`; `segs` is caller-owned scratch.
 ResolveStatus resolve_endpoint(Chart const &c,
                                ParsedDocument const &pd,
                                SubmachineId scope,
@@ -319,8 +311,8 @@ DiagCode diag_for(ResolveStatus status) {
   return DiagCode::EndpointUnresolved;
 }
 
-// A transition statement after endpoint resolution: what to create, or
-// nothing when a diagnostic already said why not.
+// A transition statement after endpoint resolution; `ok` is false when a
+// diagnostic was reported.
 struct PlannedTrans {
   PendingTrans pt;
   StateId src, dst;  // INVALID where a wildcard will synthesize
@@ -335,8 +327,8 @@ struct WildChild {
   uint32_t order;  // creation order, the stable tail of the rebuild sort
 };
 
-// Splices the synthesized pseudostates into their scopes in one rebuild of
-// state_ids, after each scope's authored children, where the ordinals put them.
+// Rebuilds `state_ids` with each scope's synthesized pseudostates after its
+// existing children, in creation order.
 void attach_wildcards(Chart &c, std::vector<WildChild> &wild) {
   if (wild.empty()) { return; }
   scav_stable_sort(wild, [](WildChild const &a, WildChild const &b) {
@@ -427,8 +419,7 @@ void model_finalize_containment(Chart &c) {
   // container's children in creation order. `children.len` is the fill cursor.
   std::vector<uint32_t> start(c.submachines.size() + 1, 0);
   for (State const &s : c.states) {
-    // A parentless state reaches here only from a hand-built chart; skipping
-    // leaves it a validation finding instead of an out-of-bounds write.
+    // A state whose parent is out of range is left out; validation reports it.
     if (s.parent.v < c.submachines.size()) { start[s.parent.v + 1] += 1; }
   }
   for (size_t i = 1; i < start.size(); ++i) { start[i] += start[i - 1]; }
@@ -516,8 +507,8 @@ bool model_resolve_transitions(Chart &c,
     planned.push_back(plan);
   }
 
-  // One pseudostate per `*`, in the statement's lexical submachine. Never
-  // merged per submachine: two `trans * -> X` are two initial arrows.
+  // One pseudostate per `*`, in the statement's lexical submachine; two
+  // `trans * -> X` make two initials.
   std::vector<WildChild> wild;
   for (PlannedTrans &plan : planned) {
     if (!plan.ok) { continue; }

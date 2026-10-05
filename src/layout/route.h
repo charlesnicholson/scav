@@ -1,12 +1,11 @@
 #ifndef SCAV_LAYOUT_ROUTE_H_INCLUDED
 #define SCAV_LAYOUT_ROUTE_H_INCLUDED
 
-// Phase 3: one polyline per transition, one port slot per boundary it crosses,
-// and the path boxes slid onto the finished routes.
+// Phase 3: one polyline per transition, one port slot per boundary it crosses, and the
+// path boxes placed on the finished routes.
 
 #include "layout/decompose.h"
 #include "layout/label.h"
-#include "layout/nudge.h"
 #include "layout/order.h"
 #include "layout/router.h"
 #include "layout/size.h"
@@ -24,32 +23,21 @@ struct Routes {
   std::vector<scav_port_slot> slots;
   std::vector<scav_span> route, port;  // parallel to transitions
   std::vector<scav_rect> placed;       // parallel to the path boxes
-  std::vector<LabelSettle> settled;    // parallel to `placed`
 
-  // Nets the router fell back on, by cause. A fallback is a straight line, and a
-  // straight line is what Tier 0 counts.
+  // Nets that fell back to a straight line, by cause.
   uint32_t outside_region{ 0 }, unreachable{ 0 }, too_large{ 0 };
   std::vector<uint8_t> failed;  // parallel to transitions; 1 = a net of it fell back
   [[nodiscard]] uint32_t degraded() const {
     return outside_region + unreachable + too_large;
   }
 
-  // Routed only after giving up the requested clearance (11.5). Not a failure; a
-  // frame full of them means the boxes are packed tighter than the profile says.
+  // Nets routed only at zero clearance.
   uint32_t reseated{ 0 };
-
-  NudgeStats nudged;
-
-  // Path boxes that found no strip clear of everything and took the centred
-  // placement instead (11.9).
-  uint32_t unplaced{ 0 };
+  uint32_t occupied{ 0 };  // ends and port slots left inside an occupied span
 };
 
-// Per frame, the exact question the router and the nudger were asked and the
-// answer they gave. A Level 1 move changes one frame and leaves every other one
-// translated -- measured at 19 of 20 on `mill` -- so a frame whose question only
-// moved is answered by moving its answer, which is what makes a candidate cost
-// the change rather than the chart (11.10c).
+// One frame's router and nudger input and output; a later run whose input is this one
+// translated reuses the output, shifted.
 struct RouteFrameCache {
   uint8_t valid{ 0 };
   scav_rect frame{};  // what the nudger bounds this frame's lanes by
@@ -57,25 +45,23 @@ struct RouteFrameCache {
   std::vector<scav_point> points;
   std::vector<scav_span> net_points;
   std::vector<RouteMetrics> metrics;
-  NudgeStats nudged;
 };
 
-// Parallel to submachines. `reuse` is read by every candidate of a round at
-// once and never written; `fill` is written by the one run that establishes the
-// incumbent.
+// As `reuse`, shared read-only by a round's candidates; as `fill`, written by the one
+// run that sets the incumbent.
 struct RouteCache {
-  std::vector<RouteFrameCache> frame;
-  // Two per segment, its source end then its destination: the router's
-  // `effective_faces` there. A face pin outside it changes nothing drawn.
+  std::vector<RouteFrameCache> frame;  // parallel to submachines
+  // Two per segment, source end then destination: the router's `effective_faces` there.
+  // An end pin outside those bits changes nothing drawn.
   std::vector<uint8_t> faceable;
 };
 
-// One net per segment, routed in that segment's frame, laid end to end. The
-// planning is the router's input, so two routers see the same problem. Frames
-// are sharded across `threads` workers and merged in frame order, so the
-// result is one value at every worker count. `was`, where given, is a routing
-// over this same sizing; its labels are kept where nothing a box reads changed.
-// Without `labels` the routes are final and `placed` is empty.
+// Moves each slot off its route to where the route next meets the slot's face inside its
+// span, else any face of the slot's box; a divider port's box is its divider line.
+void reseat_slots(SplitGraph const &g, SizedLayout const &z, Routes &out);
+
+// One net per segment, routed in its frame, laid end to end; the result is the same at
+// every `threads`. With `labels` false, `placed` is empty.
 Routes route_transitions(Chart const &c,
                          SplitGraph const &g,
                          SubmachineOrders const &o,
@@ -87,10 +73,9 @@ Routes route_transitions(Chart const &c,
                          RouteCache const *reuse = nullptr,
                          RouteCache *fill = nullptr,
                          SearchPins const *pins = nullptr,
-                         Routes const *was = nullptr,
                          bool labels = true);
 
-// The same into `out`, reusing its capacity; `was` must not be `out`.
+// The same into `out`, reusing its capacity.
 void route_transitions(Routes &out,
                        Chart const &c,
                        SplitGraph const &g,
@@ -103,17 +88,15 @@ void route_transitions(Routes &out,
                        RouteCache const *reuse,
                        RouteCache *fill,
                        SearchPins const *pins,
-                       Routes const *was,
                        bool labels);
 
-// The path boxes placed on `out`'s finished routes over `z`, as `route_transitions` places
-// them; `was` as there.
+// Places the path boxes on `out`'s finished routes, as `route_transitions` does.
 void label_routes(Routes &out,
                   Chart const &c,
+                  SplitGraph const &g,
                   SizedLayout const &z,
                   scav_spaces const &s,
-                  scav_profile const &p,
-                  Routes const *was);
+                  scav_profile const &p);
 
 }  // namespace scav
 

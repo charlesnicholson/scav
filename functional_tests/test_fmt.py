@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""Canonical form belongs to running the printer rather than to the format, so
-this verb is what makes it something a repo can hold. It gates the corpus."""
+"""`scav fmt`: rewrites charts into canonical form, and gates the corpus on it."""
 
 import os
 import subprocess
@@ -48,11 +47,7 @@ class TestFmt(unittest.TestCase):
         return path
 
     def fmt(self, source: str, expected: str, name: str = "") -> Path:
-        """Format `source` in place and compare the file against `expected`.
-
-        Then the two properties every rule owes: the result is its own fixed
-        point, and `--check` agrees that it is canonical.
-        """
+        """Asserts `source` formats to `expected`, a fixed point `--check` accepts."""
         path = self.write(source, name)
         result = self.run_scav("fmt", path)
         self.assertEqual("", result.stderr)
@@ -270,8 +265,7 @@ class TestFmt(unittest.TestCase):
         )
 
     def test_rule_the_budget_counts_the_at_sign_and_the_namespace(self) -> None:
-        # The entry alone fits; `@ns:` in front of it does not, and measuring the
-        # entry on its own emitted a line past the budget.
+        # The entry fits alone but not after `@nsx:`; the list breaks.
         value = "v" * 70
         self.fmt(
             f'chart c {{ @nsx:k = ["{value}", "bbb"], }}\n',
@@ -284,8 +278,7 @@ class TestFmt(unittest.TestCase):
         )
 
     def test_rule_the_budget_counts_codepoints_rather_than_bytes(self) -> None:
-        # Two bytes and one column each. The inner block is 79 codepoints and
-        # 129 bytes, so it stays flat only if the budget counts what it should.
+        # U+00E9 is two bytes and one column: the inner block is 79 columns, 129 bytes.
         label = "\u00e9" * 50
         self.fmt(
             f'chart c {{ state Outer {{ state A "{label}", }}, }}\n',
@@ -390,8 +383,7 @@ class TestFmt(unittest.TestCase):
         self.assertEqual(b"chart c {\n  state A,\n}\n", path.read_bytes())
 
     def test_decomposed_text_is_composed(self) -> None:
-        # Spelled in escapes: a literal here would already be composed, and
-        # then the case would assert nothing.
+        # Written as escapes to stay decomposed.
         decomposed = "cafe\u0301"
         composed = "caf\u00e9"
         self.assertNotEqual(decomposed, composed)
@@ -514,19 +506,13 @@ class TestFmt(unittest.TestCase):
         self.assertEqual("", result.stdout)
 
     def test_formatting_does_not_move_the_structural_hash(self) -> None:
-        """Canonical form is a spelling, not a model change.
-
-        The attribute sort reorders rows the digest walks, so the digest sorts
-        them too; without that, running the gate would change what `dump --hash`
-        reports and two copies of one chart would stop comparing.
-        """
-        # The whole directory, so an included document still resolves beside its
-        # root, and the network is three documents rather than one.
+        """`fmt`'s attribute sort leaves `dump --hash` unchanged on the vac network."""
+        # Copies the whole directory so vac's includes resolve.
         network = scavtest.fresh_dir(self.scratch / "network")
         for chart in (self.cfg.repo_root / CHARTS).glob("*.scav"):
             (network / chart.name).write_bytes(chart.read_bytes())
 
-        # Undo the one thing the sort moved, so the comparison is not a no-op.
+        # Reverts vac's `@nav` entries to their unsorted order.
         root = network / "vac.scav"
         canonical = root.read_text(encoding="utf-8")
         authored = canonical.replace(
@@ -556,7 +542,6 @@ class TestFmt(unittest.TestCase):
         self.assertEqual(before.stdout, self.run_scav("dump", "--hash", path).stdout)
 
     def test_every_corpus_chart_is_its_own_fixed_point(self) -> None:
-        # Copied out of the tree so a bug here cannot rewrite the corpus.
         for name in self.corpus():
             source = (self.cfg.repo_root / name).read_bytes()
             copy = self.scratch / "corpus" / Path(name).name
@@ -593,8 +578,7 @@ class TestFmt(unittest.TestCase):
         path = self.write("chart c { s A, }\n")
         self.assertEqual(0, self.run_scav("fmt", path).returncode)
         self.assertEqual(b"chart c {\n  state A,\n}\n", path.read_bytes())
-        # Pinned into the past, so a rewrite shows up whatever the filesystem's
-        # timestamp resolution is.
+        # Sets the mtime far in the past so any rewrite changes it.
         os.utime(path, (1_000_000_000, 1_000_000_000))
         before = path.stat().st_mtime_ns
         result = self.run_scav("fmt", path)
@@ -605,8 +589,6 @@ class TestFmt(unittest.TestCase):
     # Failure ===============================================================
 
     def test_a_parse_error_leaves_the_file_alone(self) -> None:
-        # Printing a half-parsed document would write a file saying less than
-        # the one on disk.
         path = self.write("chart c { state , }\n")
         before = path.read_bytes()
         result = self.run_scav("fmt", path)
@@ -633,8 +615,7 @@ class TestFmt(unittest.TestCase):
         missing = self.scratch / "mixed_absent.scav"
         canonical = self.write("chart b {\n  state B,\n}\n", name="mixed_canonical")
         result = self.run_scav("fmt", "--check", loose, missing, canonical)
-        # Argument order, and the worst outcome across the list is the one the
-        # process exits with.
+        # Reports in argument order; the exit code is the worst outcome.
         self.assertEqual(2, result.returncode)
         self.assertEqual("", result.stdout)
         self.assertEqual(f"{loose}: not canonical\nscav: cannot read '{missing}'\n",
@@ -657,8 +638,6 @@ class TestFmt(unittest.TestCase):
             os.chmod(path, 0o644)
 
     def test_fmt_does_not_follow_includes(self) -> None:
-        # Canonical form is a property of a document; a network's documents are
-        # formatted by naming them.
         leaf = self.write("chart leaf { s L, }\n", name="leaf")
         root = self.write(
             'chart root { include "leaf.scav" as l, s R, }\n', name="root"

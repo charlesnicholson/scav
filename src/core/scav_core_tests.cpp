@@ -37,12 +37,10 @@ TEST_CASE("ids: distinct types compare by value") {
 
 TEST_CASE("ids: INVALID is the all-ones sentinel") {
   CHECK(INVALID == 0xFFFFFFFFU);
-  CHECK(INVALID + 1U == 0U);  // unsigned wrap is defined, so this is not UB
+  CHECK(INVALID + 1U == 0U);  // unsigned wrap is defined
 }
 
 TEST_CASE("narrow: round-trips what fits and refuses what does not") {
-  // we ban narrowing without a range check and names one helper for it.
-  // This is the boundary between the caller's size_t and the model's uint32.
   uint32_t out{ 0xDEAD };
   CHECK(narrow<uint32_t>(size_t{ 0 }, out));
   CHECK(out == 0);
@@ -52,8 +50,7 @@ TEST_CASE("narrow: round-trips what fits and refuses what does not") {
   if constexpr (sizeof(size_t) > 4) {
     out = 0xDEAD;
     CHECK_FALSE(narrow<uint32_t>(size_t{ 0x100000000ULL }, out));
-    // Left alone on refusal, so a caller that ignores the bool gets its own
-    // value back rather than a truncated one.
+    // `out` is unchanged on refusal.
     CHECK(out == 0xDEAD);
     CHECK_FALSE(narrow<uint32_t>(SIZE_MAX, out));
   }
@@ -66,7 +63,6 @@ TEST_CASE("narrow: round-trips what fits and refuses what does not") {
 }
 
 TEST_CASE("narrow_clamp: clamps rather than wrapping") {
-  // A short read is a bug you can find; a wrapped one is a 4-gigabyte read.
   CHECK(narrow_clamp<uint32_t>(size_t{ 7 }) == 7U);
   CHECK(narrow_clamp<uint32_t>(size_t{ 0xFFFFFFFF }) == 0xFFFFFFFFU);
   if constexpr (sizeof(size_t) > 4) {
@@ -82,7 +78,7 @@ TEST_CASE("string_pool: a ref reads back the bytes it spans") {
   StrRef const b{ append(pool, "beta") };
   CHECK(string_pool_view(pool, a) == "alpha");
   CHECK(string_pool_view(pool, b) == "beta");
-  // Adjacent, so a wrong length reads into the neighbour rather than off the end.
+  // The refs are adjacent: one byte past `a` is the first byte of `b`.
   CHECK(string_pool_view(pool, str_ref(a.off, a.len + 1)) == "alphab");
 }
 
@@ -90,12 +86,12 @@ TEST_CASE("string_pool: a zero-length ref is empty without touching the pool") {
   StringPool const empty;
   CHECK(string_pool_view(empty, str_ref(0, 0)).empty());
   CHECK(string_pool_view(empty, StrRef{}).empty());
-  // The offset is not read when the length is zero, so a stale one is still safe.
+  // A zero-length ref reads empty whatever its offset.
   CHECK(string_pool_view(empty, str_ref(9999, 0)).empty());
 }
 
 TEST_CASE("string_pool: an embedded NUL is an ordinary byte") {
-  // Spans, not C strings: nothing stops at a NUL and nothing appends one.
+  // A NUL is an ordinary byte in a span; the pool appends no terminator.
   StringPool pool;
   StrRef const r{ append(pool, std::string_view{ "a\0b", 3 }) };
   CHECK(r.len == 3);
@@ -104,8 +100,8 @@ TEST_CASE("string_pool: an embedded NUL is an ordinary byte") {
 }
 
 TEST_CASE("string_pool: equal strings get their own bytes") {
-  // The pool is append-order and not deduplicated, so StrRef equality is span
-  // equality and says nothing about the text. Compare the views.
+  // The pool appends each string without deduplication; StrRef equality compares
+  // spans, so the test compares views.
   StringPool pool;
   StrRef const a{ append(pool, "same") };
   StrRef const b{ append(pool, "same") };
@@ -114,8 +110,8 @@ TEST_CASE("string_pool: equal strings get their own bytes") {
   CHECK(pool.bytes.size() == 8);
 }
 
-// Fails on purpose, skipped unless run by name. The build runs it expecting a
-// non-zero exit, which is how a silent harness is told from a passing one.
+// Fails on purpose; skipped unless run by name. The build runs it and expects
+// a non-zero exit.
 TEST_CASE("core: deliberate failure" * doctest::skip()) {
   CHECK_MESSAGE(INVALID == 0, "this failure is intentional");
 }

@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Whether a failed build left binaries worth keeping.
-
-Wrong one way leaves a stale executable after a compile error, answering for
-code no longer in the tree. Wrong the other deletes the binaries a red test is
-diagnosed and a golden regenerated with."""
+"""Tests `build_is_stale` on ninja output from failed builds."""
 
 import sys
 import unittest
@@ -51,8 +47,7 @@ class TestBuildIsStale(unittest.TestCase):
         self.assertFalse(build_tool.build_is_stale(STAMP + STAMP))
 
     def test_a_failure_naming_nothing_assumes_the_worst(self) -> None:
-        """A shape this parser does not recognise must not be read as good
-        news: the binaries go, and the next build spends seconds relinking."""
+        """Output that names no failed edge counts as stale."""
         self.assertTrue(build_tool.build_is_stale("ninja: build stopped.\n"))
         self.assertTrue(build_tool.build_is_stale(""))
 

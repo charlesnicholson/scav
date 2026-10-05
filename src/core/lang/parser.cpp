@@ -13,12 +13,10 @@ namespace scav {
 
 namespace {
 
-// Whether the current block is between `{`/`,` and an item, or between an item
-// and the `,`/`}` that follows it. Two states is the whole of a block's grammar.
+// `Item` after `{` or `,`, expecting an item; `Separator` after an item, expecting
+// `,` or `}`.
 enum class Slot : uint32_t { Item, Separator };
 
-// Capacity rather than size: the performance tests assert a peak, and a vector
-// that grew and shrank still holds what it grew to.
 template <typename T>
 uint64_t bytes_of(std::vector<T> const &v) {
   return uint64_t{ v.capacity() } * sizeof(T);
@@ -30,8 +28,6 @@ struct Frame {
   Slot slot;
 };
 
-// State threaded through the parse. A plain struct, taken by reference, so
-// control flow stays readable from the source.
 struct Parser {
   scav_byte const *bytes;
   uint32_t len;
@@ -53,8 +49,7 @@ struct Parser {
 
 Token const &peek(Parser const &p, uint32_t ahead = 0) {
   uint32_t const at{ p.pos + ahead };
-  // The stream always ends with one End token, so clamping is enough and no
-  // caller needs a bounds check of its own.
+  // Clamps past the end to the stream's final End token.
   return p.tokens[(at < p.token_count) ? at : (p.token_count - 1)];
 }
 
@@ -86,8 +81,8 @@ bool expect(Parser &p, TokKind kind, DiagCode code) {
   return true;
 }
 
-// Straight into the document's pool in the order the parser meets them, so a
-// repeated name costs its own bytes.
+// Appends `bytes` to the document's string pool, one copy per call. Empty input
+// returns an empty ref.
 StrRef pool_append(Parser &p, scav_byte const *bytes, size_t len) {
   if (len == 0) { return {}; }
   std::vector<scav_byte> &pool{ p.pd->strings.bytes };
@@ -105,8 +100,6 @@ StrRef pool_token(Parser &p, Token const &t) {
   return pool_append(p, p.bytes + t.off, t.len);
 }
 
-// An identifier in a name position. Reserved words are rejected here, not in the
-// lexer: `s`, `m` and `t` are keywords only in statement-leading position.
 bool take_name(Parser &p, StrRef &out) {
   if (!at_kind(p, TokKind::Ident)) {
     error_at(p, DiagCode::ExpectedIdentifier, peek(p));
@@ -140,8 +133,7 @@ bool take_string(Parser &p, StrRef &out) {
   return true;
 }
 
-// The positional string is the label, and every statement that takes one takes
-// it optionally.
+// Takes the optional label string; `out` stays empty when none follows.
 bool take_optional_label(Parser &p, StrRef &out) {
   out = {};
   if (!at_kind(p, TokKind::String)) { return true; }
@@ -164,15 +156,14 @@ bool take_number(Parser &p, uint32_t &out) {
   return true;
 }
 
-// Measured between the leading comment run and whatever ended above it, so a
-// blank stays above a heading comment and a trailing one does not hide it.
+// 1 when a blank line separates the code (or its trailing comment) above from this
+// statement's first leading comment, or the statement when it has none.
 uint32_t blank_before(Parser &p, uint32_t at) {
   while ((p.comment_cursor < p.comment_count) &&
          (p.comments[p.comment_cursor].src.off < p.last_end)) {
     ++p.comment_cursor;
   }
-  // A comment with code earlier on its line trails the statement above, so the
-  // gap begins after it rather than before it.
+  // The gap starts after any trailing comments on the line above.
   uint32_t from{ p.last_end };
   while ((p.comment_cursor < p.comment_count) &&
          (p.comments[p.comment_cursor].src.off < at) &&
@@ -300,8 +291,7 @@ bool parse_attr(Parser &p, uint32_t &out_stmt) {
   uint32_t const entries_begin{ narrow_clamp<uint32_t>(p.pd->attr_entries.size()) };
 
   if (at_kind(p, TokKind::LBrace)) {
-    // n keys under one namespace. Parsed inline, not through the frame stack:
-    // a datablock holds entries and cannot nest.
+    // A datablock: entries under the namespace `first`, parsed inline.
     stmt.ns = first;
     advance(p);
     while (!at_kind(p, TokKind::RBrace)) {
@@ -358,8 +348,8 @@ bool parse_state(Parser &p, uint32_t &out_stmt, bool &opens_block) {
 
   StateStmt stmt{ .name = {}, .label = {}, .kind = StateKind::Normal, .has_block = 0 };
   if (!take_name(p, stmt.name)) { return false; }
-  // The name slot is first and mandatory, so a bare identifier after it is a
-  // kind -- or, if reserved, the next statement with its comma missing.
+  // An unreserved identifier after the name is the state kind. A reserved one stays
+  // unconsumed and fails as ExpectedSeparator.
   if (at_kind(p, TokKind::Ident) && !lex_is_reserved_word(tok_text(p, peek(p)))) {
     Token const &t{ peek(p) };
     if (!syntax_state_kind_from_name(tok_text(p, t), stmt.kind)) {
@@ -387,8 +377,6 @@ bool parse_submachine(Parser &p, uint32_t &out_stmt, bool &opens_block) {
   if (!take_optional_label(p, stmt.label)) { return false; }
   p.pd->submachines.push_back(stmt);
 
-  // Unlike state and trans, the block is mandatory: a submachine with no states
-  // says nothing that leaving it out does not.
   if (!at_kind(p, TokKind::LBrace)) {
     error_at(p, DiagCode::ExpectedBlock, peek(p));
     return false;
@@ -406,12 +394,12 @@ bool parse_trans(Parser &p, uint32_t &out_stmt, bool &opens_block) {
   TransStmt stmt{ .src = {},
                   .dst = {},
                   .label = {},
-                  .kind = TransKind::External,
+                  .kind = TransKind::Default,
                   .has_block = 0 };
-  // The three kind words are reserved, so an identifier here is a kind if it is
-  // one of them and a state name otherwise -- no lookahead needed.
+  // An identifier naming a transition kind is the kind; any other identifier starts
+  // the source endpoint.
   if (at_kind(p, TokKind::Ident)) {
-    TransKind kind{ TransKind::External };
+    TransKind kind{ TransKind::Default };
     if (syntax_trans_kind_from_name(tok_text(p, peek(p)), kind)) {
       stmt.kind = kind;
       advance(p);
@@ -439,8 +427,8 @@ bool parse_item(Parser &p, uint32_t &out_stmt, bool &opens_block) {
 
   std::string_view const word{ tok_text(p, peek(p)) };
   if (word == "include") { return parse_include(p, out_stmt); }
-  // s / m / t are aliases only in statement-leading position, which is exactly
-  // here, so `state s` still declares a state named `s`.
+  // `s`, `m` and `t` alias the keywords only in statement-leading position, so
+  // `state s` declares a state named `s`.
   if ((word == "state") || (word == "s")) { return parse_state(p, out_stmt, opens_block); }
   if ((word == "submachine") || (word == "m")) {
     return parse_submachine(p, out_stmt, opens_block);
@@ -493,8 +481,7 @@ void close_frame(Parser &p) {
   end_stmt(p, frame.owner);
 
   if (!p.frames.empty()) {
-    // Back to exactly where the parent's own children left off, so document
-    // order survives the round trip through the scratch stack.
+    // Appends the closed statement to `scratch` after its parent's earlier children.
     p.scratch.push_back({ .v = frame.owner });
     p.frames.back().slot = Slot::Separator;
   }
@@ -565,8 +552,8 @@ struct WalkFrame {
   uint32_t last_child;  // the sibling a trailing comment attaches to
 };
 
-// Positional, and after the tree is built: a block's leading and trailing
-// trivia are separated by all of its children's.
+// Assigns each comment to a statement by source position, then groups
+// `pd.comments` into one span per statement in source order.
 void attach_comments(ParsedDocument &pd, std::vector<LexComment> const &lexed) {
   uint32_t const n{ narrow_clamp<uint32_t>(lexed.size()) };
   pd.comments.clear();
@@ -577,8 +564,7 @@ void attach_comments(ParsedDocument &pd, std::vector<LexComment> const &lexed) {
   if (root == INVALID) { return; }
 
   uint32_t next{ 0 };
-  // Anything before the chart keyword: the loop below only sees comments inside
-  // a span, and the root has no parent to have claimed these.
+  // Comments before the chart keyword belong to the chart.
   while ((next < n) && (lexed[next].src.off < pd.stmts[root].src.off)) {
     owner[next] = root;
     ++next;
@@ -658,7 +644,7 @@ bool parse_tokens(scav_byte const *bytes,
   out = {};
   out.id = doc;
 
-  // Statement.src is a Span, so the document has to be addressable by one.
+  // DocumentTooLarge when the length exceeds what a uint32 Span addresses.
   uint32_t len{ 0 };
   if (!narrow(byte_count, len)) {
     diags.push_back({ .code = DiagCode::DocumentTooLarge, .doc = doc, .src = {} });
@@ -668,16 +654,13 @@ bool parse_tokens(scav_byte const *bytes,
   out.src_bytes.assign(bytes, bytes + len);
   out.doc.text = make_span(0, len);
 
-  // A statement is a keyword plus a couple of tokens, so tokens/4 spares the
-  // statement arrays most of their doubling copies.
   uint32_t const stmt_estimate{ narrow_clamp<uint32_t>(lexed.tokens.size() / 4) };
   out.stmts.reserve(stmt_estimate);
   out.stmt_payload.reserve(stmt_estimate);
   out.stmt_children.reserve(stmt_estimate);
   out.stmt_ids.reserve(stmt_estimate);
 
-  // The stream always ends with an End sentinel, which is what lets lookahead
-  // skip its bounds check. An empty one is a caller error, not input.
+  // An empty token stream lacks the End sentinel; reports ExpectedChart.
   if (lexed.tokens.empty()) {
     diags.push_back(
         { .code = DiagCode::ExpectedChart, .doc = doc, .src = make_span(0, 0) });
@@ -720,13 +703,12 @@ bool parse_document(scav_byte const *bytes,
   std::vector<scav_byte> normalized;
   if (!source_text_normalize(bytes, len, doc, normalized, diags)) { return false; }
 
-  // source_text_normalize already rejected anything a Span cannot address, so
-  // this cannot overflow.
+  // source_text_normalize limits `normalized` to a uint32 length.
   uint32_t const norm_len{ narrow_clamp<uint32_t>(normalized.size()) };
   LexResult lexed;
   if (!lex_source(normalized.data(), norm_len, doc, lexed, diags)) {
-    // Parse anyway when the lexer recovered: one run should report the syntax
-    // error too rather than making the author fix stray bytes first.
+    // When the lexer recovered, parses anyway to report syntax errors too, then
+    // returns false.
     if (lexed.tokens.empty()) { return false; }
     parse_tokens(normalized.data(), norm_len, lexed, doc, name, opts, out, diags);
     return false;

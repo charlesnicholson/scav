@@ -1,0 +1,62 @@
+// A firmware statechart in full: descriptions under headers, internal transitions
+// as loops, a fork and join, concurrent regions, a history pseudostate that resumes
+// a paused print, and crossings into a headed fault composite.
+chart printer "3D printer controller" {
+  @doc = "homes, preheats and prints a job; a pause resumes where it left off",
+
+  state Idle "steppers off, heaters off",
+  state Homing "seeking endstops" {
+    state SeekX,
+    state SeekY,
+    state SeekZ,
+    trans * -> SeekX,
+    trans SeekX -> SeekY "x endstop",
+    trans SeekY -> SeekZ "y endstop",
+  },
+  state Preheat fork,
+  state Bed "bed to target",
+  state Hotend "nozzle to target",
+  state Ready join,
+  state Printing "job running" {
+    submachine motion "toolpath" {
+      state Last history,
+      state Moving "following gcode",
+      state Retracted,
+      trans * -> Moving,
+      trans Moving -> Retracted "travel",
+      trans Retracted -> Moving "unretract",
+      trans internal Moving -> Moving "layer change",
+    },
+    submachine thermal "temperature hold" {
+      state Holding "within one degree",
+      state Recovering,
+      trans * -> Holding,
+      trans Holding -> Recovering "drift",
+      trans Recovering -> Holding "settled",
+      trans internal Holding -> Holding "pid tick",
+    },
+  },
+  state Paused "head parked",
+  state Fault "heaters cut, latched" { state Thermal, state Runaway, trans * -> Thermal },
+  state Check choice,
+
+  trans * -> Idle,
+  trans Idle -> Homing "job received",
+  trans Homing -> Homing "rehome",
+  trans Homing -> Preheat "homed",
+  trans Preheat -> Bed,
+  trans Preheat -> Hotend,
+  trans Bed -> Ready,
+  trans Hotend -> Ready,
+  trans Ready -> Printing "start",
+  trans Printing -> Paused "pause",
+  trans Paused -> Printing:motion/Last "resume",
+  trans internal Paused -> Paused "keep warm",
+  trans Printing:thermal/Recovering -> Fault/Runaway "runaway",
+  trans Bed -> Fault/Thermal "no rise",
+  trans internal Fault -> Fault/Runaway "retest",
+  trans Fault -> Idle "acknowledged",
+  trans Printing -> Check "last line",
+  trans Check -> Idle "done",
+  trans Check -> Homing "next job",
+}

@@ -1,0 +1,11 @@
+// Two regions of one composite, joined by an external transition: the route leaves the
+// composite and comes back in to the other region.
+chart detour "an external transition between two regions of one composite" {
+  state Outer {
+    submachine Left { state A, trans * -> A },
+    submachine Right { state B, trans * -> B },
+  },
+
+  trans * -> Outer,
+  trans external Outer:Left/A -> Outer:Right/B "swap",
+}

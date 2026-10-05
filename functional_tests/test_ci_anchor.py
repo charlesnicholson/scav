@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
-"""Branch protection names one check, so that check has to depend on every job.
-
-A job added without being wired into the anchor still runs and still reports, but
-stops being able to block a merge -- a weakening nothing else would notice."""
+"""Checks the anchor job, the one required check: it needs every other CI job, runs
+under `if: always()`, and fails on any non-success."""
 
 import re
 import sys
@@ -14,8 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import scavtest  # noqa: E402
 
 ANCHOR = "all-checks-pass"
-# Two spaces then a name then a colon, under `jobs:`. Matched by hand, since
-# the standard library carries no YAML parser.
+# A job name: two spaces, a name and a colon, under `jobs:`.
 JOB = re.compile(r"^  ([a-z][a-z0-9-]*):$")
 NEEDS_ITEM = re.compile(r"^      - ([a-z][a-z0-9-]*)$")
 
@@ -49,8 +46,6 @@ class TestCiAnchor(unittest.TestCase):
         self.assertEqual([], missing, f"{ANCHOR} does not depend on {missing}")
 
     def test_the_anchor_runs_even_when_a_job_fails(self) -> None:
-        # Without `if: always()` the anchor is skipped rather than failed, and a
-        # skipped required check does not block a merge.
         start = self.lines.index(f"  {ANCHOR}:")
         head = "\n".join(self.lines[start:start + 4])
         self.assertIn("if: always()", head)

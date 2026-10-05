@@ -1,0 +1,18 @@
+// A composite whose header carries a description, entered from above a child and
+// left from another: no port sits on the face the header lines.
+chart header "ports clear of a header" {
+  state Source,
+  state Box "the header walls this face" {
+    state Near,
+    state Middle,
+    state Far,
+    trans * -> Near,
+    trans Near -> Middle,
+    trans Middle -> Far,
+  },
+  state Sink,
+
+  trans * -> Source,
+  trans Source -> Box/Middle "drop",
+  trans Box/Far -> Sink "lift",
+}

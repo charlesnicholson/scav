@@ -47,8 +47,8 @@
   <table class="sx-table">
     <tr><th>kind</th><th>the source's border</th><th>a self-transition</th></tr>
     <tr><td><code>external</code> (default)</td><td>crossed</td><td>a loop outside the box</td></tr>
-    <tr><td><code>internal</code></td><td>not crossed: the route starts on its inner face</td><td>no route: drawn as text in the state's band</td></tr>
-    <tr><td><code>local</code></td><td>as <code>internal</code></td><td>no route</td></tr>
+    <tr><td><code>internal</code></td><td>not crossed: the route starts on its inner face</td><td>a loop inside the box</td></tr>
+    <tr><td><code>local</code></td><td>as <code>internal</code></td><td>a loop inside the box</td></tr>
   </table>
   <p>When the destination encloses the source, the route ends on the destination's inner face, whatever the kind.</p>
 
@@ -65,12 +65,12 @@
   <p>scav owns the model, the layout, and what layout and drawing must agree on: the draw list, space requests and text metrics. The application owns appearance and the render loop. The interface is a flat <code>extern "C"</code> ABI with no callbacks, shipped as <code>libscav</code> with Python bindings; its main user is a build system running <code>scav render</code>, <code>scav fmt --check</code> and <code>scav check</code>.</p>
   <p>Layout's only inputs are the model, a <b>profile</b> of 52 integer settings, and three tables of <b>space requests</b>. It never sees a font or a string.</p>
   <ul>
-    <li><code>BoxSpace</code>, per state and submachine: the width its text needs, and the bands above and below its children.</li>
-    <li><code>PathClear</code>, per transition: how far to shorten each end for the arrowhead.</li>
+    <li><code>BoxSpace</code>, per state and submachine: the width its text needs, and four bands around its children: above, below, before and after.</li>
+    <li><code>PathClear</code>, per transition: the least length of each end leg, for the arrowhead.</li>
     <li><code>PathBox</code>, zero or more per transition: a <a href="#labels">label</a> box to place along the route.</li>
   </ul>
   <p>The application measures its text with scav's metrics, fills the tables, and calls <code>scav_layout_run</code>, which rejects bad input rather than clamping it. It draws the returned geometry with scav's SVG back end or its own.</p>
-  <div class="callout why"><span class="t">Scale</span>The design target is 2,000 states, 5,000 transitions and nesting 16 deep. The examples here are eleven hand-written charts, from the 3-state <code>estop</code> to <code>bottler</code>, nested six deep.</div>
+  <div class="callout why"><span class="t">Scale</span>The design target is 2,000 states, 5,000 transitions and nesting 16 deep. The examples here are twelve hand-written charts, from the 3-state <code>estop</code> to <code>bottler</code>, nested six deep.</div>
 </section>
 <script>
 SX.register('intro', function (sec) {
@@ -159,7 +159,8 @@ SX.register('intro', function (sec) {
     var g = c.text.trans[t.id], ports = g.ports || [];
     return '<b>' + ESC(t.src_path) + ' → ' + ESC(t.dst_path) + '</b>' + (t.label ? '<br>label “' + ESC(t.label) + '”' : '') +
       '<br><span class="m">' + t.kind + (ports.length ? ', crosses ' + ports.length + ' border' + (ports.length > 1 ? 's' : '') + ' (' + ports.length + ' port' + (ports.length > 1 ? 's' : '') + ')' : '') +
-      (g.points.length ? ', ' + (g.points.length - 1) + ' leg' + (g.points.length > 2 ? 's' : '') : ', no route: drawn as text in its state') + '</span>';
+      (g.points.length ? ', ' + (g.points.length - 1) + ' leg' + (g.points.length > 2 ? 's' : '') : '') +
+      (t.src === t.dst && t.kind !== 'external' ? ', a loop in its state\'s loop room' : '') + '</span>';
   }
 
 
@@ -253,14 +254,14 @@ SX.register('intro', function (sec) {
     ];
     var DEF = {
       brew: {
-        composite: { states: [3], text: '<b>Composite state.</b> <code>Brewing</code> holds two submachines, so it is concurrent. Its box is its packed submachines, its text bands and a 128-unit pad.' },
+        composite: { states: [3], text: '<b>Composite state.</b> <code>Brewing</code> holds two submachines, so it is concurrent. Its box is its packed submachines, its header and a 128-unit pad.' },
         region: { subs: [1, 2], text: '<b>Region.</b> One submachine of a concurrent state, laid out as its own <a href="#decompose">frame</a>. The renderer does not draw the dashed rectangle.' },
         divider: { subdraw: [2], text: '<b>Region divider.</b> Drawn midway across the 192-unit gap (<code>sub_sep</code>) between sibling regions.' },
         initial: { states: [8, 9, 10], text: '<b>Initial pseudostate.</b> Created by <code>trans * -&gt; Off</code>; seated one <code>rank_sep</code> before the state it enters, level with it.' },
         choice: { states: [2], text: '<b>Choice pseudostate.</b> A diamond in its box; routes meet it at a face midpoint.' },
         final: { states: [11], text: '<b>Final pseudostate.</b> <code>trans Standby -&gt; * "descale overdue"</code> creates one, drawn as a ringed disc.' },
         label: { trans: [9], boxes: [9], text: '<b>Transition label.</b> A requested box (<code>PathBox</code>) hung off its route by a 96-unit leader. The dashed outline is the placed box.' },
-        internal: { trans: [6], text: '<b>Internal transition.</b> It never crosses <code>Pumping</code>\'s border, so it has no route; it is drawn as text in the state\'s lower band.' }
+        internal: { trans: [6], boxes: [6], text: '<b>Internal transition.</b> It never crosses <code>Pumping</code>\'s border, so it is a loop inside the state: out of its right border from inside and back, with its label beside it, in room reserved inside the state.' }
       },
       tcp: {
         composite: { states: [4], text: '<b>Composite state.</b> <code>Established</code> holds <code>inbound</code> and <code>outbound</code>, which close independently, so it is concurrent.' },
@@ -287,8 +288,7 @@ SX.register('intro', function (sec) {
       if (d.subs) { var q = g.subs[d.subs[0]].rect; return [q[0], q[1]]; }
       if (d.subdraw) { var ln = g.subs[d.subdraw[0]].draw[0]; return [ln.x1, ln.y1 + (ln.y2 - ln.y1) * 0.2]; }
       if (d.ports) return g.trans[d.ports[0]].ports[0].at;
-      if (d.boxes) { var b = g.trans[d.boxes[0]].label_box; return [b[0], b[1]]; }
-      if (key === 'internal') { var tp = g.trans[d.trans[0]].draw[0]; return [tp.x + tp.textLength / 2, tp.y + 40]; }
+      if (d.boxes && key === 'label') { var b = g.trans[d.boxes[0]].label_box; return [b[0], b[1]]; }
       var pts = g.trans[d.trans[0]].points, k = Math.floor((pts.length - 1) / 2);
       return [(pts[k][0] + pts[k + 1][0]) / 2, (pts[k][1] + pts[k + 1][1]) / 2];
     }

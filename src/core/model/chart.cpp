@@ -1,5 +1,4 @@
-// Reads over the model, and the string-pool append everything else builds on.
-// Nothing here mutates a chart.
+// Read-only queries over a chart, plus `string_pool_add`.
 
 #include "core/core_internal.h"
 #include "core/model/model.h"
@@ -21,8 +20,8 @@ uint64_t bytes_of(std::vector<T> const &v) {
   return static_cast<uint64_t>(v.capacity()) * sizeof(T);
 }
 
-// Position of `id` among its parent's unnamed same-kind siblings. Counts every
-// row rather than the live ones, so tombstoning a sibling renames nothing.
+// Count of unnamed same-kind siblings before `id` in its parent's span, tombstoned
+// ones included, so tombstoning renames nothing.
 uint32_t synthetic_ordinal(Chart const &c, StateId id) {
   State const &s{ c.states[id.v] };
   Span const kids{ c.submachines[s.parent.v].children };
@@ -142,8 +141,7 @@ uint32_t chart_attr_find(Chart const &c, ElemRef subject, std::string_view key) 
 void chart_path_of(Chart const &c, StateId id, std::string &out) {
   if (id.v >= c.states.size()) { return; }
 
-  // The ancestor chain, leaf-first. An owner's id is below its descendants', so
-  // the climb terminates; the guard truncates rather than hangs on a bad one.
+  // The ancestor chain, leaf-first; the guard caps the climb at the state count.
   auto const chain{ [&] {
     std::vector<StateId> links;
     links.reserve(17);  // the depth-16 design target plus the leaf; deeper is legal
@@ -163,8 +161,8 @@ void chart_path_of(Chart const &c, StateId id, std::string &out) {
     StateId const step{ chain[i] };
     model_state_segment(c, step, out);
     if (i == 0) { continue; }
-    // Only ambiguity earns a qualifier: `On:main/Idle` against `On/Idle`. Row
-    // count, not live count, so a tombstoned sibling never moves an address.
+    // Adds a `:` qualifier when the state has more than one submachine row,
+    // tombstoned ones included.
     StateId const child{ chain[i - 1] };
     SubmachineId const sm{ c.states[child.v].parent };
     if (c.states[step.v].submachines.len > 1) {

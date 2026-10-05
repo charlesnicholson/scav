@@ -1,15 +1,6 @@
 #!/usr/bin/env python3
-"""Fit 11.6's nine Tier 2 weights to the defects a reader counts (11.12, P9d).
-
-The objective is a *ranking*, so this fits one: over every pair of candidates
-for one chart that the audit orders, does `t2` order them the same way? A
-regression on defect counts would fit the corpus's absolute numbers, which are
-eleven charts' worth of accident; the pairs are what a search actually consumes.
-
-Reports the pairs no weight vector can reach -- two candidates with identical
-term vectors and different defect counts -- because that is the ceiling, and
-leave-one-chart-out agreement, because nine free parameters over eleven charts
-overfits if nobody looks.
+"""Fits nine of the 13 Tier 2 weights (TERMS) to order rows by defects, then area.
+Reports unreachable pairs, defects at the pick, and leave-one-chart-out agreement.
 """
 
 import argparse
@@ -27,13 +18,13 @@ import candidates  # noqa: E402
 
 TERMS = ("bends", "corridor", "crossings", "excess_len", "adjacency",
          "label", "label_near", "aspect", "area")
-# Parallel to TERMS: the em power each is divided by before weighting (11.6).
+# Parallel to TERMS: the em power each term is divided by before weighting.
 EM_POWER = (0, 1, 0, 1, 0, 0, 1, 1, 2)
 WEIGHT_MAX = 1024
 
 
 def profile_weights(path):
-    """The nine weights the shipped `readable` profile carries, in TERMS order."""
+    """The shipped `readable` profile's weights for TERMS, in TERMS order."""
     text = path.read_text(encoding="utf-8")
     out = []
     for name in TERMS:
@@ -49,7 +40,7 @@ def ceil_div(a, b):
 
 
 def normalised(cost, em):
-    """The nine term values `weighted_terms` multiplies a weight into."""
+    """The TERMS values `weighted_terms` multiplies a weight into."""
     out = []
     for name, power in zip(TERMS, EM_POWER):
         v = cost[name]
@@ -78,14 +69,7 @@ def collect(scav_bin, charts, out_dir, em):
 
 
 def pairs_of(by_chart):
-    """Every within-chart pair a reader orders, as (better, worse) terms.
-
-    **Fewer defects, and among equals the smaller drawing.** Defects alone leave
-    the four size terms unconstrained -- nothing in the audit counts area -- and
-    a fit on them drives `w_area`, `w_aspect`, `w_corridor` and `w_excess_len`
-    to zero, which is an objective that grows a chart without limit. Area is
-    11.12's exit criterion, so it is half of what a reader is asked here.
-    """
+    """Per chart, (better, worse) term pairs: fewer defects, then smaller area."""
     out = {}
     for name, rows in by_chart.items():
         here = []
@@ -100,7 +84,7 @@ def pairs_of(by_chart):
 
 
 def score(weights, pairs):
-    """Pairs ordered right. A tie is not an ordering, so it does not count."""
+    """Count of pairs whose better side has the strictly lower weighted sum."""
     good = 0
     for better, worse in pairs:
         lo = sum(w * t for w, t in zip(weights, better))
@@ -110,11 +94,8 @@ def score(weights, pairs):
 
 
 def picked(weights, by_chart):
-    """The defects of the row `argmin(t2, row)` takes, summed over the charts.
-
-    **This is the deployed metric and the one to fit.** Pairwise agreement is a
-    proxy for it and a loose one: a vector can order most pairs right and still
-    put the wrong row first, which is the only pair `layout_run` consults.
+    """Defects of each chart's row with the lowest weighted TERMS sum, summed over
+    charts; ties go to the lower row.
     """
     total = 0
     for rows in by_chart.values():
@@ -159,13 +140,8 @@ def fit_picked(by_chart, start, seed, steps):
 
 
 def fit(pairs, start, seed, steps):
-    """Coordinate descent from `start`, then from random vectors, best kept.
-
-    Integer weights on a log-ish ladder rather than a dense sweep: 11.6's
-    shipped values sit powers of two apart and the profile bounds them to
-    [0, 1024], so the ladder is the space rather than a sample of it. Ties
-    break toward the shipped weight, so a term the pairs say nothing about
-    keeps the value a human chose instead of drifting.
+    """Coordinate descent on `score` over LADDER from `start`, then random vectors.
+    Returns the best (weights, score); ties go to `start`'s weight.
     """
     rnd = random.Random(seed)
     best, best_score = list(start), score(start, pairs)
@@ -218,8 +194,6 @@ def main():
     per_chart = pairs_of(by_chart)
     every = [p for ps in per_chart.values() for p in ps]
 
-    # Read off the profile rather than restated, so "shipped" cannot drift from
-    # what ships the moment one of these is fitted and landed.
     shipped = profile_weights(REPO_ROOT / "src/layout/profile.cpp")
     floor = unreachable(every)
     print(f"{len(every)} ordered pairs over {len(per_chart)} charts, "
@@ -229,7 +203,7 @@ def main():
     best, best_score = fit(every, shipped, args.seed, args.steps)
     print(f"fitted   {best_score:4d} / {len(every) - floor}   {best}")
 
-    # The deployed metric: what the search actually picks.
+    # Fewest defects of any row, summed over charts.
     reach = sum(min(r["defects"] for r in rows) for rows in by_chart.values())
     print()
     print(f"defects at the pick, over {len(by_chart)} charts, floor {reach}")
@@ -267,13 +241,8 @@ def main():
         held_of += len(mine) - unreachable(mine)
     print(f"held out {held:4d} / {held_of}")
 
-    # Nine weights over a few hundred 0/1 constraints, and a single optimum
-    # says nothing about how much of it the data actually chose. Each term is
-    # swept across the ladder with the other eight held at the fit, and the
-    # range that stays within `slack` is what the pairs have an opinion about.
-    # A term whose range spans the ladder is one they do not constrain; a term
-    # the fit zeroes but that costs nothing to restore is collinear with
-    # another, not unwanted.
+    # Per term, the LADDER range that scores within `slack` of the fit with the other
+    # terms held; "free" spans the whole ladder.
     print()
     print(f"{'term':<12}{'shipped':>9}{'fitted':>8}{'keeps':>14}  cost of shipped")
     for i, name in enumerate(TERMS):

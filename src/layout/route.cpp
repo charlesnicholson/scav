@@ -32,21 +32,295 @@ namespace scav {
 
 namespace {
 
+// Moves an inner-face end on `frame`'s edge square out to the owner's border; to the gap's
+// midpoint where another region is in the way; unmoved where the leg crosses a wall.
+scav_point on_owner_border(Chart const &c,
+                           SizedLayout const &z,
+                           uint32_t frame,
+                           scav_point at) {
+  if (frame >= c.submachines.size()) { return at; }
+  uint32_t const owner{ c.submachines[frame].owner.v };
+  if (owner >= z.state.size()) { return at; }
+  scav_rect const &f{ z.sub[frame] };
+  scav_rect const &b{ z.state[owner] };
+  scav_point out{ at };
+  bool const along_x{ (at.x == f.x) || (at.x == (f.x + f.w)) };
+  if (at.x == f.x) {
+    out.x = b.x;
+  } else if (at.x == (f.x + f.w)) {
+    out.x = b.x + b.w;
+  } else if (at.y == f.y) {
+    out.y = b.y;
+  } else if (at.y == (f.y + f.h)) {
+    out.y = b.y + b.h;
+  } else {
+    return at;
+  }
+  scav_rect const leg{ span_rect(at, out) };
+  int32_t const from{ along_x ? at.x : at.y };
+  int32_t const to{ along_x ? out.x : out.y };
+  int32_t near{ to };  // the nearest other region's edge the leg meets, else `to`
+  Span const subs{ c.states[owner].submachines };
+  for (uint32_t k = 0; k < subs.len; ++k) {
+    uint32_t const m{ c.submachine_ids[subs.off + k].v };
+    if ((m == frame) || (c.submachines[m].live == 0) || !overlaps(leg, z.sub[m])) {
+      continue;
+    }
+    scav_rect const &r{ z.sub[m] };
+    int32_t const lo{ along_x ? r.x : r.y };
+    near = (to < from) ? imax(near, lo + (along_x ? r.w : r.h)) : imin(near, lo);
+  }
+  if (near != to) {
+    int32_t const sep{ imin(from, near) +
+                       floor_div(imax(from, near) - imin(from, near), 2) };
+    return along_x ? scav_point{ .x = sep, .y = at.y } : scav_point{ .x = at.x, .y = sep };
+  }
+  for (scav_rect const &wall : state_walls(z, owner)) {
+    if ((wall.w > 0) && (wall.h > 0) && overlaps(leg, wall)) { return at; }
+  }
+  return out;
+}
+
 scav_point centre(scav_rect const &r) {
   return { .x = r.x + floor_div(r.w, 2), .y = r.y + floor_div(r.h, 2) };
 }
 
-// Moves `a` toward `b` by `amount`, capped at half the distance so the two
-// ends cannot cross.
-scav_point trim(scav_point a, scav_point b, int32_t amount) {
-  if (amount <= 0) { return a; }
-  Wide const dx{ static_cast<Wide>(b.x) - a.x };
-  Wide const dy{ static_cast<Wide>(b.y) - a.y };
-  Wide const len{ static_cast<Wide>(isqrt(static_cast<uint64_t>((dx * dx) + (dy * dy)))) };
-  if (len == 0) { return a; }
-  Wide const k{ imin(Wide{ amount }, floor_div(len, Wide{ 2 })) };
-  return { .x = a.x + static_cast<int32_t>(floor_div(dx * k, len)),
-           .y = a.y + static_cast<int32_t>(floor_div(dy * k, len)) };
+// The gap between two live sibling regions that no third region enters: `low` lies left
+// of or above it and `high` right of or below it, `line` is the divider down its middle,
+// and `rect` runs between their facing edges along the span both share.
+struct Gap {
+  uint32_t low, high;  // -> submachines
+  bool vertical;       // the two regions sit side by side
+  int32_t line;
+  scav_rect rect;
+};
+
+// Appends the gaps between each live state's live regions.
+void region_gaps(Chart const &c, SizedLayout const &z, std::vector<Gap> &out) {
+  out.clear();
+  for (uint32_t st = 0; st < c.states.size(); ++st) {
+    Span const subs{ c.states[st].submachines };
+    if ((c.states[st].live == 0) || (subs.len < 2)) { continue; }
+    for (uint32_t i = 0; i < subs.len; ++i) {
+      for (uint32_t j = i + 1; j < subs.len; ++j) {
+        uint32_t a{ c.submachine_ids[subs.off + i].v };
+        uint32_t b{ c.submachine_ids[subs.off + j].v };
+        if ((c.submachines[a].live == 0) || (c.submachines[b].live == 0)) { continue; }
+        bool const vertical{ ((z.sub[a].x + z.sub[a].w) <= z.sub[b].x) ||
+                             ((z.sub[b].x + z.sub[b].w) <= z.sub[a].x) };
+        if (vertical ? (z.sub[b].x < z.sub[a].x) : (z.sub[b].y < z.sub[a].y)) {
+          std::swap(a, b);
+        }
+        scav_rect const &lo{ z.sub[a] };
+        scav_rect const &hi{ z.sub[b] };
+        scav_rect const shared{ intersection(lo, hi) };
+        scav_rect const gap{ vertical ? scav_rect{ .x = lo.x + lo.w,
+                                                   .y = shared.y,
+                                                   .w = hi.x - (lo.x + lo.w),
+                                                   .h = shared.h }
+                                      : scav_rect{ .x = shared.x,
+                                                   .y = lo.y + lo.h,
+                                                   .w = shared.w,
+                                                   .h = hi.y - (lo.y + lo.h) } };
+        if ((gap.w <= 0) || (gap.h <= 0)) { continue; }
+        bool clear{ true };
+        for (uint32_t k = 0; k < subs.len; ++k) {
+          uint32_t const m{ c.submachine_ids[subs.off + k].v };
+          clear = clear && ((m == a) || (m == b) || (c.submachines[m].live == 0) ||
+                            !overlaps(gap, z.sub[m]));
+        }
+        if (!clear) { continue; }
+        int32_t const line{ vertical ? (gap.x + floor_div(gap.w, 2))
+                                     : (gap.y + floor_div(gap.h, 2)) };
+        vec_push_back(
+            out,
+            { .low = a, .high = b, .vertical = vertical, .line = line, .rect = gap });
+      }
+    }
+  }
+}
+
+// The coordinate of region `m`'s face on `gap`.
+int32_t gap_face(Gap const &gap, uint32_t m) {
+  bool const low{ gap.low == m };
+  if (gap.vertical) { return low ? gap.rect.x : (gap.rect.x + gap.rect.w); }
+  return low ? gap.rect.y : (gap.rect.y + gap.rect.h);
+}
+
+// The gap beside region `frame` that `end` lies in, off `frame`'s face; INVALID where none
+// is.
+uint32_t gap_of(std::vector<Gap> const &gaps, uint32_t frame, scav_point end) {
+  for (uint32_t i = 0; i < gaps.size(); ++i) {
+    Gap const &gap{ gaps[i] };
+    if (((gap.low == frame) || (gap.high == frame)) && (end.x >= gap.rect.x) &&
+        (end.x <= (gap.rect.x + gap.rect.w)) && (end.y >= gap.rect.y) &&
+        (end.y <= (gap.rect.y + gap.rect.h)) &&
+        ((gap.vertical ? end.x : end.y) != gap_face(gap, frame))) {
+      return i;
+    }
+  }
+  return INVALID;
+}
+
+// True when `end` lies in a gap beside region `frame`; `stub` is then `end` moved square
+// into `frame`, `band` past the divider or onto the face where that is farther, and onto
+// the face where a state of `frame` comes within `bumper` of that.
+bool gap_stub(Chart const &c,
+              SizedLayout const &z,
+              std::vector<Gap> const &gaps,
+              int32_t band,
+              int32_t bumper,
+              uint32_t frame,
+              scav_point end,
+              scav_point &stub) {
+  uint32_t const at{ gap_of(gaps, frame, end) };
+  if (at == INVALID) { return false; }
+  Gap const &gap{ gaps[at] };
+  int32_t const face{ gap_face(gap, frame) };
+  stub = end;
+  int32_t &across{ gap.vertical ? stub.x : stub.y };
+  across = (gap.low == frame) ? imin(face, gap.line - band) : imax(face, gap.line + band);
+  Span const kids{ c.submachines[frame].children };
+  for (uint32_t k = 0; k < kids.len; ++k) {
+    uint32_t const st{ c.state_ids[kids.off + k].v };
+    if ((c.states[st].live != 0) &&
+        overlaps(span_rect(end, stub), grow(z.state[st], bumper))) {
+      across = face;
+      break;
+    }
+  }
+  return !same(stub, end);
+}
+
+// The gap a route from region `from` to region `to` crosses: the one between them, else
+// the first beside `from` on the side facing `to`; INVALID where none is.
+uint32_t gap_toward(std::vector<Gap> const &gaps,
+                    SizedLayout const &z,
+                    uint32_t from,
+                    uint32_t to) {
+  scav_rect const &a{ z.sub[from] };
+  scav_rect const &b{ z.sub[to] };
+  uint32_t facing{ INVALID };
+  for (uint32_t i = 0; i < gaps.size(); ++i) {
+    Gap const &gap{ gaps[i] };
+    if (((gap.low == from) && (gap.high == to)) ||
+        ((gap.low == to) && (gap.high == from))) {
+      return i;
+    }
+    bool const toward_low{ gap.vertical ? ((b.x + b.w) <= a.x) : ((b.y + b.h) <= a.y) };
+    bool const toward_high{ gap.vertical ? (b.x >= (a.x + a.w)) : (b.y >= (a.y + a.h)) };
+    if ((facing == INVALID) &&
+        ((toward_high && (gap.low == from)) || (toward_low && (gap.high == from)))) {
+      facing = i;
+    }
+  }
+  return facing;
+}
+
+// A point placed on a divider.
+struct OnDivider {
+  bool vertical;
+  int32_t line, along;
+};
+
+// The room an end on a divider keeps: `clear` inside the gap's ends and from the other
+// ends on that divider, and `bumper` from each state within `bumper` of its route's reach,
+// `band` either side of the divider or across the gap; level with a state it meets there,
+// `clear` inside that state's face.
+struct DividerRoom {
+  int32_t clear, band, bumper;
+};
+
+// A side of a divider an end's route runs on: the region there, and the state the route
+// meets next on it; INVALID for none.
+struct DividerSide {
+  uint32_t region{ INVALID };
+  uint32_t meets{ INVALID };
+};
+
+// The coordinate along `gap`'s divider for a new end: the first of `want` with its room on
+// `sides`, else the one with that room nearest `want[0]`, else `want[0]` held inside the
+// gap; appended to `taken`. `blocks` is scratch.
+int32_t on_divider(Chart const &c,
+                   SizedLayout const &z,
+                   Gap const &gap,
+                   std::array<int32_t, 3> const &want,
+                   uint32_t wanted,
+                   std::array<DividerSide, 2> const &sides,
+                   DividerRoom const &room,
+                   std::vector<OnDivider> &taken,
+                   std::vector<std::array<int32_t, 2>> &blocks) {
+  int32_t const lo{ gap.vertical ? gap.rect.y : gap.rect.x };
+  int32_t const len{ gap.vertical ? gap.rect.h : gap.rect.w };
+  int32_t const inset{ imin(room.clear, len / 2) };
+  int32_t const first{ lo + inset };
+  int32_t const last{ (lo + len) - inset };
+  blocks.clear();  // open intervals along the divider
+  for (OnDivider const &had : taken) {
+    if ((had.vertical == gap.vertical) && (had.line == gap.line)) {
+      vec_push_back(blocks, { had.along - room.clear, had.along + room.clear });
+    }
+  }
+  std::array<std::array<int32_t, 2>, 4> beside{};  // off the face of a met state in reach
+  uint32_t besides{ 0 };
+  for (DividerSide const &side : sides) {
+    if (side.region >= c.submachines.size()) { continue; }
+    bool const low{ side.region == gap.low };
+    int32_t const face{ gap_face(gap, side.region) };
+    int32_t const near{ low ? imin(face, gap.line - room.band) : gap.line };
+    int32_t const far{ low ? gap.line : imax(face, gap.line + room.band) };
+    Span const kids{ c.submachines[side.region].children };
+    for (uint32_t k = 0; k < kids.len; ++k) {
+      uint32_t const st{ c.state_ids[kids.off + k].v };
+      if (c.states[st].live == 0) { continue; }
+      scav_rect const r{ grow(z.state[st], room.bumper) };
+      int32_t const across{ gap.vertical ? r.x : r.y };
+      if ((across >= far) || ((across + (gap.vertical ? r.w : r.h)) <= near)) { continue; }
+      int32_t const along{ gap.vertical ? r.y : r.x };
+      int32_t const extent{ gap.vertical ? r.h : r.w };
+      if (st != side.meets) {
+        vec_push_back(blocks, { along, along + extent });
+        continue;
+      }
+      int32_t const in{ imin(room.clear, (extent / 2) - room.bumper) };
+      beside[besides++] = { COORD_MIN, along + room.bumper + in };
+      beside[besides++] = { (along + extent) - room.bumper - in, COORD_MAX };
+    }
+  }
+  size_t const loose{ blocks.size() };
+  for (uint32_t k = 0; k < besides; ++k) { vec_push_back(blocks, beside[k]); }
+  auto const held = [&](int32_t v) { return imin(imax(v, first), last); };
+  int32_t const base{ held(want[0]) };
+  int32_t at{ base };
+  bool found{ false };
+  // Every block, then without the met states' faces where those leave no room.
+  for (size_t const limit : { blocks.size(), loose }) {
+    auto const roomy = [&](int32_t v) {
+      if ((v < first) || (v > last)) { return false; }
+      for (size_t k = 0; k < limit; ++k) {
+        if ((v > blocks[k][0]) && (v < blocks[k][1])) { return false; }
+      }
+      return true;
+    };
+    for (uint32_t k = 0; !found && (k < imin(wanted, 3U)); ++k) {
+      found = roomy(held(want[k]));
+      if (found) { at = held(want[k]); }
+    }
+    Wide nearest{ -1 };
+    for (size_t k = 0; !found && (k < limit); ++k) {
+      for (int32_t const v : { blocks[k][0], blocks[k][1], first, last }) {
+        Wide const off{ (v > base) ? (Wide{ v } - base) : (Wide{ base } - v) };
+        if (roomy(v) && ((nearest < 0) || (off < nearest))) {
+          nearest = off;
+          at = v;
+        }
+      }
+    }
+    found = found || (nearest >= 0);
+    if (found) { break; }
+  }
+  vec_push_back(taken, { .vertical = gap.vertical, .line = gap.line, .along = at });
+  return at;
 }
 
 // One segment's routing problem, before it is grouped into its frame's batch.
@@ -55,15 +329,235 @@ struct Planned {
   scav_point src, dst;
   uint32_t src_state, dst_state;  // -> states, INVALID unless the end is a box centre
   uint32_t seg;                   // -> SplitGraph::segments, for its bend chain
+  int32_t loop;                   // `RouteNet::loop`
+  uint32_t loop_state;            // -> states, the box a loop runs off; INVALID for none
+  uint32_t src_stubbed, dst_stubbed;  // `RouteNet`'s stubs
+  scav_point src_stub, dst_stub;
 };
 
-// One frame's answer, written by the shard that owns the frame and read back
-// in frame order.
-// True when `b` is `a` with every coordinate moved by one delta, which it
-// writes to `dx`/`dy`. Compares exactly what the router and the nudger read, so
-// the only thing left to assume is that the router answers a shifted question
-// with a shifted answer -- which `router_orthogonal_tests` pins directly
-// (11.10c).
+// Slides each state-border slot along its face level with the point across it on its outer
+// side: the next end for a slot the route leaves by, the previous end for one it enters
+// by. A slot stays where that end is a box, or where the spot is off the face's free span.
+void slide_slots(Chart const &c,
+                 SplitGraph const &g,
+                 SizedLayout const &z,
+                 scav_profile const &p,
+                 std::vector<std::vector<uint32_t>> const &seg_bends,
+                 std::vector<Span> const &trans_nets,
+                 std::vector<scav_span> const &trans_slots,
+                 std::vector<uint32_t> const &slot_port,
+                 std::vector<OccupiedSpan> const &occupied,  // keyed by state
+                 std::vector<scav_port_slot> &slots,
+                 std::vector<Planned> &planned) {
+  int32_t const clear{ route_clearance(p) };
+  int32_t const bumper{ box_clearance(p) };
+  auto const state_of = [&](uint32_t i) { return g.ports[slot_port[i]].state.v; };
+  auto const along = [&](uint32_t i) {
+    return (slots[i].side < 2) ? slots[i].y : slots[i].x;
+  };
+  auto const face_coord = [](scav_rect const &b, uint32_t side) {
+    switch (side) {
+      case 0: return b.x;
+      case 1: return b.x + b.w;
+      case 2: return b.y;
+      default: return b.y + b.h;
+    }
+  };
+  auto const on_face = [&](uint32_t i) {
+    uint32_t const st{ state_of(i) };
+    if (st >= z.state.size()) { return false; }
+    return ((slots[i].side < 2) ? slots[i].x : slots[i].y) ==
+           face_coord(z.state[st], slots[i].side);
+  };
+  // True when `v` along slot `i`'s face is `clear` inside the dividers between region `m`,
+  // its inner frame, and the state's other live regions; true for a frame the state does
+  // not own.
+  auto const in_region = [&](uint32_t i, uint32_t m, int32_t v) {
+    uint32_t const st{ state_of(i) };
+    if ((m >= c.submachines.size()) || (c.submachines[m].owner.v != st)) { return true; }
+    bool const y_axis{ slots[i].side < 2 };
+    scav_rect const &r{ z.sub[m] };
+    int32_t const r_lo{ y_axis ? r.y : r.x };
+    int32_t const r_hi{ r_lo + (y_axis ? r.h : r.w) };
+    Span const subs{ c.states[st].submachines };
+    for (uint32_t k = 0; k < subs.len; ++k) {
+      uint32_t const o{ c.submachine_ids[subs.off + k].v };
+      if ((o == m) || (o >= c.submachines.size()) || (c.submachines[o].live == 0)) {
+        continue;
+      }
+      scav_rect const &q{ z.sub[o] };
+      int32_t const q_lo{ y_axis ? q.y : q.x };
+      int32_t const q_hi{ q_lo + (y_axis ? q.h : q.w) };
+      if ((q_hi <= r_lo) && (v < (q_hi + floor_div(r_lo - q_hi, 2) + clear))) {
+        return false;
+      }
+      if ((q_lo >= r_hi) && (v > ((r_hi + floor_div(q_lo - r_hi, 2)) - clear))) {
+        return false;
+      }
+    }
+    return true;
+  };
+  // True when `v` along slot `i`'s face is `border_band` inside its corners, off its
+  // occupied spans, `bumper` off the bands lining the face, inside its inner frame `m`'s
+  // share of the face, and more than `clear` short of its neighbour slots.
+  auto const free_at = [&](uint32_t i, uint32_t m, int32_t v) {
+    if (!in_region(i, m, v)) { return false; }
+    uint32_t const side{ slots[i].side };
+    uint32_t const st{ state_of(i) };
+    scav_rect const &box{ z.state[st] };
+    bool const y_axis{ side < 2 };
+    int32_t const pad{ z.before[st].x - box.x };
+    int32_t const lo{ y_axis ? box.y : box.x };
+    int32_t const len{ y_axis ? box.h : box.w };
+    int32_t const inset{ imin(border_band(p), len / 2) };
+    if ((v < (lo + inset)) || (v > ((lo + len) - inset))) { return false; }
+    if (occupied_at(occupied, st, side, v)) { return false; }
+    int32_t const face{ face_coord(box, side) };
+    for (scav_rect const &wall : state_walls(z, st)) {
+      if ((wall.w <= 0) || (wall.h <= 0)) { continue; }
+      int32_t const w_lo{ y_axis ? wall.y : wall.x };
+      int32_t const w_hi{ w_lo + (y_axis ? wall.h : wall.w) };
+      int32_t const a_lo{ y_axis ? wall.x : wall.y };
+      int32_t const a_hi{ a_lo + (y_axis ? wall.w : wall.h) };
+      bool const lines{ (face >= (a_lo - pad - bumper)) &&
+                        (face <= (a_hi + pad + bumper)) };
+      if (lines && (v >= (w_lo - bumper)) && (v <= (w_hi + bumper))) { return false; }
+    }
+    int32_t const now{ along(i) };
+    for (uint32_t j = 0; j < slots.size(); ++j) {
+      if ((j == i) || (slots[j].side != side) || (state_of(j) != st) || !on_face(j)) {
+        continue;
+      }
+      int32_t const other{ along(j) };
+      if ((other == now) ||
+          ((other < now) ? (v <= (other + clear)) : (v >= (other - clear)))) {
+        return false;
+      }
+    }
+    return true;
+  };
+  // Slides slot `i`, its transition's `k`th, level with the point on the net beside it.
+  auto const slide = [&](Span nets, uint32_t i, uint32_t k, bool next) {
+    Planned const &pn{ planned[nets.off + k + (next ? 1U : 0U)] };
+    uint32_t const inner{ planned[nets.off + k + (next ? 0U : 1U)].frame };
+    std::vector<uint32_t> const &bends{ seg_bends[pn.seg] };
+    if (bends.empty() && ((next ? pn.dst_state : pn.src_state) != INVALID)) { return; }
+    scav_point to{ next ? pn.dst : pn.src };
+    if (!bends.empty()) { to = z.node[next ? bends.front() : bends.back()]; }
+    int32_t const v{ (slots[i].side < 2) ? to.y : to.x };
+    if ((v == along(i)) || !free_at(i, inner, v)) { return; }
+    ((slots[i].side < 2) ? slots[i].y : slots[i].x) = v;
+    scav_point const at{ .x = slots[i].x, .y = slots[i].y };
+    planned[nets.off + k].dst = at;
+    planned[nets.off + k + 1].src = at;
+  };
+  for (uint32_t t = 0; t < trans_slots.size(); ++t) {
+    scav_span const ss{ trans_slots[t] };
+    Span const nets{ trans_nets[t] };
+    if ((ss.len == 0) || (nets.len != (ss.len + 1))) { continue; }
+    // True when slot `k`'s state encloses the frame of the net before it.
+    auto const leaves = [&](uint32_t k) {
+      uint32_t const frame{ g.segments[planned[nets.off + k].seg].frame.v };
+      StateId const owner{ (frame < c.submachines.size()) ? c.submachines[frame].owner
+                                                          : StateId{ INVALID } };
+      return (owner.v != INVALID) &&
+             ancestor_or_self(c, StateId{ state_of(ss.off + k) }, owner);
+    };
+    auto const movable = [&](uint32_t k) {
+      return (state_of(ss.off + k) != INVALID) && on_face(ss.off + k);
+    };
+    for (uint32_t k = ss.len; k-- > 0;) {  // exits, outermost first
+      if (movable(k) && leaves(k)) { slide(nets, ss.off + k, k, true); }
+    }
+    for (uint32_t k = 0; k < ss.len; ++k) {  // entries, outermost first
+      if (movable(k) && !leaves(k)) { slide(nets, ss.off + k, k, false); }
+    }
+  }
+}
+
+// `reseat_slots` for transition `t`.
+void reseat_trans_slots(SplitGraph const &g,
+                        SizedLayout const &z,
+                        uint32_t t,
+                        Routes &out) {
+  if ((t >= out.route.size()) || (t >= g.trans_segments.size())) { return; }
+  scav_span const ports{ out.port[t] };
+  scav_span const route{ out.route[t] };
+  Span const segs{ g.trans_segments[t] };
+  if ((ports.len == 0) || (route.len < 2) || (ports.len >= segs.len)) { return; }
+  uint32_t from{ 0 };  // the route segment the slot before lies on
+  for (uint32_t k = 0; k < ports.len; ++k) {
+    scav_port_slot &slot{ out.slots[ports.off + k] };
+    uint32_t const port{ g.segments[segs.off + k].dst_port };
+    if (port >= g.ports.size()) { continue; }
+    SplitPort const &pt{ g.ports[port] };
+    scav_rect box{ (pt.state.v != INVALID) ? z.state[pt.state.v] : z.sub[pt.sub.v] };
+    if (pt.into.v != INVALID) {  // a divider port's box: its line, across both regions
+      scav_rect const &other{ z.sub[pt.into.v] };
+      bool const upright{ slot.side < 2 };
+      int32_t const lo{ upright ? imin(box.y, other.y) : imin(box.x, other.x) };
+      int32_t const hi{ upright ? imax(box.y + box.h, other.y + other.h)
+                                : imax(box.x + box.w, other.x + other.w) };
+      box = upright ? scav_rect{ .x = slot.x, .y = lo, .w = 0, .h = hi - lo }
+                    : scav_rect{ .x = lo, .y = slot.y, .w = hi - lo, .h = 0 };
+    }
+    // Where segment `i` meets `face` inside its span, nearest the slot along it.
+    auto const meet = [&](uint32_t face, uint32_t i, scav_point &at) {
+      scav_point const a{ out.points[route.off + i] };
+      scav_point const b{ out.points[route.off + i + 1] };
+      bool const upright{ face < 2 };  // the face runs down the page
+      int32_t line{ box.y + box.h };
+      switch (face) {
+        case 0: line = box.x; break;
+        case 1: line = box.x + box.w; break;
+        case 2: line = box.y; break;
+        default: break;
+      }
+      int32_t const lo{ upright ? box.y : box.x };
+      int32_t const hi{ lo + (upright ? box.h : box.w) };
+      int32_t const a_across{ upright ? a.x : a.y };
+      int32_t const b_across{ upright ? b.x : b.y };
+      int32_t const a_along{ upright ? a.y : a.x };
+      int32_t const b_along{ upright ? b.y : b.x };
+      if ((imin(a_across, b_across) > line) || (imax(a_across, b_across) < line) ||
+          ((a_across != b_across) && (a_along != b_along))) {
+        return false;
+      }
+      int32_t const was{ upright ? slot.y : slot.x };
+      int32_t const along{ (a_across == b_across) ? imin(imax(was, imin(a_along, b_along)),
+                                                         imax(a_along, b_along))
+                                                  : a_along };
+      if ((along < lo) || (along > hi)) { return false; }
+      at = upright ? scav_point{ .x = line, .y = along }
+                   : scav_point{ .x = along, .y = line };
+      return true;
+    };
+    bool placed{ false };
+    for (uint32_t i = from; !placed && ((i + 1) < route.len); ++i) {
+      scav_point const a{ out.points[route.off + i] };
+      scav_point const b{ out.points[route.off + i + 1] };
+      placed = (slot.x >= imin(a.x, b.x)) && (slot.x <= imax(a.x, b.x)) &&
+               (slot.y >= imin(a.y, b.y)) && (slot.y <= imax(a.y, b.y));
+      if (placed) { from = i; }
+    }
+    for (uint32_t pass = 0; !placed && (pass < 2); ++pass) {
+      for (uint32_t i = from; !placed && ((i + 1) < route.len); ++i) {
+        for (uint32_t face = 0; !placed && (face < 4); ++face) {
+          scav_point at{};
+          if (((pass == 0) != (face == slot.side)) || !meet(face, i, at)) { continue; }
+          slot.x = at.x;
+          slot.y = at.y;
+          slot.side = face;
+          from = i;
+          placed = true;
+        }
+      }
+    }
+  }
+}
+
+// True when `b` and `frame` are `a`'s input and frame with every coordinate moved by one
+// delta, written to `dx`/`dy`; compares every input the router and the nudger read.
 bool same_but_shifted(RouteFrameCache const &a,
                       RouteInput const &b,
                       scav_rect const &frame,
@@ -72,7 +566,7 @@ bool same_but_shifted(RouteFrameCache const &a,
   RouteInput const &x{ a.in };
   if ((x.obstacles.size() != b.obstacles.size()) || (x.nets.size() != b.nets.size()) ||
       (x.waypoints.size() != b.waypoints.size()) || (x.inscribed != b.inscribed) ||
-      (x.corner != b.corner)) {
+      (x.corner != b.corner) || (x.first_wall != b.first_wall)) {
     return false;
   }
   if ((x.region.w != b.region.w) || (x.region.h != b.region.h)) { return false; }
@@ -82,15 +576,27 @@ bool same_but_shifted(RouteFrameCache const &a,
     return false;
   }
   if (std::memcmp(&x.profile, &b.profile, sizeof(scav_profile)) != 0) { return false; }
+  if (x.occupied.size() != b.occupied.size()) { return false; }
   dx = b.region.x - x.region.x;
   dy = b.region.y - x.region.y;
+  for (uint32_t i = 0; i < x.occupied.size(); ++i) {
+    OccupiedSpan const &p{ x.occupied[i] };
+    OccupiedSpan const &q{ b.occupied[i] };
+    if ((p.obstacle != q.obstacle) || (p.face != q.face) || (p.len != q.len) ||
+        ((q.lo - p.lo) != ((p.face < 2) ? dy : dx))) {
+      return false;
+    }
+  }
   auto const moved_pt = [dx, dy](scav_point const &p, scav_point const &q) {
     return ((q.x - p.x) == dx) && ((q.y - p.y) == dy);
   };
   auto const moved_rect = [&](scav_rect const &p, scav_rect const &q) {
     return (p.w == q.w) && (p.h == q.h) && ((q.x - p.x) == dx) && ((q.y - p.y) == dy);
   };
-  if (!moved_rect(a.frame, frame)) { return false; }
+  if (!moved_rect(a.frame, frame) || (x.gaps.size() != b.gaps.size())) { return false; }
+  for (uint32_t i = 0; i < x.gaps.size(); ++i) {
+    if (!moved_rect(x.gaps[i], b.gaps[i])) { return false; }
+  }
   for (uint32_t i = 0; i < x.obstacles.size(); ++i) {
     if (!moved_rect(x.obstacles[i], b.obstacles[i])) { return false; }
   }
@@ -103,31 +609,37 @@ bool same_but_shifted(RouteFrameCache const &a,
     if ((p.src_obstacle != q.src_obstacle) || (p.dst_obstacle != q.dst_obstacle) ||
         (p.waypoint_off != q.waypoint_off) || (p.waypoint_len != q.waypoint_len) ||
         (p.src_face != q.src_face) || (p.dst_face != q.dst_face) || (p.lean != q.lean) ||
-        !moved_pt(p.src, q.src) || !moved_pt(p.dst, q.dst)) {
+        (p.loop != q.loop) || (p.src_clear != q.src_clear) ||
+        (p.dst_clear != q.dst_clear) || (p.apart != q.apart) ||
+        (p.loop_box != q.loop_box) || !moved_pt(p.src, q.src) || !moved_pt(p.dst, q.dst) ||
+        (p.src_stubbed != q.src_stubbed) || (p.dst_stubbed != q.dst_stubbed) ||
+        ((p.src_stubbed != 0) && !moved_pt(p.src_stub, q.src_stub)) ||
+        ((p.dst_stubbed != 0) && !moved_pt(p.dst_stub, q.dst_stub))) {
       return false;
     }
   }
   return true;
 }
 
+// One frame's routes, written by the shard that owns the frame, read back in frame order.
 struct FrameRoutes {
   std::vector<scav_point> points;
   std::vector<scav_span> net_points;  // -> points, parallel to the frame's nets
   std::vector<RouteMetrics> metrics;  // parallel to the frame's nets
-  NudgeStats nudged;
 };
 
-// Per-thread, reused across every frame the thread routes. A shard never waits on the
-// pool, so no second shard on this thread starts while one uses it.
+// Per-thread, reused across the frames the thread routes; one shard uses it at a time.
 struct FrameScratch {
   RouteInput in;
   RouteOutput ro;
   std::vector<uint32_t> obstacle_index;  // -> in.obstacles; INVALID off this frame
   std::vector<uint32_t> obstacle_states;
   std::vector<scav_rect> own;
-  std::vector<uint8_t> in_chain;  // parallel to states; 1 on the frame owner's chain
-  std::vector<uint32_t> chain;    // -> states, the owner and its enclosing states
-  std::vector<uint64_t> pick;     // one bit per state, the gather's candidates
+  std::vector<scav_path_clear> keep;  // parallel to `in.nets`: each net's end clears
+  std::vector<uint8_t> in_chain;      // parallel to states; 1 on the frame owner's chain
+  std::vector<uint32_t> chain;        // -> states, the owner and its enclosing states
+  std::vector<scav_rect> walls;       // what the nudger keeps the frame's lanes out of
+  std::vector<uint64_t> pick;         // one bit per state, the gather's candidates
 };
 
 FrameScratch &frame_scratch() {
@@ -140,41 +652,39 @@ struct CallScratch {
   std::array<std::vector<uint32_t>, 2> faces;
   std::vector<uint32_t> port_seg, seg_reversed;
   std::vector<std::vector<uint32_t>> seg_bends;
-  std::vector<uint8_t> source_node;
+  std::vector<uint32_t> slot_port;  // parallel to `Routes::slots`: each slot's port
   std::vector<Planned> planned;
   std::vector<Span> trans_nets;
+  std::vector<scav_extent> loop_label;
+  std::vector<scav_rect> loop_row;
+  std::vector<scav_point> loop_points;
+  std::vector<scav_span> loop_span;    // per transition, its inner loop in `loop_points`
+  std::vector<OccupiedSpan> occupied;  // keyed by state
   std::vector<std::vector<uint32_t>> by_frame;
   std::vector<FrameRoutes> frames;
   std::vector<scav_point> routed;
   std::vector<scav_span> net_span;
   std::vector<scav_rect> walls, held;
-  std::vector<uint8_t> up;
   std::vector<uint32_t> enclosing;  // parallel to states: `enclosing_state` of each
   // The live states each state encloses, as lists threaded through `kid_next`
   // from `kid_head`, and the live states a gather must always visit.
   std::vector<uint32_t> kid_head, kid_next, loose;
+  std::vector<Gap> gaps;
+  std::vector<OnDivider> on_dividers;  // the divider ends planned so far
+  std::vector<std::array<int32_t, 2>> blocks;
 };
 
-// A thread waiting in `parallel_for` can route another candidate before its call returns,
-// so each call takes the next scratch down this stack for its whole run.
+// Per-thread `CallScratch` stack: each call pops one for its run and pushes it back; a
+// call nested in a `parallel_for` wait takes the next.
 std::vector<CallScratch> &call_stack() {
   thread_local std::vector<CallScratch> s;
   return s;
 }
 
-// `v` resized to `n` empty lists, each keeping the capacity it had.
+// Resizes `v` to `n` empty lists, each keeping its capacity.
 void reset_lists(std::vector<std::vector<uint32_t>> &v, size_t n) {
   vec_resize(v, n);
   for (std::vector<uint32_t> &list : v) { list.clear(); }
-}
-
-void merge_nudged(NudgeStats &into, NudgeStats const &from) {
-  into.lanes += from.lanes;
-  into.spread += from.spread;
-  into.moved += from.moved;
-  into.bundles += from.bundles;
-  into.refused += from.refused;
-  into.reordered += from.reordered;
 }
 
 }  // namespace
@@ -190,23 +700,9 @@ Routes route_transitions(Chart const &c,
                          RouteCache const *reuse,
                          RouteCache *fill,
                          SearchPins const *pins,
-                         Routes const *was,
                          bool labels) {
   Routes out;
-  route_transitions(out,
-                    c,
-                    g,
-                    o,
-                    z,
-                    s,
-                    p,
-                    router,
-                    threads,
-                    reuse,
-                    fill,
-                    pins,
-                    was,
-                    labels);
+  route_transitions(out, c, g, o, z, s, p, router, threads, reuse, fill, pins, labels);
   return out;
 }
 
@@ -222,40 +718,42 @@ void route_transitions(Routes &out,
                        RouteCache const *reuse,
                        RouteCache *fill,
                        SearchPins const *pins,
-                       Routes const *was,
                        bool labels) {
   out.points.clear();
   out.slots.clear();
   out.placed.clear();
-  out.settled.clear();
   out.outside_region = 0;
   out.unreachable = 0;
   out.too_large = 0;
   out.reseated = 0;
-  out.nudged = {};
-  out.unplaced = 0;
+  out.occupied = 0;
   std::vector<CallScratch> &stack{ call_stack() };
   CallScratch cs;
   if (!stack.empty()) {
     cs = std::move(stack.back());
     stack.pop_back();
   }
-  // `{trans, leg, end}` resolved to a face per segment end once, so the frame
-  // workers read a flat table rather than searching the pin list per net.
+  // End pins at portless ends as `faces[end][seg]`; INVALID where unpinned, both empty
+  // with no end pins.
   std::array<std::vector<uint32_t>, 2> &faces{ cs.faces };
   for (std::vector<uint32_t> &side : faces) { side.clear(); }
-  if ((pins != nullptr) && !pins->faces.empty()) {
+  if ((pins != nullptr) && !pins->ends.empty()) {
     for (std::vector<uint32_t> &side : faces) {
       vec_assign(side, g.segments.size(), INVALID);
     }
-    for (FacePin const &fp : pins->faces) {
+    for (EndPin const &fp : pins->ends) {
       if ((fp.trans.v == INVALID) || (fp.trans.v >= g.trans_segments.size()) ||
           (fp.end > 1) || (fp.face > 3)) {
         continue;
       }
       Span const segs{ g.trans_segments[fp.trans.v] };
       if (fp.leg >= segs.len) { continue; }
-      faces[fp.end][segs.off + fp.leg] = fp.face;
+      uint32_t const seg{ segs.off + fp.leg };
+      if (((fp.end == 0) ? g.segments[seg].src_port : g.segments[seg].dst_port) !=
+          INVALID) {
+        continue;
+      }
+      faces[fp.end][seg] = fp.face;
     }
   }
   if (fill != nullptr) {
@@ -267,8 +765,7 @@ void route_transitions(Routes &out,
   vec_assign(out.port, n, {});
   vec_assign(out.failed, n, 0);
 
-  // The segment each port's boundary node belongs to, and the bends each
-  // segment was chained through, both gathered once.
+  // Each port's segment, and each segment's bend nodes from source to destination.
   std::vector<uint32_t> &port_seg{ cs.port_seg };
   vec_assign(port_seg, g.ports.size(), INVALID);
   for (uint32_t seg = 0; seg < g.segments.size(); ++seg) {
@@ -289,8 +786,7 @@ void route_transitions(Routes &out,
     scav_stable_sort(chain, [&](uint32_t a, uint32_t b) {
       return o.nodes[a].rank < o.nodes[b].rank;
     });
-    // Ranks climb in the acyclic direction, which is the authored one only
-    // when the segment's edge is not reversed.
+    // Ranks climb in the acyclic direction; reversed edges flip to authored order.
     if (seg_reversed[seg] != 0) {
       for (uint32_t i = 0; i < (chain.size() / 2); ++i) {
         uint32_t const other{ chain[i] };
@@ -300,17 +796,69 @@ void route_transitions(Routes &out,
     }
   }
 
-  // Whether a route arrives at a boundary or leaves through one. Read from the
-  // node's direction, not its absolute x, which carries the packer's offset.
-  std::vector<uint8_t> &source_node{ cs.source_node };
-  vec_assign(source_node, o.nodes.size(), 0);
-  for (OrderEdge const &e : o.edges) { source_node[e.src] = 1; }
+  // Each inner loop's four points out of its state's border and back, in its row of the
+  // state's loop room; `occupied` gets its ends' run on each face they touch, padded.
+  std::vector<scav_rect> &loop_row{ cs.loop_row };
+  loop_rows(c, z, s, p, cs.loop_label, loop_row);
+  std::vector<scav_point> &loop_points{ cs.loop_points };
+  loop_points.clear();
+  std::vector<scav_span> &loop_span{ cs.loop_span };
+  vec_assign(loop_span, n, scav_span{});
+  std::vector<OccupiedSpan> &occupied{ cs.occupied };
+  occupied.clear();
+  int32_t const clear{ route_clearance(p) };
+  for (uint32_t t = 0; t < n; ++t) {
+    if ((g.trans_segments[t].len == 0) || !inner_loop(c, t)) { continue; }
+    uint32_t const st{ c.transitions[t].src.v };
+    scav_rect const r{ z.state[st] };
+    scav_rect const row{ loop_row[t] };
+    uint32_t const exit{ loop_place(z, st).face };
+    bool const vertical{ exit >= 2 };
+    int32_t const edge{ loop_boundary(z, st, exit) };
+    int32_t const lane{ imin(scav::loop_row(p, cs.loop_label[t], vertical).lane,
+                             vertical ? row.w : row.h) };
+    int32_t const first{ vertical
+                             ? (row.x + floor_div(row.w - lane, 2))
+                             : (row.y + floor_div(row.h - lane, 2)) };  // the first leg
+    int32_t leg{ (exit == 0) ? (row.x + loop_reach(p))
+                             : ((row.x + row.w) - loop_reach(p)) };
+    if (vertical) {
+      leg = (exit == 2) ? (row.y + loop_reach(p)) : ((row.y + row.h) - loop_reach(p));
+    }
+    auto const at = [vertical](int32_t along, int32_t across) {
+      return vertical ? scav_point{ .x = across, .y = along }
+                      : scav_point{ .x = along, .y = across };
+    };
+    uint32_t const off{ static_cast<uint32_t>(loop_points.size()) };
+    loop_span[t] = { .off = off, .len = 4 };
+    vec_push_back(loop_points, at(edge, first));
+    vec_push_back(loop_points, at(leg, first));
+    vec_push_back(loop_points, at(leg, first + lane));
+    vec_push_back(loop_points, at(edge, first + lane));
+    loop_occupied({ loop_points[off], loop_points[off + 3] }, r, st, clear, occupied);
+  }
 
-  // A slot sits on the crossed box's own border, at the height its boundary
-  // node ended up.
-  auto const slot_of = [&](uint32_t port) {
+  // A point on face `face` of state `st` moved along it out of the state's occupied spans,
+  // held `border_band` off its corners; left in place and counted where none is free.
+  auto const clear_of_loops = [&](uint32_t st, uint32_t face, scav_point at) {
+    if ((face >= 4) || occupied.empty()) { return at; }
+    scav_rect const &r{ z.state[st] };
+    int32_t &pos{ (face < 2) ? at.y : at.x };
+    if (!occupied_at(occupied, st, face, pos)) { return at; }
+    int32_t const lo{ (face < 2) ? r.y : r.x };
+    int32_t const len{ (face < 2) ? r.h : r.w };
+    int32_t const inset{ imin(border_band(p), len / 2) };
+    if (!occupied_free(occupied, st, face, lo + inset, (lo + len) - inset, pos)) {
+      ++out.occupied;
+    }
+    return at;
+  };
+
+  // A slot sits on the crossed box's border on segment `seg`'s side, at its boundary
+  // node's coordinate along that side, clear of the box's occupied spans; at the box
+  // centre when the segment has no node.
+  auto const slot_of = [&](uint32_t port, uint32_t seg) {
     SplitPort const &pt{ g.ports[port] };
-    uint32_t const seg{ port_seg[port] };
     uint32_t const node{ (seg == INVALID) ? INVALID : o.seg_node[seg] };
     bool const on_state{ pt.state.v != INVALID };
     scav_rect const box{ on_state ? z.state[pt.state.v] : z.sub[pt.sub.v] };
@@ -320,43 +868,110 @@ void route_transitions(Routes &out,
       scav_point const at{ centre(box) };
       return scav_port_slot{ .x = at.x, .y = at.y, .side = 0, .boundary_depth = depth };
     }
-    bool const leading{ source_node[node] != 0 };
-    // On the border the frame's ranks start and end at: left and right for a frame running
-    // across, top and bottom for one running down; a cross-border node is on the others.
-    uint32_t const frame{ g.segments[seg].frame.v };
-    bool const down{ (frame < o.sub_down.size()) && (o.sub_down[frame] != 0) };
-    uint8_t const cross{ (seg < o.seg_cross.size()) ? o.seg_cross[seg] : uint8_t{ 0 } };
-    if (cross != 0) {
-      bool const first{ cross == 1 };
-      if (down) {
-        return scav_port_slot{ .x = first ? box.x : (box.x + box.w),
-                               .y = z.node[node].y,
-                               .side = first ? 0U : 1U,
-                               .boundary_depth = depth };
-      }
-      return scav_port_slot{ .x = z.node[node].x,
-                             .y = first ? box.y : (box.y + box.h),
-                             .side = first ? 2U : 3U,
-                             .boundary_depth = depth };
+    uint32_t const side{ o.seg_side[seg] };
+    scav_point at{ z.node[node] };
+    switch (side) {
+      case 0: at.x = box.x; break;
+      case 1: at.x = box.x + box.w; break;
+      case 2: at.y = box.y; break;
+      default: at.y = box.y + box.h; break;
     }
-    if (down) {
-      return scav_port_slot{ .x = z.node[node].x,
-                             .y = leading ? box.y : (box.y + box.h),
-                             .side = leading ? 2U : 3U,
-                             .boundary_depth = depth };
-    }
-    return scav_port_slot{ .x = leading ? box.x : (box.x + box.w),
-                           .y = z.node[node].y,
-                           .side = leading ? 0U : 1U,
-                           .boundary_depth = depth };
+    if (on_state) { at = clear_of_loops(pt.state.v, side, at); }
+    return scav_port_slot{ .x = at.x, .y = at.y, .side = side, .boundary_depth = depth };
   };
 
-  // Plan every net before routing any, so the port slots come out in
-  // transition order however the frames are then visited.
+  std::vector<Gap> &gaps{ cs.gaps };
+  region_gaps(c, z, gaps);
+  cs.on_dividers.clear();
+  DividerRoom const room{ .clear = clear,
+                          .band = border_band(p),
+                          .bumper = box_clearance(p) };
+
+  // The state segment `seg` starts (`end` 0) or finishes (1) on: its box, or the state a
+  // port there sits on; INVALID for an inner face or a divider.
+  auto const met = [&](uint32_t seg, uint32_t end) {
+    SplitSegment const &sg{ g.segments[seg] };
+    uint32_t const port{ (end == 0) ? sg.src_port : sg.dst_port };
+    if (port != INVALID) { return g.ports[port].state.v; }
+    if (((end == 0) ? sg.src_inner : sg.dst_inner) != 0) { return INVALID; }
+    Transition const &tr{ c.transitions[sg.trans.v] };
+    return ((end == 0) ? tr.src : tr.dst).v;
+  };
+
+  // A divider port's slot: on the divider of the gap its route crosses, level with the
+  // first with room of the source region's boundary node, the target region's, and the
+  // point the route reaches the divider from, where each node faces the gap. With no gap,
+  // on the source region's border at its node.
+  auto const divider_slot = [&](uint32_t port, uint32_t seg, scav_point from) {
+    SplitPort const &pt{ g.ports[port] };
+    uint32_t const crossed{ gap_toward(gaps, z, pt.sub.v, pt.into.v) };
+    if (crossed == INVALID) { return slot_of(port, seg); }
+    Gap const &gap{ gaps[crossed] };
+    uint32_t const other{ (gap.low == pt.sub.v) ? gap.high : gap.low };
+    std::array<DividerSide, 2> const sides{
+      DividerSide{ .region = pt.sub.v, .meets = met(seg, 0) },
+      DividerSide{ .region = other,
+                   .meets = (other == pt.into.v) ? met(seg + 1, 1) : INVALID }
+    };
+    auto const level = [&gap](scav_point v) { return gap.vertical ? v.y : v.x; };
+    std::array<int32_t, 3> want{};
+    uint32_t wanted{ 0 };
+    for (uint32_t const side : { 0U, 1U }) {
+      uint32_t const at{ seg + side };  // the leg whose boundary node stands for the port
+      uint32_t const m{ (side == 0) ? pt.sub.v : pt.into.v };
+      uint32_t const node{ o.seg_node[at] };
+      if ((node == INVALID) || (o.seg_port[at] != port) ||
+          ((gap.low != m) && (gap.high != m))) {
+        continue;
+      }
+      uint32_t const facing{ (gap.vertical ? 0U : 2U) + ((gap.low == m) ? 1U : 0U) };
+      if (o.seg_side[at] == facing) { want[wanted++] = level(z.node[node]); }
+    }
+    std::vector<uint32_t> const &bends{ seg_bends[seg] };
+    want[wanted++] = level(bends.empty() ? from : z.node[bends.back()]);
+    int32_t const along{
+      on_divider(c, z, gap, want, wanted, sides, room, cs.on_dividers, cs.blocks)
+    };
+    uint32_t const side{ (gap.vertical ? 0U : 2U) + ((gap.low == pt.sub.v) ? 1U : 0U) };
+    return scav_port_slot{ .x = gap.vertical ? gap.line : along,
+                           .y = gap.vertical ? along : gap.line,
+                           .side = side,
+                           .boundary_depth =
+                               g.state_depth[c.submachines[pt.sub.v].owner.v] + 1 };
+  };
+
+  // An inner-face end of `frame` on its owner's border, clear of the owner's occupied
+  // spans; on a divider, with room there for a route meeting state `meets` next.
+  auto const inner_end = [&](uint32_t frame, scav_point node, uint32_t meets) {
+    scav_point at{ on_owner_border(c, z, frame, node) };
+    if (frame >= c.submachines.size()) { return at; }
+    uint32_t const in_gap{ gap_of(gaps, frame, at) };
+    if (in_gap != INVALID) {
+      Gap const &gap{ gaps[in_gap] };
+      int32_t &along{ gap.vertical ? at.y : at.x };
+      along = on_divider(c,
+                         z,
+                         gap,
+                         { along, 0, 0 },
+                         1,
+                         { DividerSide{ .region = frame, .meets = meets }, DividerSide{} },
+                         room,
+                         cs.on_dividers,
+                         cs.blocks);
+      return at;
+    }
+    uint32_t const owner{ c.submachines[frame].owner.v };
+    return (owner < z.state.size())
+               ? clear_of_loops(owner, face_of(at, z.state[owner]), at)
+               : at;
+  };
+
+  // Plans every net before routing any; port slots are in transition order.
   std::vector<Planned> &planned{ cs.planned };
   planned.clear();
   std::vector<Span> &trans_nets{ cs.trans_nets };
   vec_assign(trans_nets, n, Span{});
+  cs.slot_port.clear();
   for (uint32_t t = 0; t < n; ++t) {
     Span const segs{ g.trans_segments[t] };
     if (segs.len == 0) { continue; }
@@ -364,34 +979,33 @@ void route_transitions(Routes &out,
     uint32_t const first_net{ static_cast<uint32_t>(planned.size()) };
     uint32_t const first_slot{ static_cast<uint32_t>(out.slots.size()) };
 
-    if (tr.src == tr.dst) {
-      // The external self-loop: out the trailing side and back, and no further
-      // than the state it is drawn inside lets it, which keeps a route off
-      // that state's border (11.10g).
-      scav_rect const r{ z.state[tr.src.v] };
-      scav_point const lip{ .x = r.x + r.w, .y = r.y + floor_div(r.h, 2) };
+    bool const looped{ inner_loop(c, t) };  // laid out above
+    if (!looped && (tr.src == tr.dst)) {
+      // Self-loop: both ends name the state; the router seats them on its least-used face.
       uint32_t const frame{ g.segments[segs.off].frame.v };
-      StateId const around{ (frame < c.submachines.size()) ? c.submachines[frame].owner
-                                                           : StateId{ INVALID } };
-      int32_t reach{ lip.x + (2 * p.pad) };
-      if (around.v != INVALID) {
-        scav_rect const box{ z.state[around.v] };
-        reach = imax(imin(reach, (box.x + box.w) - imax(p.pad / 2, 1) - 1), lip.x + 1);
-      }
+      scav_point const mid{ centre(z.state[tr.src.v]) };
       vec_push_back(planned,
                     { .frame = frame,
-                      .src = lip,
-                      .dst = { .x = reach, .y = lip.y },
-                      .src_state = INVALID,
-                      .dst_state = INVALID,
-                      .seg = segs.off });
-    } else {
-      // An endpoint that encloses its end of the route is met on that state's
-      // inner face, which is where phase 1 put the segment's boundary node.
-      // Nothing is crossed there, so the end names no obstacle and no slot.
+                      .src = mid,
+                      .dst = mid,
+                      .src_state = tr.src.v,
+                      .dst_state = tr.src.v,
+                      .seg = segs.off,
+                      .loop = 2 * p.pad,
+                      .loop_state = tr.src.v,
+                      .src_stubbed = 0,
+                      .dst_stubbed = 0,
+                      .src_stub = {},
+                      .dst_stub = {} });
+    } else if (!looped) {
+      // An end inside its own endpoint state sits at the segment's boundary node on that
+      // state's inner face; it names no obstacle and no slot.
       uint32_t const head{ o.seg_node[segs.off] };
       bool const head_inner{ (g.segments[segs.off].src_inner != 0) && (head != INVALID) };
-      scav_point at{ head_inner ? z.node[head] : centre(z.state[tr.src.v]) };
+      scav_point at{ head_inner ? inner_end(g.segments[segs.off].frame.v,
+                                            z.node[head],
+                                            met(segs.off, 1))
+                                : centre(z.state[tr.src.v]) };
       uint32_t at_state{ head_inner ? INVALID : tr.src.v };
       for (uint32_t k = 0; k < segs.len; ++k) {
         uint32_t const seg{ segs.off + k };
@@ -401,25 +1015,38 @@ void route_transitions(Routes &out,
         scav_point end{};
         uint32_t end_state{ INVALID };
         if (port != INVALID) {
-          scav_port_slot const slot{ slot_of(port) };
+          scav_port_slot const slot{ (g.ports[port].into.v != INVALID)
+                                         ? divider_slot(port, seg, at)
+                                         : slot_of(port, port_seg[port]) };
           vec_push_back(out.slots, slot);
+          vec_push_back(cs.slot_port, port);
           end = { .x = slot.x, .y = slot.y };
         } else if (tail_inner) {
-          end = z.node[tail];
+          end = inner_end(g.segments[seg].frame.v, z.node[tail], met(seg, 0));
         } else {
           end = centre(z.state[tr.dst.v]);
           end_state = tr.dst.v;
         }
-        // The channel between two concurrent regions of one state is routed
-        // inside that state, in the source region's frame: in the frame the
-        // state sits in, the state is an obstacle walling the route out of
-        // the space between its own regions, and it went the long way round
-        // outside them (11.8).
-        uint32_t frame{ g.segments[seg].frame.v };
+        uint32_t const frame{ g.segments[seg].frame.v };
         uint32_t const from_port{ g.segments[seg].src_port };
-        if ((g.segments[seg].separator != 0) && (from_port < g.ports.size()) &&
-            (g.ports[from_port].sub.v < c.submachines.size())) {
-          frame = g.ports[from_port].sub.v;
+        // An external route's leg between a box and a port on its border, or between two
+        // ports on one face of a box, is a loop off that box.
+        uint32_t loop_state{ INVALID };
+        if (tr.kind == TransKind::External) {
+          bool const from_slot{ from_port < g.ports.size() };
+          if ((at_state != INVALID) && (port != INVALID) &&
+              (g.ports[port].state.v == at_state)) {
+            loop_state = at_state;
+          } else if ((end_state != INVALID) && from_slot &&
+                     (g.ports[from_port].state.v == end_state)) {
+            loop_state = end_state;
+          } else if ((port != INVALID) && from_slot &&
+                     (out.slots.size() >= (first_slot + 2)) &&
+                     (g.ports[port].state.v != INVALID) &&
+                     (g.ports[port].state == g.ports[from_port].state) &&
+                     (out.slots[out.slots.size() - 2].side == out.slots.back().side)) {
+            loop_state = g.ports[port].state.v;
+          }
         }
         vec_push_back(planned,
                       { .frame = frame,
@@ -427,7 +1054,13 @@ void route_transitions(Routes &out,
                         .dst = end,
                         .src_state = at_state,
                         .dst_state = end_state,
-                        .seg = seg });
+                        .seg = seg,
+                        .loop = (loop_state != INVALID) ? (2 * p.pad) : 0,
+                        .loop_state = loop_state,
+                        .src_stubbed = 0,
+                        .dst_stubbed = 0,
+                        .src_stub = {},
+                        .dst_stub = {} });
         at = end;
         at_state = end_state;
       }
@@ -437,9 +1070,93 @@ void route_transitions(Routes &out,
     out.port[t] = { .off = first_slot,
                     .len = static_cast<uint32_t>(out.slots.size()) - first_slot };
   }
+  slide_slots(c,
+              g,
+              z,
+              p,
+              seg_bends,
+              trans_nets,
+              out.port,
+              cs.slot_port,
+              occupied,
+              out.slots,
+              planned);
+  // Where a leg square from divider end `end` into `frame` meets the net's other end: on
+  // box `st`'s face level with `end`, or at point `other` level with it, with no other
+  // state of `frame` between; false where it does not.
+  auto const straight_in = [&](uint32_t frame,
+                               scav_point end,
+                               uint32_t st,
+                               scav_point other,
+                               scav_point &at) {
+    uint32_t const in_gap{ gap_of(gaps, frame, end) };
+    if (in_gap == INVALID) { return false; }
+    Gap const &gap{ gaps[in_gap] };
+    bool const low{ gap.low == frame };
+    int32_t const along{ gap.vertical ? end.y : end.x };
+    at = other;
+    if (st < c.states.size()) {
+      scav_rect const &r{ z.state[st] };
+      int32_t const lo{ gap.vertical ? r.y : r.x };
+      int32_t const len{ gap.vertical ? r.h : r.w };
+      int32_t const arc{ state_corner_radius(c.states[st].kind, r, z.before[st].x - r.x) };
+      int32_t const inset{ imin(imax(clear, arc), len / 2) };
+      bool const level{ kind_inscribed(c.states[st].kind)
+                            ? (along == (lo + floor_div(len, 2)))
+                            : ((along >= (lo + inset)) &&
+                               (along <= ((lo + len) - inset))) };
+      if (!level) { return false; }
+      int32_t const low_face{ gap.vertical ? r.x : r.y };
+      at = end;
+      (gap.vertical ? at.x : at.y) =
+          low ? (low_face + (gap.vertical ? r.w : r.h)) : low_face;
+    } else if ((gap.vertical ? at.y : at.x) != along) {
+      return false;
+    }
+    int32_t const across{ gap.vertical ? at.x : at.y };
+    if (low ? (across > gap_face(gap, frame)) : (across < gap_face(gap, frame))) {
+      return false;
+    }
+    Span const kids{ c.submachines[frame].children };
+    for (uint32_t k = 0; k < kids.len; ++k) {
+      uint32_t const kid{ c.state_ids[kids.off + k].v };
+      if ((kid != st) && (c.states[kid].live != 0) &&
+          overlaps(span_rect(end, at), z.state[kid])) {
+        return false;
+      }
+    }
+    return true;
+  };
 
-  // One batch per frame, in submachine order. A frame's nets keep the order
-  // they were planned in, which is `(transition, ordinal)`.
+  // An end in a gap beside its frame's region leaves square to the divider; where
+  // `straight_in` reaches the net's other end, that leg is the whole net, and a box end
+  // sits on its face.
+  for (Planned &pn : planned) {
+    if (pn.src_state == INVALID) {
+      pn.src_stubbed =
+          gap_stub(c, z, gaps, room.band, room.bumper, pn.frame, pn.src, pn.src_stub) ? 1U
+                                                                                      : 0U;
+    }
+    if (pn.dst_state == INVALID) {
+      pn.dst_stubbed =
+          gap_stub(c, z, gaps, room.band, room.bumper, pn.frame, pn.dst, pn.dst_stub) ? 1U
+                                                                                      : 0U;
+    }
+    scav_point at{};
+    if ((pn.src_stubbed != 0) && (pn.dst_stubbed == 0) &&
+        straight_in(pn.frame, pn.src, pn.dst_state, pn.dst, at)) {
+      pn.dst = at;
+      pn.dst_state = INVALID;
+      pn.src_stub = at;
+    } else if ((pn.dst_stubbed != 0) && (pn.src_stubbed == 0) &&
+               straight_in(pn.frame, pn.dst, pn.src_state, pn.src, at)) {
+      pn.src = at;
+      pn.src_state = INVALID;
+      pn.dst_stub = at;
+    }
+  }
+
+  // One batch per frame, in submachine order, of nets in `(transition, ordinal)` order.
   std::vector<std::vector<uint32_t>> &by_frame{ cs.by_frame };
   reset_lists(by_frame, c.submachines.size());
   for (uint32_t i = 0; i < planned.size(); ++i) {
@@ -449,13 +1166,17 @@ void route_transitions(Routes &out,
   }
 
   int32_t const margin{ router.margin(p) };
+  int32_t const pitch{ imax(route_clearance(p), p.font_size_grid) };  // nudging's lanes
+  scav_rect const domain{ .x = COORD_MIN,
+                          .y = COORD_MIN,
+                          .w = 2 * COORD_MAX,
+                          .h = 2 * COORD_MAX };
   std::vector<FrameRoutes> &frames{ cs.frames };
   vec_resize(frames, by_frame.size());
   for (FrameRoutes &fr : frames) {
     fr.points.clear();
     fr.net_points.clear();
     fr.metrics.clear();
-    fr.nudged = {};
   }
 
   // Every obstacle of a frame is loose or enclosed by a state on the owner's chain. A
@@ -484,23 +1205,19 @@ void route_transitions(Routes &out,
     if (!contains(z.state[up], z.state[st])) { vec_push_back(loose, st); }
   }
 
-  // Reads the model, the orders, the geometry and the plan; writes `frames[m]`
-  // and the caller's own scratch, so two frames share nothing.
+  // Writes only `frames[m]`, `fill`'s entries for frame `m`, and `sc`.
   auto const route_frame = [&](uint32_t m, FrameScratch &sc) {
     TraceFrame const traced{ SubmachineId{ m } };
     RouteInput &in{ sc.in };
     RouteOutput &ro{ sc.ro };
     in.obstacles.clear();
     in.inscribed.clear();
-    // Cleared with the obstacles it parallels: otherwise a later frame reads an
-    // earlier one's radius at that index and the corner inset stops applying.
     in.corner.clear();
     in.nets.clear();
     in.waypoints.clear();
     sc.obstacle_states.clear();
 
-    // Grown to hold every point its nets reach: a port sits on the *crossed* box's
-    // border, which is outside this submachine by the owner's padding.
+    // The frame's rect grown to cover every end, bend and loop reach of its nets.
     scav_rect region{ z.sub[m] };
     auto const cover = [&region](scav_point at) {
       int32_t const right{ imax(region.x + region.w, at.x) };
@@ -514,18 +1231,22 @@ void route_transitions(Routes &out,
       cover(planned[i].src);
       cover(planned[i].dst);
       for (uint32_t const bend : seg_bends[planned[i].seg]) { cover(z.node[bend]); }
+      if ((planned[i].loop > 0) && (planned[i].loop_state != INVALID)) {
+        scav_rect const &r{ z.state[planned[i].loop_state] };
+        int32_t const reach{ planned[i].loop };
+        cover({ .x = r.x - reach, .y = r.y - reach });
+        cover({ .x = r.x + r.w + reach, .y = r.y + r.h + reach });
+      }
     }
 
-    // Exactly what this router asked for, not a guess: a margin larger than it
-    // needs is canvas nobody draws in, smaller leaves a frame-edge box no lane.
     region.x -= margin;
     region.y -= margin;
     region.w += 2 * margin;
     region.h += 2 * margin;
     in.region = region;
 
-    // Every live box overlapping the region except those enclosing it, and of those only
-    // the outermost. The chain matches `ancestor_or_self`; candidates go in state order.
+    // Every live box overlapping the region and not enclosing the frame, outermost only,
+    // in state order. The chain matches `ancestor_or_self`.
     StateId const owner{ c.submachines[m].owner };
     sc.chain.clear();
     uint32_t link{ owner.v };
@@ -564,9 +1285,41 @@ void route_transitions(Routes &out,
                                           z.before[st].x - z.state[st].x));
       }
     }
-    for (uint32_t const a : sc.chain) { sc.in_chain[a] = 0; }
-    // The state the frame's routes are drawn inside.
+    // The walls (bands and loop rooms) of the owner's chain that overlap the region.
+    in.first_wall = static_cast<uint32_t>(in.obstacles.size());
+    for (uint32_t const a : sc.chain) {
+      sc.in_chain[a] = 0;
+      for (scav_rect const &band : state_walls(z, a)) {
+        if ((band.w > 0) && (band.h > 0) && overlaps(region, band)) {
+          vec_push_back(in.obstacles, band);
+          vec_push_back(in.inscribed, 0U);
+          vec_push_back(in.corner, 0);
+        }
+      }
+    }
     in.enclosure = (owner.v == INVALID) ? scav_rect{} : z.state[owner.v];
+    // Each gap beside this region, unless an end of the frame's nets lies beyond it.
+    in.gaps.clear();
+    for (Gap const &gap : gaps) {
+      if ((gap.low != m) && (gap.high != m)) { continue; }
+      bool const low{ gap.low == m };
+      int32_t const far{ gap_face(gap, low ? gap.high : gap.low) };
+      bool beyond{ false };
+      for (uint32_t const i : by_frame[m]) {
+        for (scav_point const at : { planned[i].src, planned[i].dst }) {
+          int32_t const across{ gap.vertical ? at.x : at.y };
+          beyond = beyond || (low ? (across > far) : (across < far));
+        }
+      }
+      if (!beyond) { vec_push_back(in.gaps, gap.rect); }
+    }
+    in.occupied.clear();
+    for (OccupiedSpan const &span : occupied) {
+      if (sc.obstacle_index[span.obstacle] == INVALID) { continue; }
+      OccupiedSpan here{ span };
+      here.obstacle = sc.obstacle_index[span.obstacle];
+      vec_push_back(in.occupied, here);
+    }
     for (uint32_t const i : by_frame[m]) {
       Planned const &pn{ planned[i] };
       RouteNet net{ .src = pn.src, .dst = pn.dst };
@@ -581,7 +1334,31 @@ void route_transitions(Routes &out,
         net.src_face = faces[0][pn.seg];
         net.dst_face = faces[1][pn.seg];
       }
+      net.loop = pn.loop;
+      if ((pn.src_state == INVALID) && (pn.dst_state == INVALID) &&
+          (pn.loop_state != INVALID)) {
+        net.loop_box = sc.obstacle_index[pn.loop_state];
+      }
+      // A transition's own ends keep its clears, on its first and last segments.
+      uint32_t const t{ g.segments[pn.seg].trans.v };
+      if ((s.path_clear != nullptr) && (t < s.n_path_clear) &&
+          (t < g.trans_segments.size())) {
+        Span const segs{ g.trans_segments[t] };
+        if (pn.seg == segs.off) { net.src_clear = s.path_clear[t].src; }
+        if ((pn.seg + 1) == (segs.off + segs.len)) { net.dst_clear = s.path_clear[t].dst; }
+      }
+      net.trans = g.segments[pn.seg].trans.v;
+      net.seg = pn.seg;
+      // An out-and-back route's legs in one frame keep clear of each other.
+      for (uint32_t k = 0; k < in.nets.size(); ++k) {
+        RouteNet const &had{ in.nets[k] };
+        if ((had.trans == net.trans) && ((had.seg + 1) < net.seg)) { net.apart = k; }
+      }
       if (pn.seg < z.lean.size()) { net.lean = z.lean[pn.seg]; }
+      net.src_stubbed = pn.src_stubbed;
+      net.dst_stubbed = pn.dst_stubbed;
+      net.src_stub = pn.src_stub;
+      net.dst_stub = pn.dst_stub;
       trace_emit({ .kind = TraceKind::NetPlanned,
                    .net = { .seg = pn.seg,
                             .trans = g.segments[pn.seg].trans.v,
@@ -595,18 +1372,18 @@ void route_transitions(Routes &out,
         trace_emit({ .kind = TraceKind::NetWaypoint, .point = { .x = at.x, .y = at.y } });
       }
       vec_push_back(in.nets, net);
-      if (fill != nullptr) {
-        auto const at{ static_cast<uint32_t>(in.nets.size() - 1) };
-        for (uint32_t end = 0; end < 2; ++end) {
-          fill->faceable[(size_t{ 2 } * pn.seg) + end] =
-              static_cast<uint8_t>(router.effective_faces(in, at, end));
-        }
+    }
+    // After every net is in: a loop's `effective_faces` reads the frame's other ends.
+    for (uint32_t k = 0; (fill != nullptr) && (k < by_frame[m].size()); ++k) {
+      uint32_t const seg{ planned[by_frame[m][k]].seg };
+      for (uint32_t end = 0; end < 2; ++end) {
+        fill->faceable[(size_t{ 2 } * seg) + end] =
+            static_cast<uint8_t>(router.effective_faces(in, k, end));
       }
     }
     scav_rect const frame{ (owner.v == INVALID) ? region : z.state[owner.v] };
 
-    // A frame whose question only moved is answered by moving its answer. The
-    // comparison costs one walk of an input the gather above already built.
+    // A cached frame whose input matches this one up to a translation is reused, shifted.
     int32_t dx{ 0 };
     int32_t dy{ 0 };
     if ((reuse != nullptr) && (m < reuse->frame.size()) && (reuse->frame[m].valid != 0) &&
@@ -619,7 +1396,6 @@ void route_transitions(Routes &out,
       }
       vec_assign(frames[m].net_points, had.net_points.begin(), had.net_points.end());
       vec_assign(frames[m].metrics, had.metrics.begin(), had.metrics.end());
-      frames[m].nudged = had.nudged;
       if (fill != nullptr) {
         RouteFrameCache &to{ fill->frame[m] };
         to.valid = had.valid;
@@ -628,7 +1404,6 @@ void route_transitions(Routes &out,
         to.points = moved;
         to.net_points = had.net_points;
         to.metrics = had.metrics;
-        to.nudged = had.nudged;
       }
       for (uint32_t const st : sc.obstacle_states) { sc.obstacle_index[st] = INVALID; }
       return;
@@ -636,20 +1411,25 @@ void route_transitions(Routes &out,
 
     router.route(in, ro);
 
-    // Nudged per frame, while the frame's obstacles are in hand.
+    // Nudges the frame's lanes against its own obstacles and the gaps between regions.
     if (margin > 0) {
-      // The pitch is a line of text, not the router's clearance (11.9.5), and
-      // it is the grouping tolerance too, so what is spread apart by it is
-      // exactly what was too close by it.
-      vec_assign(sc.own, ro.net_points.size(), frame);
+      vec_assign(sc.own, ro.net_points.size(), (owner.v == INVALID) ? domain : frame);
+      vec_resize(sc.keep, in.nets.size());
+      for (size_t k = 0; k < in.nets.size(); ++k) {
+        sc.keep[k] = { .src = in.nets[k].src_clear, .dst = in.nets[k].dst_clear };
+      }
+      vec_assign(sc.walls, in.obstacles.begin(), in.obstacles.end());
+      vec_insert(sc.walls, sc.walls.end(), in.gaps.begin(), in.gaps.end());
       nudge_lanes(region,
                   sc.own,
-                  in.obstacles,
-                  imax(margin, p.font_size_grid),
+                  sc.walls,
+                  pitch,
                   margin,
+                  border_band(p),
                   ro.net_points,
                   ro.points,
-                  frames[m].nudged);
+                  sc.keep.data(),
+                  static_cast<uint32_t>(sc.keep.size()));
     }
 
     frames[m].points = ro.points;
@@ -661,8 +1441,7 @@ void route_transitions(Routes &out,
                          .in = in,
                          .points = ro.points,
                          .net_points = ro.net_points,
-                         .metrics = ro.metrics,
-                         .nudged = frames[m].nudged };
+                         .metrics = ro.metrics };
     }
     for (uint32_t const st : sc.obstacle_states) { sc.obstacle_index[st] = INVALID; }
   };
@@ -685,19 +1464,18 @@ void route_transitions(Routes &out,
   };
   parallel_for(shards, threads, body);
 
-  // Merged in frame order, which is what makes the totals and the point array
-  // the same at every worker count (6).
+  // Merges in frame order; totals and points are the same at every worker count.
   std::vector<scav_point> &routed{ cs.routed };
   routed.clear();
   std::vector<scav_span> &net_span{ cs.net_span };
   vec_assign(net_span, planned.size(), scav_span{});
   for (uint32_t m = 0; m < by_frame.size(); ++m) {
     FrameRoutes const &fr{ frames[m] };
-    merge_nudged(out.nudged, fr.nudged);
     for (uint32_t j = 0; j < by_frame[m].size(); ++j) {
       scav_span const at{ (j < fr.net_points.size()) ? fr.net_points[j] : scav_span{} };
       if (j < fr.metrics.size()) {
         out.reseated += static_cast<uint32_t>(fr.metrics[j].reseated);
+        out.occupied += static_cast<uint32_t>(fr.metrics[j].occupied);
         if (fr.metrics[j].failed != RouteFailure::None) {
           out.failed[g.segments[planned[by_frame[m][j]].seg].trans.v] = 1;
           trace_emit({ .kind = TraceKind::RouteDegraded,
@@ -719,16 +1497,17 @@ void route_transitions(Routes &out,
     }
   }
 
-  // Laid end to end: consecutive nets share the endpoint the planner handed
-  // both of them, so a net that begins on the point already laid down drops
-  // it. Matched against that point rather than against the net's ordinal, so a
-  // router that began somewhere else leaves the break in the polyline instead
-  // of having a leg spliced over it.
+  // Lays each transition's loop points and nets end to end; a net starting on the last
+  // point laid drops that point, and any other start leaves a break in the polyline.
   vec_reserve(out.points, routed.size());
   for (uint32_t t = 0; t < n; ++t) {
     Span const nets{ trans_nets[t] };
-    if (nets.len == 0) { continue; }
+    scav_span const loop{ loop_span[t] };
+    if ((nets.len == 0) && (loop.len == 0)) { continue; }
     uint32_t const first_point{ static_cast<uint32_t>(out.points.size()) };
+    for (uint32_t k = 0; k < loop.len; ++k) {
+      vec_push_back(out.points, loop_points[loop.off + k]);
+    }
     for (uint32_t j = 0; j < nets.len; ++j) {
       scav_span const at{ net_span[nets.off + j] };
       if (at.len == 0) { continue; }
@@ -739,90 +1518,65 @@ void route_transitions(Routes &out,
       }
     }
     uint32_t const count{ static_cast<uint32_t>(out.points.size()) - first_point };
-    if ((s.path_clear != nullptr) && (t < s.n_path_clear) && (count >= 2)) {
-      scav_point *const pts{ out.points.data() + first_point };
-      pts[0] = trim(pts[0], pts[1], s.path_clear[t].src);
-      pts[count - 1] = trim(pts[count - 1], pts[count - 2], s.path_clear[t].dst);
-    }
     out.route[t] = { .off = first_point, .len = count };
   }
 
-  // **One pass over the composed polylines, because a lane is what a reader
-  // sees and a reader sees neither frames nor segments** (11.10a). Nudging
-  // above runs per frame on per-segment nets, so a shared run falls between two
-  // stools twice over: a decomposed transition's pieces are routed in different
-  // frames, and a piece three points long has no interior segment for a lane to
-  // hold. `dock` reads both -- `Charging -> Solid` runs down the line
-  // `Solid -> Off` runs up, 1,777 units of it in opposite directions, and the
-  // down leg is the last segment of its own three-point net.
+  // Nudges the composed polylines chart-wide, for lanes shared across frames or segments.
   if (margin > 0) {
     std::vector<scav_rect> &walls{ cs.walls };
     walls.clear();
     for (uint32_t st = 0; st < c.states.size(); ++st) {
-      if ((c.states[st].live != 0) && (z.state[st].w != 0) && (z.state[st].h != 0)) {
-        vec_push_back(walls, z.state[st]);
+      if ((c.states[st].live == 0) || (z.state[st].w == 0) || (z.state[st].h == 0)) {
+        continue;
+      }
+      vec_push_back(walls, z.state[st]);
+      for (scav_rect const &band : state_walls(z, st)) {
+        if ((band.w > 0) && (band.h > 0)) { vec_push_back(walls, band); }
       }
     }
-    // Each transition is bounded by the innermost state enclosing *both* its
-    // ends -- the frame it was routed in -- and by the chart where there is
-    // none. A hierarchy-crossing transition is bounded by the ancestor it
-    // crosses inside, which is what lets its pieces leave the child frames;
-    // one wholly inside a composite may not leave that composite.
+    for (Gap const &gap : gaps) { vec_push_back(walls, gap.rect); }
+    // Bounds each transition by the innermost state strictly enclosing both its ends, or
+    // the coordinate domain where none does; an inner loop by its own state.
     std::vector<scav_rect> &held{ cs.held };
-    vec_assign(held, out.route.size(), z.chart);
-    std::vector<uint8_t> &up{ cs.up };
-    vec_assign(up, c.states.size(), 0);
-    auto const above = [&enclosing](StateId of) {
-      return (of.v == INVALID) ? INVALID : enclosing[of.v];
-    };
+    vec_assign(held, out.route.size(), domain);
     for (uint32_t t = 0; t < out.route.size(); ++t) {
       if (t >= c.transitions.size()) { continue; }
-      for (uint32_t a{ above(c.transitions[t].src) }; a != INVALID; a = enclosing[a]) {
-        up[a] = 1;
-      }
-      for (uint32_t b{ above(c.transitions[t].dst) }; b != INVALID; b = enclosing[b]) {
-        if (up[b] != 0) {
-          held[t] = z.state[b];
-          break;
-        }
-      }
-      for (uint32_t a{ above(c.transitions[t].src) }; a != INVALID; a = enclosing[a]) {
-        up[a] = 0;
-      }
+      Transition const &tr{ c.transitions[t] };
+      StateId const both{ g.trans_common[t].state };
+      StateId const above{ ((both == tr.src) || (both == tr.dst))
+                               ? enclosing_state(c, both)
+                               : both };
+      if (above.v != INVALID) { held[t] = z.state[above.v]; }
+      if (inner_loop(c, t)) { held[t] = z.state[tr.src.v]; }
     }
-    nudge_lanes(z.chart,
+    nudge_lanes(domain,
                 held,
                 walls,
-                imax(margin, p.font_size_grid),
+                pitch,
                 margin,
+                border_band(p),
                 out.route,
                 out.points,
-                out.nudged);
+                s.path_clear,  // an end leg keeps at least its clear
+                (s.path_clear != nullptr) ? s.n_path_clear : 0);
+    reseat_slots(g, z, out);
   }
 
-  if (labels) { label_routes(out, c, z, s, p, was); }
+  if (labels) { label_routes(out, c, g, z, s, p); }
   vec_push_back(stack, std::move(cs));
+}
+
+void reseat_slots(SplitGraph const &g, SizedLayout const &z, Routes &out) {
+  for (uint32_t t = 0; t < out.port.size(); ++t) { reseat_trans_slots(g, z, t, out); }
 }
 
 void label_routes(Routes &out,
                   Chart const &c,
+                  SplitGraph const &g,
                   SizedLayout const &z,
                   scav_spaces const &s,
-                  scav_profile const &p,
-                  Routes const *was) {
-  LabelBase const base{ .route = (was != nullptr) ? &was->route : nullptr,
-                        .points = (was != nullptr) ? &was->points : nullptr,
-                        .placed = (was != nullptr) ? &was->placed : nullptr,
-                        .settled = (was != nullptr) ? &was->settled : nullptr };
-  out.unplaced = place_labels(c,
-                              z,
-                              s,
-                              out.route,
-                              out.points,
-                              p,
-                              out.placed,
-                              out.settled,
-                              (was != nullptr) ? &base : nullptr);
+                  scav_profile const &p) {
+  place_labels(c, g, z, s, out.route, out.points, p, out.placed);
 }
 
 }  // namespace scav

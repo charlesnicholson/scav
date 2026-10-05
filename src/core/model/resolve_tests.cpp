@@ -1,5 +1,4 @@
-// The public text-path resolver, against a code-built chart,
-// so resolution is tested without the parser in the loop.
+// Tests resolve_path against a code-built chart.
 
 #include "core/model/model.h"
 #include "core/tests/test_support.h"
@@ -67,13 +66,13 @@ TEST_CASE("resolve: absolute paths from the root") {
 TEST_CASE("resolve: the first segment climbs, later segments only descend") {
   Rig const r{ rig() };
   StateId out{ INVALID };
-  // From inside main: the local Idle shadows nothing -- it is simply nearest.
+  // From inside main, Idle resolves to main's own child.
   CHECK(at(r, r.main_sm, "Idle", out) == ResolveStatus::Ok);
   CHECK(out == r.idle);
   // Off is not in main; the climb finds it at the root.
   CHECK(at(r, r.main_sm, "Off", out) == ResolveStatus::Ok);
   CHECK(out == r.off);
-  // aux' Idle is a sibling submachine's child: never on the climb path.
+  // From aux, main's Ready sits in a sibling submachine, off the climb path.
   CHECK(at(r, r.aux, "Ready", out) == ResolveStatus::NotFound);
   // Descent is strict: On/Off would need Off inside On.
   CHECK(at(r, r.root, "On:main/Off", out) == ResolveStatus::NotFound);
@@ -162,8 +161,6 @@ TEST_CASE("resolve: a path with no segments at all names nothing") {
 }
 
 TEST_CASE("resolve: a name qualifier on the last segment selects nothing") {
-  // The ordinal spelling is refused above; the named one takes the other arm of
-  // the same test, so both spellings fail alike.
   Rig const r{ rig() };
   StateId out{ INVALID };
   CHECK(at(r, r.root, "Off:main", out) == ResolveStatus::BadQualifier);
@@ -171,8 +168,7 @@ TEST_CASE("resolve: a name qualifier on the last segment selects nothing") {
 }
 
 TEST_CASE("resolve: a qualifier that is not all digits is a submachine name") {
-  // The digit test has to reject bytes below '0' as well as above '9', or a
-  // qualifier like `+m` would be read as an ordinal.
+  // `+m` and `1x` read as names, and On has no submachine of either name.
   Rig const r{ rig() };
   StateId out{ INVALID };
   CHECK(at(r, r.root, "On:+m/Idle", out) == ResolveStatus::BadQualifier);
@@ -180,8 +176,6 @@ TEST_CASE("resolve: a qualifier that is not all digits is a submachine name") {
 }
 
 TEST_CASE("resolve: descending into an ordinary leaf misses, and crosses nothing") {
-  // A state with no submachines is not an unresolved alias, so the descent is a
-  // plain miss rather than the include-crossing report.
   Rig const r{ rig() };
   StateId out{ INVALID };
   CHECK(at(r, r.root, "Off/X", out) == ResolveStatus::NotFound);

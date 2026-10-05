@@ -1,0 +1,13 @@
+// Two transitions from different states into different children of one composite.
+// With both ports pinned to the composite's far face, both reach it along one side,
+// and they are two lines there, not one.
+chart side "two arrivals along one side of a composite" {
+  state Left,
+  state Right,
+  state Box { state Upper, state Lower, trans Upper -> Lower },
+
+  trans * -> Left,
+  trans Left -> Right,
+  trans Right -> Box/Upper "first",
+  trans Left -> Box/Lower "second",
+}

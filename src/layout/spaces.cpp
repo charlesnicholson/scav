@@ -1,5 +1,5 @@
-// The space tables: domain validation attributing each failure to its request,
-// and the digest that makes a measurement policy a hashed layout input.
+// Validates the space tables, one diagnostic per bad row or count, and digests them for
+// the layout inputs hash.
 
 #include "layout/wire.h"
 #include "scav/scav_core.h"
@@ -26,8 +26,7 @@ void report(std::vector<Diagnostic> &out, DiagCode code, ElemKind kind, uint32_t
                   .src = {} });
 }
 
-// A parallel table's count either matches its entity array or is zero, and a
-// null pointer carries no rows.
+// True when `count` is 0, or equals `entities` with `rows` non-null.
 bool check_count(std::vector<Diagnostic> &out,
                  void const *rows,
                  uint32_t count,
@@ -45,7 +44,8 @@ void check_boxes(std::vector<Diagnostic> &out,
                  ElemKind kind) {
   for (uint32_t i = 0; i < count; ++i) {
     if (!in_domain(rows[i].min_w) || !in_domain(rows[i].h_before) ||
-        !in_domain(rows[i].h_after)) {
+        !in_domain(rows[i].h_after) || !in_domain(rows[i].w_before) ||
+        !in_domain(rows[i].w_after) || (rows[i].ruled > 0xFU)) {
       report(out, DiagCode::SpaceOutOfRange, kind, i);
     }
   }
@@ -85,17 +85,10 @@ bool spaces_validate(Chart const &c,
       report(found, DiagCode::SpaceCountMismatch, ElemKind::Chart, 0);
     }
   } else {
-    // A transition that gets no route -- an internal or local self-loop --
-    // has nothing to slide a box along.
-    auto const routeless = [&c](uint32_t t) {
-      return (c.transitions[t].src == c.transitions[t].dst) &&
-             (c.transitions[t].kind != TransKind::External);
-    };
     for (uint32_t i = 0; i < s.n_path_box; ++i) {
       scav_path_box const &box{ s.path_box[i] };
       uint32_t subject{ box.subject };
-      if ((subject >= transitions) || (c.transitions[subject].live == 0) ||
-          routeless(subject)) {
+      if ((subject >= transitions) || (c.transitions[subject].live == 0)) {
         report(found,
                DiagCode::SpaceSubjectInvalid,
                ElemKind::Transition,
@@ -107,8 +100,7 @@ bool spaces_validate(Chart const &c,
       }
     }
 
-    // Uniqueness of (subject, order) by sorting indices, so detection order is
-    // the data's and not a hash table's, and rows are not copied.
+    // Reports duplicate (subject, order) pairs by stably sorting row indices.
     std::vector<uint32_t> by_key(s.n_path_box);
     for (uint32_t i = 0; i < s.n_path_box; ++i) { by_key[i] = i; }
     scav_stable_sort(by_key, [&s](uint32_t a, uint32_t b) {
@@ -126,7 +118,7 @@ bool spaces_validate(Chart const &c,
     }
   }
 
-  // A total order over the triple; stability keeps equal triples in scan order.
+  // Sorts by (code, kind, ordinal); equal triples keep scan order.
   scav_stable_sort(found, [](Diagnostic const &a, Diagnostic const &b) {
     if (a.code != b.code) {
       return static_cast<uint32_t>(a.code) < static_cast<uint32_t>(b.code);
@@ -143,23 +135,28 @@ bool spaces_validate(Chart const &c,
 }
 
 uint32_t spaces_digest(scav_spaces const &s) {
-  // Field by field, never a struct's bytes, with each table's count prefixed
-  // so two adjacent tables cannot spell one.
+  // Hashes each table field by field, prefixed with its row count.
   std::vector<scav_byte> bytes;
   vec_reserve(bytes,
-              16 + (12ULL * (s.n_box_state + s.n_box_sub)) + (8ULL * s.n_path_clear) +
+              16 + (24ULL * (s.n_box_state + s.n_box_sub)) + (8ULL * s.n_path_clear) +
                   (16ULL * s.n_path_box));
   append_u32(bytes, s.n_box_state);
   for (uint32_t i = 0; i < s.n_box_state; ++i) {
     append_i32(bytes, s.box_state[i].min_w);
     append_i32(bytes, s.box_state[i].h_before);
     append_i32(bytes, s.box_state[i].h_after);
+    append_i32(bytes, s.box_state[i].w_before);
+    append_i32(bytes, s.box_state[i].w_after);
+    append_u32(bytes, s.box_state[i].ruled);
   }
   append_u32(bytes, s.n_box_sub);
   for (uint32_t i = 0; i < s.n_box_sub; ++i) {
     append_i32(bytes, s.box_sub[i].min_w);
     append_i32(bytes, s.box_sub[i].h_before);
     append_i32(bytes, s.box_sub[i].h_after);
+    append_i32(bytes, s.box_sub[i].w_before);
+    append_i32(bytes, s.box_sub[i].w_after);
+    append_u32(bytes, s.box_sub[i].ruled);
   }
   append_u32(bytes, s.n_path_clear);
   for (uint32_t i = 0; i < s.n_path_clear; ++i) {

@@ -1,10 +1,8 @@
-# One mutually-exclusive enum rather than booleans: ASan and TSan cannot coexist,
-# so a boolean pair would invite an unbuildable combination.
+# SCAV_SANITIZER picks one sanitizer per build: NONE, ASAN, UBSAN, TSAN or MSAN.
 
 include_guard(GLOBAL)
 
-# Availability is a toolchain fact, not a preference. Anything unavailable is a
-# configure error rather than a build that appears to work and reports nothing.
+# Fails configure when the toolchain cannot provide sanitizer `name`.
 function(scav_sanitizer_check name)
   set(msvc_frontend FALSE)
   if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
@@ -68,18 +66,15 @@ function(scav_sanitizers_init)
 
   scav_sanitizer_check("${san}")
 
-  # Both Windows toolchains take the MSVC driver's spellings, and the GNU ones
-  # below would be ignored there -- which is itself a warning.
+  # MSVC-style drivers, cl and clang-cl, take the MSVC spellings.
   if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
-    # /Z7 rather than /Zi: same debug info, embedded per object, so no
-    # shared PDB write serializes or defeats a compiler cache.
+    # /Z7 embeds debug info in each object file.
     set(flags /Z7 /Oy-)
     target_link_options(scav_sanitizer INTERFACE /INCREMENTAL:NO)
     if(san STREQUAL "ASAN")
       list(APPEND flags /fsanitize=address)
     elseif(san STREQUAL "UBSAN")
-      # Trap rather than diagnose: the diagnosing runtime is built against one
-      # CRT and mismatches ours at link.
+      # UBSan traps on a finding and links no runtime library.
       list(APPEND flags -fsanitize=undefined -fsanitize-trap=undefined)
     endif()
     target_compile_options(scav_sanitizer INTERFACE ${flags})
@@ -92,8 +87,7 @@ function(scav_sanitizers_init)
   if(san STREQUAL "ASAN")
     set(flags -fsanitize=address ${common})
   elseif(san STREQUAL "UBSAN")
-    # Signed overflow stays undefined rather than reaching for -fwrapv, which MSVC
-    # has no equivalent for; -fno-sanitize-recover makes a finding fail the test.
+    # -fno-sanitize-recover=all makes any finding fail the test.
     set(flags
       -fsanitize=undefined
       -fsanitize=signed-integer-overflow
@@ -117,8 +111,7 @@ function(scav_sanitizers_init)
   target_link_options(scav_sanitizer INTERFACE ${flags})
 
   if(san STREQUAL "MSAN")
-    # An uninstrumented libc++ is precisely what produces the false positives, so
-    # replace it wholesale.
+    # Swaps the standard library for the instrumented libc++ in SCAV_MSAN_LIBCXX_DIR.
     target_compile_options(scav_sanitizer INTERFACE
       -nostdinc++
       "-isystem${SCAV_MSAN_LIBCXX_DIR}/include/c++/v1"

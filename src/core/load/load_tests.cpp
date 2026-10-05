@@ -1,5 +1,5 @@
-// The loader, driven the way an application drives it: add the root, read
-// pending, add each, repeat, finish. Nothing here touches a filesystem.
+// Drives the loader as an application does: add the root, read pending, add
+// each, repeat, finish. Documents come from in-memory strings.
 
 #include "core/core_internal.h"
 #include "core/tests/test_support.h"
@@ -39,8 +39,7 @@ std::string_view body_of(std::vector<Doc> const &corpus, std::string_view name) 
   return {};
 }
 
-// `reverse` resolves each pending batch back to front, so a model that varies
-// with arrival order shows up as a mismatch rather than passing quietly.
+// `reverse` supplies each pending batch back to front.
 Loaded load_network(std::vector<Doc> const &corpus,
                     std::string_view root,
                     bool reverse = false) {
@@ -130,7 +129,6 @@ TEST_CASE("load: one document with no includes matches lower_document") {
   REQUIRE(p.ok);
   REQUIRE(lower_document(direct, p.pd, diags));
 
-  // The loader is the same three steps with N == 1, so it had better agree.
   CHECK(chart_structural_hash(r.chart) == chart_structural_hash(direct));
 }
 
@@ -152,8 +150,8 @@ TEST_CASE("load: a two-document network resolves its alias and its endpoints") {
   CHECK(chart_string(r.chart, inc.path) == "b.scav");
   CHECK(inc.target == DocId{ 1 });
 
-  // Resolution links, it does not flatten: the included root is a submachine
-  // of the alias state, and the containment tree spans both documents.
+  // The included root attaches as a submachine of the alias state; the
+  // containment tree spans both documents.
   State const &host{ r.chart.states[inc.host.v] };
   REQUIRE(host.submachines.len == 1);
   SubmachineId const attached{ r.chart.submachine_ids[host.submachines.off] };
@@ -181,13 +179,13 @@ TEST_CASE("load: an included file is parsed once and instantiated per include") 
 }
 
 TEST_CASE("load: DocId comes from the include graph, never from arrival order") {
-  // What lets a host resolve a pending batch concurrently.
+  // A host may supply a pending batch in any order.
   Loaded const forward{ load_network(diamond(), "root.scav", false) };
   Loaded const backward{ load_network(diamond(), "root.scav", true) };
   REQUIRE(forward.ok);
   REQUIRE(backward.ok);
 
-  CHECK(forward.fetched != backward.fetched);  // the orders really did differ
+  CHECK(forward.fetched != backward.fetched);  // the arrival orders differ
   CHECK(document_names(forward.chart) == document_names(backward.chart));
   CHECK(chart_structural_hash(forward.chart) == chart_structural_hash(backward.chart));
 
@@ -205,8 +203,7 @@ TEST_CASE("load: pending names the path, the requester, and its statement") {
 
   std::vector<Pending> const &pending{ load_pending(s) };
   REQUIRE(pending.size() == 1);
-  // Resolved against the requesting document's directory, so the application
-  // is told what to fetch rather than what was written.
+  // The pending path resolves against the requesting document's directory.
   CHECK(load_pending_path(s, pending[0]) == "top/sub/b.scav");
   CHECK(pending[0].from == DocId{ 0 });
   CHECK(s.parsed[0].stmts[pending[0].stmt_row].kind == StmtKind::Include);
@@ -233,8 +230,7 @@ TEST_CASE("load: two spellings of one path claim one document") {
   CHECK(r.chart.documents.size() == 2);
   CHECK(r.chart.includes.size() == 2);
   CHECK(r.chart.includes[0].target == r.chart.includes[1].target);
-  // The authored text survives verbatim even though the key is shared: the
-  // printer reprints what was written, not what it resolved to.
+  // Each include keeps its authored path text; both share one resolved key.
   CHECK(chart_string(r.chart, r.chart.includes[0].path) == "./b.scav");
   CHECK(chart_string(r.chart, r.chart.includes[1].path) == "sub/../b.scav");
 }
@@ -251,8 +247,7 @@ TEST_CASE("load: entities carry the instantiation they belong to") {
     if (name == "M") { CHECK(s.inst.v != INVALID); }
   }
 
-  // The two `L` rows belong to different instantiations, which is the only
-  // thing distinguishing them.
+  // The two `L` rows belong to different instantiations.
   std::vector<uint32_t> insts;
   for (State const &s : r.chart.states) {
     if (chart_string(r.chart, s.name) == "L") { insts.push_back(s.inst.v); }
@@ -263,8 +258,6 @@ TEST_CASE("load: entities carry the instantiation they belong to") {
 }
 
 TEST_CASE("load: an included root submachine is unnamed and keeps its label") {
-  // Naming it after the sub-chart would make `Host:leaf/L` a legal address
-  // spelled from a word nobody wrote as a submachine name.
   Loaded r{ load_network(
       { { .name = "a.scav", .text = R"(chart a { include "b.scav" as b, state A, })" },
         { .name = "b.scav", .text = R"(chart b "the label" { state B, })" } },
@@ -279,16 +272,14 @@ TEST_CASE("load: an included root submachine is unnamed and keeps its label") {
   CHECK(m.name.len == 0);
   CHECK(chart_string(r.chart, m.label) == "the label");
   CHECK(m.stmt.v != INVALID);
-  // The sub-chart's name is one `stmt` hop away, which is the whole point of
-  // carrying provenance.
+  // `m.stmt` points at the sub-chart's chart statement.
   CHECK(r.chart.stmts[m.stmt.v].kind == StmtKind::Chart);
   // And the model still has exactly one chart name -- the root's.
   CHECK(chart_string(r.chart, r.chart.name) == "a");
 }
 
 TEST_CASE("load: a sub-document's chart attrs land on its root submachine") {
-  // A model holds exactly one Chart entity and it belongs to the root
-  // document, so an included chart's attrs cannot attach there.
+  // The model's one Chart entity belongs to the root document.
   Loaded r{ load_network(
       { { .name = "a.scav", .text = R"(chart a { @top = "1", include "b.scav" as b, })" },
         { .name = "b.scav", .text = R"(chart b { @sub = "2", state B, })" } },
@@ -350,7 +341,7 @@ TEST_CASE("load: an include cycle is refused and names the closing statement") {
       "a.scav") };
   CHECK_FALSE(r.ok);
   CHECK(has_code(r.diags, DiagCode::IncludeCycle));
-  // No chart at all: a network that cannot be built is not a partial model.
+  // A network that fails to build leaves the chart empty.
   CHECK(r.chart.documents.empty());
   CHECK(r.chart.states.empty());
 
@@ -463,8 +454,7 @@ TEST_CASE("load: a parse error in an included document names that document") {
       "a.scav") };
   CHECK_FALSE(r.ok);
   CHECK(r.chart.documents.empty());
-  // parse_document holds one document and is not told which; the loader is
-  // the layer that knows, so it stamps the DocId.
+  // The loader stamps each parse diagnostic with its document's DocId.
   REQUIRE_FALSE(r.diags.empty());
   CHECK(r.diags[0].doc == DocId{ 1 });
   CHECK(load_document_name(r.loader, r.diags[0].doc) == "b.scav");
@@ -481,7 +471,7 @@ TEST_CASE("load: an alias colliding with a sibling state is an ordinary duplicat
       { { .name = "a.scav", .text = R"(chart a { include "b.scav" as b, state b, })" },
         { .name = "b.scav", .text = R"(chart b { state B, })" } },
       "a.scav") };
-  REQUIRE(r.ok);  // structurally loadable; validation is what objects
+  REQUIRE(r.ok);  // loads; validate_chart reports the duplicate
   std::vector<Diagnostic> diags;
   CHECK_FALSE(validate_chart(r.chart, diags));
   CHECK(has_code(diags, DiagCode::DuplicateName));
@@ -495,8 +485,7 @@ TEST_CASE("load: an endpoint naming nothing across an include still diagnoses") 
       "a.scav") };
   CHECK_FALSE(r.ok);
   CHECK(has_code(r.diags, DiagCode::EndpointUnresolved));
-  // The chart exists: this is a finding about a statement, not a failure to
-  // build the network, so the rows are there to look at.
+  // An unresolved endpoint still builds the chart's documents and rows.
   CHECK_FALSE(r.chart.documents.empty());
   CHECK(r.chart.documents.size() == 2);
 }
@@ -671,8 +660,8 @@ TEST_CASE("load: finishing a second time into the same chart is refused") {
 }
 
 TEST_CASE("load: an unresolved document with nothing to quote still reports") {
-  // The claiming statement is what a diagnostic points at, so a claim naming a
-  // document or a row that is not there degrades to the code alone.
+  // A claim naming a missing document or row yields a diagnostic with an
+  // empty span.
   Chart c;
   std::vector<Diagnostic> diags;
   Loader s;
@@ -711,8 +700,6 @@ TEST_CASE("load: an unresolved document with nothing to quote still reports") {
 }
 
 TEST_CASE("load: an include statement with no edge leaves its target unresolved") {
-  // Every include the discovery walk saw has an edge; one that does not must
-  // leave the host unattached rather than instantiate whatever is at index 0.
   Loader s;
   constexpr std::string_view ROOT{ R"(chart a { include "b.scav" as b, state A, })" };
   constexpr std::string_view SUB{ R"(chart b { state B, })" };

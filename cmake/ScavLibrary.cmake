@@ -1,7 +1,6 @@
 include_guard(GLOBAL)
 
-# What each library may link. Notably draw may not link layout: a builder reads
-# geometry columns and does not care who wrote them.
+# SCAV_LIBRARY_DEPS_<lib>: the scav libraries <lib> may link.
 set(SCAV_LIBRARY_DEPS_core "")
 set(SCAV_LIBRARY_DEPS_layout core)
 set(SCAV_LIBRARY_DEPS_draw core)
@@ -10,16 +9,14 @@ set(SCAV_LIBRARY_DEPS_imgui draw)
 
 # scav_settings(<target>) -- warning set, sanitizer, coverage and include paths.
 function(scav_settings target)
-  # BUILD_INTERFACE so an exported archive names none of them. COMPILE_ONLY would
-  # be the more precise relationship but survives into the export by name.
+  # BUILD_INTERFACE keeps these settings targets out of the exported link interface.
   target_link_libraries(${target} PRIVATE
     $<BUILD_INTERFACE:scav_warnings>
     $<BUILD_INTERFACE:scav_lang_rules>
     $<BUILD_INTERFACE:scav_sanitizer>
     $<BUILD_INTERFACE:scav_coverage>
   )
-  # The whole public/private boundary: a library's own sources and tests reach
-  # `src/<lib>/...`, and nothing that merely links it can.
+  # Internal headers, `src/<lib>/...`, visible to this target only.
   target_include_directories(${target} PRIVATE "${PROJECT_SOURCE_DIR}/src")
   # The cross-library vocabulary. A library's own API is added below.
   target_include_directories(${target} PUBLIC
@@ -34,10 +31,8 @@ function(scav_settings target)
   endif()
 endfunction()
 
-# scav_optimize_for_size(<target> [SOURCES <file>...]) -- on GCC and Clang front
-# ends, Release compiles <target> and a library's _testable twin at -Os, overriding
-# the configuration's -O. With SOURCES, only those files, in every target of
-# <target>'s directory.
+# scav_optimize_for_size(<target> [SOURCES <file>...]) -- Release -Os for <target>
+# and <target>_testable, or for SOURCES in its directory; GNU-style drivers only.
 function(scav_optimize_for_size target)
   cmake_parse_arguments(PARSE_ARGV 1 arg "" "" "SOURCES")
   if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
@@ -120,8 +115,7 @@ function(scav_static_library name)
     message(FATAL_ERROR "scav_static_library(${name}): no sources")
   endif()
 
-  # The library's API, and the only thing a consumer can reach: everything else
-  # under `src/<lib>/` needs an -I that only this library and its tests get.
+  # include/ is the public API, the only part of `src/<lib>/` that dependents reach.
   set(public_include "${CMAKE_CURRENT_SOURCE_DIR}/include")
   if(NOT IS_DIRECTORY "${public_include}")
     message(FATAL_ERROR
@@ -144,13 +138,12 @@ function(scav_static_library name)
     target_compile_definitions(${name} PUBLIC SCAV_TESTING)
     list(APPEND untidied ${name})
   endif()
-  # clang-tidy sees internal linkage as internal only where SCAV_TESTING is off.
-  # Anywhere else it reports a cross-TU fact it cannot see from inside one TU.
+  # Disables clang-tidy on targets built with SCAV_TESTING, where internal functions
+  # have external linkage.
   set_target_properties(${untidied} PROPERTIES CXX_CLANG_TIDY "")
 
   set_property(GLOBAL APPEND PROPERTY SCAV_LIBRARIES ${name})
-  # The coverage gate needs what was *supposed* to be tested: a file no test links
-  # is absent from the report entirely, so a report-driven check would miss it.
+  # Records every production source for the coverage gate's list.
   foreach(source IN LISTS ARGN)
     cmake_path(ABSOLUTE_PATH source BASE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
       NORMALIZE OUTPUT_VARIABLE absolute)
@@ -158,8 +151,8 @@ function(scav_static_library name)
   endforeach()
 endfunction()
 
-# scav_install_library(<target> <exported name>). An ALIAS is not exported, so
-# EXPORT_NAME is what makes both trees spell the dependency alike.
+# scav_install_library(<target> <exported name>) -- installs <target> as
+# scav::<exported name>, the name its build-tree ALIAS uses.
 function(scav_install_library target exported)
   add_library(scav::${exported} ALIAS ${target})
   set_target_properties(${target} PROPERTIES EXPORT_NAME ${exported})
@@ -173,8 +166,8 @@ function(scav_install_library target exported)
   )
 endfunction()
 
-# scav_check_layering() reads what targets link rather than what a wrapper was
-# told, so a plain target_link_libraries cannot slip an edge past it.
+# scav_check_layering() -- fails configure when a library or its _testable twin
+# links a scav library outside its SCAV_LIBRARY_DEPS list.
 function(scav_check_layering)
   get_property(libraries GLOBAL PROPERTY SCAV_LIBRARIES)
   foreach(library IN LISTS libraries)

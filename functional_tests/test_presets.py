@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""The committed presets are what the generator produces, and cover every matrix
-cell. A generator that quietly stopped emitting a triple would look green."""
+"""The committed presets match the generator's output and cover every matrix cell."""
 
 import json
 import sys
@@ -16,8 +15,7 @@ import build  # noqa: E402
 import gen_presets  # noqa: E402
 import scavtest  # noqa: E402
 
-# Transcribed on purpose: a test that derives its expectation from the thing under
-# test is worth nothing.
+# Each triple's CMake host system name.
 TRIPLES: dict[str, str] = {
     "macos-clang-libcxx": "Darwin",
     "linux-clang-libcxx": "Linux",
@@ -36,13 +34,12 @@ COMPILERS: dict[str, str] = {
 }
 CONFIGS: tuple[str, ...] = ("debug", "release", "testable")
 SANITIZERS: dict[str, set[str]] = {
-    # Availability is a toolchain fact, not a preference.
+    # Sanitizer -> the triples that support it.
     "asan": set(TRIPLES) - {"windows-clang"},
     "ubsan": set(TRIPLES) - {"windows-msvc"},
     "tsan": {t for t in TRIPLES if not t.startswith("windows")},
     "msan": {"linux-clang-libcxx"},
 }
-# The rows that lay out four small corpus charts; the rest run it whole.
 
 
 class TestPresets(unittest.TestCase):
@@ -75,7 +72,6 @@ class TestPresets(unittest.TestCase):
         self.assertEqual([], [n for n in self.names() if "wasm" in n or "wasi" in n])
 
     def test_each_triple_pins_a_compiler_and_its_host(self) -> None:
-        # "clang" meaning whatever is on PATH makes a row unreproducible.
         for triple, host in TRIPLES.items():
             with self.subTest(triple=triple):
                 base = self.hidden.get(f"t-{triple}")
@@ -93,8 +89,7 @@ class TestPresets(unittest.TestCase):
                 self.assertEqual(COMPILERS[triple], build.preset_compiler(name))
 
     def test_a_tree_reports_the_compiler_it_was_configured_with(self) -> None:
-        # Read back from the cache: CMake answers a changed compiler by
-        # resetting it, which drops the -D arguments and misreports the cause.
+        # Reads the compiler back from CMakeCache.txt.
         with tempfile.TemporaryDirectory() as tmp:
             tree = Path(tmp)
             self.assertIsNone(build.cached_compiler(tree), "no cache is not an answer")
@@ -113,7 +108,6 @@ class TestPresets(unittest.TestCase):
                 self.assertEqual(triples, found)
 
     def test_sanitizer_presets_set_the_enum_not_a_boolean(self) -> None:
-        # One enum, not booleans: ASan and TSan cannot coexist.
         for preset in self.doc["configurePresets"]:
             san = preset["name"].rsplit("-", 1)[-1]
             if preset.get("hidden") or san not in SANITIZERS:
@@ -125,7 +119,6 @@ class TestPresets(unittest.TestCase):
                                  "no per-sanitizer boolean alongside the enum")
 
     def test_the_testable_config_is_release_plus_scav_testing(self) -> None:
-        # Only a meaningful row if it really is release with the define added.
         testable = self.hidden["cfg-testable"]["cacheVariables"]
         release = self.hidden["cfg-release"]["cacheVariables"]
         self.assertEqual(release["CMAKE_BUILD_TYPE"], testable["CMAKE_BUILD_TYPE"])
@@ -141,16 +134,11 @@ class TestPresets(unittest.TestCase):
         self.assertEqual(self.names(), self.names("buildPresets"))
 
     def test_there_are_no_test_presets(self) -> None:
-        """Tests are build steps, so a build preset already runs them.
-
-        A testPresets section would mean a second command that has to be
-        remembered, and the failure mode of forgetting it is a green build with
-        untested code -- which is the thing this harness exists to rule out."""
+        """Tests run as build steps."""
         self.assertNotIn("testPresets", self.doc)
 
     def test_all_build_output_stays_under_out(self) -> None:
-        # Everything scav generates lives under out/, so `rm -rf out` is a
-        # factory reset. The base must declare both, or nothing below bites.
+        # `base` sets binaryDir and installDir; every preset's value is under out/.
         self.assertLessEqual({"binaryDir", "installDir"}, set(self.hidden["base"]))
         for preset in self.doc["configurePresets"]:
             for key in ("binaryDir", "installDir"):

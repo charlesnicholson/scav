@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Why a route came out the way it did, read off the decision trace (11.16).
-
-`scav dump --layout --trace` prints every decision the run made. This reads the
-JSON back and answers the question the trace exists for: for one transition,
-which choices in which phase produced the polyline that shipped.
+"""Runs `scav dump --layout --trace` on a chart and prints the decisions behind each
+transition's route.
 
   tools/trace.py estop.scav               every transition, one line each
   tools/trace.py estop.scav --trans 3     the decision chain for one of them
   tools/trace.py estop.scav --kinks       only the ones that bend
   tools/trace.py estop.scav --raw         the events, unsummarized
+  tools/trace.py bottler.scav --search    each row's searches, kicks and takes
+
+Any other flag is a layout flag passed to `scav dump`, such as `--no-text` or a pin.
 """
 
 import argparse
@@ -32,21 +32,20 @@ def find_scav(explicit=None):
     return found[0] if found else None
 
 
-def run(scav, chart, row):
-    """The trace and the model beside it: the trace names ids, and the names
-    they stand for are the dump's."""
-    argv = [str(scav), "dump", "--json", "--layout", "--trace", str(chart)]
+def run(scav, chart, row, layout=(), outline=False):
+    """Runs `scav dump --json --layout --trace`; returns (trace, model dump)."""
+    argv = [str(scav), "dump", "--json", "--layout", "--trace", *layout, str(chart)]
+    if outline:
+        argv[5:5] = ["--trace-outline"]
     if row is not None:
         argv[4:4] = ["--portfolio-row", str(row)]
     out = subprocess.run(argv, capture_output=True, text=True, check=True).stdout
-    # Two documents on one stream, the trace first: the array ends at the first
-    # line that is a bare bracket, which no line of the object dump is.
+    # The trace array comes first and ends at the first line that is a bare `]`.
     end = out.index("\n]\n") + 3
     return json.loads(out[:end]), json.loads(out[end:])
 
 
-# No filtering: `--trace` searches first and traces only the drawing that won,
-# so every event in the stream belongs to what shipped (11.16).
+# `--trace` traces only the winning drawing; every event belongs to it.
 def chain_for(events, trans, model):
     """Every event that bears on one transition, in the order it happened."""
     segs = set()
@@ -56,7 +55,8 @@ def chain_for(events, trans, model):
     out, nets = [], set()
     for e in events:
         k = e["kind"]
-        if (k in ("edge_reversed", "route_degraded", "edge_chained", "gap_charged")
+        if (k in ("edge_reversed", "route_degraded", "route_walled", "label_centred",
+                  "route_reseated", "route_crossed", "edge_chained", "gap_charged")
                 and e["seg"] in segs):
             out.append(e)
         elif k == "node_placed" and e.get("bend_of_seg") in segs:
@@ -86,6 +86,14 @@ def describe(e, model):
         return f"    must pass through {tuple(e['at'])}"
     if k == "route_degraded":
         return "  FELL BACK to a straight line"
+    if k == "route_walled":
+        return "  crossed the walls that enclose an end"
+    if k == "route_reseated":
+        return "  routed only without clearance bumpers"
+    if k == "route_crossed":
+        return "  found no way clear of its own earlier leg and crossed it"
+    if k == "label_centred":
+        return "  label found no seat beside its route; centred on it"
     if k == "gap_charged" and e["cause"] == "held":
         return (f"  segment {e['seg']}'s label ({e['width']}) is held by frame "
                 f"{e['frame']}'s rank boundary {e['boundary']}, charging nothing")
@@ -93,6 +101,30 @@ def describe(e, model):
         return (f"  segment {e['seg']} asked frame {e['frame']}'s rank boundary "
                 f"{e['boundary']} for {e['width']} ({e['cause']})")
     return f"  {k}"
+
+
+def print_outline(events):
+    """Each row's first search, repeats, kick rounds and takes, then each refold."""
+    kicked = None
+    for e in events:
+        k = e["kind"]
+        if k == "row_searched":
+            kicked = None
+            print(f"row {e['row']:2} {e['pass']:6} t2 {e['t2']} t0 {e['t0']}")
+        elif k == "row_repeated":
+            print(f"row {e['row']:2} repeats row {e['of']}, not kicked")
+        elif k == "kick_scored":
+            if kicked != e["row"]:
+                kicked = e["row"]
+                print(f"row {e['row']:2} kicks")
+            what = e["move"]
+            if what == "reverse":
+                what += f" t{e['trans']}:{e['leg']}"
+            print(f"    {what:16} frame {e['frame']:3}  framed {e['framed']:7} "
+                  f"t0 {e['framed_t0']}  -> {e['t2']:7} t0 {e['t0']}  {e['verdict']}")
+        elif k == "kick_taken":
+            kicked = None
+            print(f"  took {e['how']:8} t2 {e['t2']} t0 {e['t0']}")
 
 
 def main():
@@ -103,7 +135,8 @@ def main():
     ap.add_argument("--raw", action="store_true")
     ap.add_argument("--portfolio-row", dest="row", type=int, default=None)
     ap.add_argument("--scav", default=None)
-    args = ap.parse_args()
+    ap.add_argument("--search", action="store_true")
+    args, layout = ap.parse_known_args()
 
     scav = find_scav(args.scav)
     if scav is None:
@@ -113,7 +146,10 @@ def main():
     if not chart.exists():
         chart = CORPUS / args.chart
 
-    events, model = run(scav, chart, args.row)
+    events, model = run(scav, chart, args.row, layout, args.search)
+    if args.search and not args.raw:
+        print_outline(events)
+        return 0
     if args.raw:
         for e in events:
             print(json.dumps(e))

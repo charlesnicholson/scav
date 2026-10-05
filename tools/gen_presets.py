@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""Generate CMakePresets.json from the determinism matrix declared below.
-
-More JSON than anyone should hand-edit, and the format permits no comments, so the
-matrix lives here and the committed file is generated from it.
+"""Generates CMakePresets.json from the matrix declared below.
 
 Usage:
     $(./bin/envy product python3) tools/gen_presets.py            # write CMakePresets.json
@@ -28,8 +25,8 @@ def clang(lib: str) -> Cache:
             "CMAKE_EXE_LINKER_FLAGS": f"-stdlib={lib}"}
 
 
-# Realizable triples only, chosen to span the axes that historically diverge: three
-# standard libraries, three vendors' codegen, LP64 vs LLP64, x86_64 vs arm64.
+# Build triples: three standard libraries, three compiler vendors, LP64 and LLP64,
+# x86_64 and arm64.
 TRIPLES: dict[str, tuple[str, str, Cache]] = {
     "macos-clang-libcxx": ("Darwin", "macOS / clang / libc++",
                            {"CMAKE_CXX_COMPILER": "clang++"}),
@@ -46,8 +43,7 @@ DESC: dict[str, str] = {t: desc for t, (_, desc, _) in TRIPLES.items()}
 
 CONFIGS: list[str] = ["debug", "release", "testable"]
 
-# Availability is the toolchains': no UBSan on MSVC, no ASan link on clang-cl,
-# no TSan on Windows at all, and MSan only on clang/Linux.
+# Triples each sanitizer is available on.
 SANITIZERS: dict[str, list[str]] = {
     "asan": [t for t in TRIPLES if t != "windows-clang"],
     "ubsan": [t for t in TRIPLES if t != "windows-msvc"],
@@ -91,14 +87,12 @@ TRIPLE_DESCRIPTION_SUFFIX: str = (
 
 
 def sanitizer_flags(san: str) -> Cache:
-    """MSan takes its standard library from the instrumented prefix, so the triple's
-    -stdlib= is both redundant and, under -Werror, an unused-argument error."""
+    """Cache overrides for `san`: MSan clears the triple's `-stdlib=` flags."""
     return {"CMAKE_CXX_FLAGS": "", "CMAKE_EXE_LINKER_FLAGS": ""} if san == "msan" else {}
 
 
 def build_document() -> Preset:
-    # Earlier entries in `inherits` win, so a triple's compiler choice takes
-    # precedence over anything a configuration base sets.
+    # Earlier `inherits` entries win: the triple's compiler overrides the config base.
     configure: list[Preset] = [
         {"name": "base", "hidden": True, "description": BASE_DESCRIPTION,
          "generator": "Ninja",
@@ -131,8 +125,7 @@ def build_document() -> Preset:
         "version": 6,
         "cmakeMinimumRequired": {"major": 3, "minor": 28, "patch": 0},
         "configurePresets": configure,
-        # No testPresets: tests are build steps, so the build preset runs them
-        # and scav_check_tests() fires earlier than noTestsAction would.
+        # Build presets only; tests run as build steps.
         "buildPresets": [{"name": n, "configurePreset": n, "jobs": 0} for n in concrete],
     }
 

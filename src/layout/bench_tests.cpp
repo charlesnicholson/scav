@@ -1,5 +1,5 @@
-// The router bench: every registered router over the corpus and the scale
-// targets, scored into a golden, timed, and joined against `straight`.
+// Router bench: every registered router over the corpus and the scale targets, scored
+// into a golden, timed, and with route ends checked against `straight`'s.
 
 #include "core/tests/corpus.h"
 #include "layout/cost.h"
@@ -26,9 +26,10 @@ namespace {
 
 using namespace scav;
 
-constexpr std::array<char const *, 11> CORPUS{
-  "axis.scav", "bottler.scav", "brew.scav", "dock.scav",        "estop.scav", "led.scav",
-  "mill.scav", "ota.scav",     "tcp.scav",  "toolchanger.scav", "vac.scav"
+constexpr std::array<char const *, 14> CORPUS{
+  "axis.scav",    "bottler.scav", "brew.scav",        "dock.scav", "elevator.scav",
+  "estop.scav",   "kiln.scav",    "led.scav",         "mill.scav", "ota.scav",
+  "printer.scav", "tcp.scav",     "toolchanger.scav", "vac.scav"
 };
 
 scav_profile readable() {
@@ -43,17 +44,7 @@ scav_profile compact() {
   return p;
 }
 
-// Every chart in test_data/charts/gauntlet, by the bare name the element suite
-// next door names it by, so one functional test holds both arrays to the
-// directory.
-constexpr std::array<char const *, 28> GAUNTLET{
-  "above.scav",     "carried.scav",   "chain.scav",   "corner.scav",  "crossing.scav",
-  "crowd.scav",     "enclosing.scav", "entered.scav", "fanin.scav",   "folded.scav",
-  "fork.scav",      "lane.scav",      "level.scav",   "long.scav",    "loop.scav",
-  "marks.scav",     "mutual.scav",    "ported.scav",  "pulled.scav",  "regions.scav",
-  "roundtrip.scav", "seated.scav",    "stretch.scav", "through.scav", "tight.scav",
-  "transit.scav",   "under.scav",     "unfolded.scav"
-};
+using scav::test::GAUNTLET;
 
 std::string router_label(uint32_t index) {
   scav_byte const *bytes{ nullptr };
@@ -62,8 +53,7 @@ std::string router_label(uint32_t index) {
   return std::string{ reinterpret_cast<char const *>(bytes), len };
 }
 
-// `rel` is relative to test_data/charts, so an element chart is
-// "gauntlet/loop.scav".
+// `rel` is relative to test_data/charts, e.g. "gauntlet/loop.scav".
 void load_chart(std::string const &rel, Chart &c) {
   std::string path{ SCAV_TEST_DATA_DIR "/charts/" };
   path += rel;
@@ -73,8 +63,7 @@ void load_chart(std::string const &rel, Chart &c) {
   REQUIRE(load_file(path.c_str(), loader, c, diags, failed));
 }
 
-// Where a router may move an end that names a box: on a side within the cap
-// span, or on a cap within the side span.
+// True when `at` lies on `r`'s border.
 bool on_border(scav_point at, scav_rect const &r) {
   bool const on_side{ ((at.x == r.x) || (at.x == (r.x + r.w))) && (at.y >= r.y) &&
                       (at.y <= (r.y + r.h)) };
@@ -95,10 +84,8 @@ int64_t timed_run(Chart &c, scav_layout_opts const &o, bool &laid) {
 }  // namespace
 
 TEST_CASE("bench: every registered router scores the corpus, term by term") {
-  // No space requests and the readable profile, so a row is comparable with the
-  // single-router cost golden and with whatever registers next. The phases
-  // directly and no portfolio, deliberately: this is an A/B between routers on
-  // one candidate, so both sides have to be the same candidate (11.10).
+  // Readable, no space requests, phases called directly: every router routes the same
+  // candidate.
   scav_profile const p{ readable() };
   scav_router_id reference{ 0 };
   REQUIRE(router_by_name(reinterpret_cast<scav_byte const *>("straight"), 8, reference));
@@ -146,8 +133,7 @@ TEST_CASE("bench: every registered router scores the corpus, term by term") {
       }
       row += '\n';
 
-      // `straight` takes both ends where phase 3 put them, so its polyline is
-      // where every other router's has to begin and end.
+      // Each route end matches `straight`'s or lies on its end state's border.
       REQUIRE(r.route.size() == ref.route.size());
       for (uint32_t edge = 0; edge < r.route.size(); ++edge) {
         CAPTURE(edge);
@@ -186,10 +172,7 @@ TEST_CASE("bench: every registered router scores the corpus, term by term") {
 
 TEST_CASE("bench: every registered router is timed over the corpus and at scale" *
           doctest::test_suite("full")) {
-  // **One layout per chart, not a search.** The floors below are written to
-  // catch a router that arrives quadratic, and a move sweep multiplies every
-  // one of them by thousands of layouts -- which measures the search rather
-  // than the router and buries the signal this case exists for (11.10c).
+  // One layout per chart: Level 1 off and one portfolio row.
   scav_profile p{ readable() };
   p.portfolio_k = 0;
   p.portfolio_m = 1;
@@ -230,8 +213,7 @@ TEST_CASE("bench: every registered router is timed over the corpus and at scale"
             " ",
             flat_laid);
 #if SCAV_PERF_ASSERT_FLOOR == 1
-    // Floors, not times, and the same two the single-router cases assert: a
-    // router that arrives quadratic is caught rather than measured.
+    // Upper bounds that catch a quadratic router.
     CHECK_MESSAGE(nested_us < 200000, label, " nested 2k");
     CHECK_MESSAGE(flat_us < 500000, label, " flat 2k");
 #endif
@@ -239,11 +221,8 @@ TEST_CASE("bench: every registered router is timed over the corpus and at scale"
 }
 
 TEST_CASE("bench: the cells corpus_routers.txt leaves unscored, term by term") {
-  // chart x profile x router, less the corpus at `readable` next door: the
-  // corpus at `compact`, and the element suite at both. Raw terms and the
-  // Tier-0 count with no weighted sum, so a weight change cannot move a row.
-  // The phases directly and no portfolio, for the same reason: this pins the
-  // scorer over a fixed candidate, so neither a weight nor a pick can move it.
+  // Raw cost terms, unweighted, for the corpus at `compact` and the element suite at
+  // both profiles; phases called directly on one fixed candidate.
   std::string actual;
   auto const row = [&actual](char const *profile,
                              scav_profile const &p,
@@ -316,8 +295,7 @@ TEST_CASE("bench: the cells corpus_routers.txt leaves unscored, term by term") {
 }
 
 TEST_CASE("bench: the scorer is timed over the corpus and at scale") {
-  // Scoring alone, with routing outside the clock: `layout_run` never calls
-  // `cost_terms`, so no timing above this one would notice it going quadratic.
+  // Times `cost_terms` alone, with routing outside the clock.
   scav_profile const p{ readable() };
   auto const scored_us = [&p](Chart const &c, uint32_t times) {
     SplitGraph const g{ decompose(c) };
@@ -350,8 +328,7 @@ TEST_CASE("bench: the scorer is timed over the corpus and at scale") {
           flat_us,
           " us");
 #if SCAV_PERF_ASSERT_FLOOR == 1
-  // Floors, not times: what they catch is a per-piece sweep over every state,
-  // which puts both of these back into hundreds of milliseconds.
+  // Upper bounds that catch a per-piece sweep over every state.
   CHECK(nested_us < 20000);
   CHECK(flat_us < 20000);
 #endif

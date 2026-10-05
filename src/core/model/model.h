@@ -1,8 +1,7 @@
 #ifndef SCAV_CORE_MODEL_MODEL_H_INCLUDED
 #define SCAV_CORE_MODEL_MODEL_H_INCLUDED
 
-// Cross-TU internals of the model. Private by location: nothing outside src/
-// can reach this path, and nothing here is installed.
+// Model internals shared across src/ translation units; not installed.
 
 #include "scav/scav_core.h"
 
@@ -20,13 +19,11 @@ void model_append_column_rows(Chart &c, ElemKind entity);
 // ordinal. Shared by chart_path_of and the resolver.
 void model_state_segment(Chart const &c, StateId id, std::string &out);
 
-// Appends the row and grows its columns; the caller owes the containment spans.
-// A bulk producer uses these and rebuilds the spans once.
+// Appends the row and grows its columns; the caller rebuilds the containment spans.
 StateId model_append_state_row(Chart &c, State const &row);
 SubmachineId model_append_submachine_row(Chart &c, Submachine const &row);
 
-// A pre-split path segment, so a caller holding PathSeg rows resolves without
-// printing text it would immediately re-parse.
+// A pre-split path segment for model_resolve_segments.
 struct ResolveSeg {
   std::string_view name;
   std::string_view qualifier;  // empty when absent or numeric
@@ -65,8 +62,7 @@ struct PendingTrans {
   uint32_t stmt_base;
 };
 
-// An include row whose target the caller must fill. The entity pass has no
-// document graph to consult.
+// An include row whose `target` the caller fills.
 struct PendingInc {
   uint32_t row;  // the include statement's row in `doc`
   DocId doc;

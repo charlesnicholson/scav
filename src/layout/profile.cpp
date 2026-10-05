@@ -1,7 +1,5 @@
-// The shipped profiles as data, and the bound check every consumer of a
-// profile runs before trusting one.
+// The shipped profiles, and the range check every profile passes before use.
 
-#include "scav/scav_core.h"
 #include "scav/scav_layout.h"
 
 #include <cstdint>
@@ -13,10 +11,9 @@ namespace {
 
 constexpr int32_t PT{ 16 };  // grid units are 1/16 pt
 
-// One of the two shipped profiles scav_profile_named hands out by name.
 constexpr scav_profile READABLE{
   .profile_id = 2,
-  .profile_version = 15,
+  .profile_version = 16,
   .pad = 8 * PT,
   .rank_sep = 36 * PT,
   .node_sep = 18 * PT,
@@ -62,22 +59,16 @@ constexpr scav_profile READABLE{
   .w_transit_bends = 768,
   .w_whitespace = 0,
   .portfolio_k = 1024,
-  // The whole table: the packer, compaction, a frame's owner's hole, and a
-  // frame that always folds, each row searched and kicked to convergence. Row 8
-  // onward is where `axis`'s regions stack into columns (11.10g).
-  .portfolio_m = 16,
+  .portfolio_m = 16,  // every row of the search table
   .sweep_count = 8,
-  .congestion_iterations = 8,
-  .ripup_cap = 16,
   .spacing_inflation_cap = 8,
   .spacing_inflation_increment = 2 * PT,
-  .print_columns = static_cast<int32_t>(DEFAULT_PRINT_COLUMNS),
 };
 
-// The other shipped profile: tighter spacing and type for dense charts.
+// Tighter spacing and smaller type than READABLE.
 constexpr scav_profile COMPACT{
   .profile_id = 1,
-  .profile_version = 15,
+  .profile_version = 16,
   .pad = 4 * PT,
   .rank_sep = 22 * PT,
   .node_sep = 11 * PT,
@@ -121,16 +112,10 @@ constexpr scav_profile COMPACT{
   .w_transit_bends = 768,
   .w_whitespace = 0,
   .portfolio_k = 1024,
-  // The whole table: the packer, compaction, a frame's owner's hole, and a
-  // frame that always folds, each row searched and kicked to convergence. Row 8
-  // onward is where `axis`'s regions stack into columns (11.10g).
-  .portfolio_m = 16,
+  .portfolio_m = 16,  // every row of the search table
   .sweep_count = 8,
-  .congestion_iterations = 8,
-  .ripup_cap = 16,
   .spacing_inflation_cap = 8,
   .spacing_inflation_increment = 2 * PT,
-  .print_columns = static_cast<int32_t>(DEFAULT_PRINT_COLUMNS),
 };
 
 bool in_range(int32_t v, int32_t lo, int32_t hi) { return (v >= lo) && (v <= hi); }
@@ -169,12 +154,8 @@ bool profile_validate(scav_profile const &p) {
            in_range(p.portfolio_k, 0, 1 << 20) &&
            in_range(p.portfolio_m, 1, static_cast<int32_t>(LAYOUT_SEARCH_ROWS)) &&
            in_range(p.sweep_count, 0, 1024) &&
-           in_range(p.congestion_iterations, 0, 1024) && in_range(p.ripup_cap, 0, 1024) &&
            in_range(p.spacing_inflation_cap, 0, 1024) &&
-           in_range(p.spacing_inflation_increment, 0, SPACE_MAX) &&
-           in_range(p.print_columns,
-                    static_cast<int32_t>(PRINT_COLUMNS_MIN),
-                    static_cast<int32_t>(PRINT_COLUMNS_MAX)) };
+           in_range(p.spacing_inflation_increment, 0, SPACE_MAX) };
   for (int32_t const v : p.kind_min_w) { ok = ok && in_range(v, 0, SPACE_MAX); }
   for (int32_t const v : p.kind_min_h) { ok = ok && in_range(v, 0, SPACE_MAX); }
   return ok;

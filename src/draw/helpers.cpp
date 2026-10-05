@@ -1,6 +1,5 @@
-// The optional helper layer: interior subdivision, the lines an author wrote,
-// and shape emission. Pure functions over PODs, and nothing in scav's pipeline
-// calls any of them.
+// The optional helper layer: interior subdivision, author line splits, and shape
+// emission. Pure functions over PODs, for apps and builders.
 
 #include "scav/scav_draw.h"
 
@@ -41,8 +40,7 @@ scav_rect align(scav_rect r, int32_t w, int32_t h, Anchor a) {
   uint32_t const cell{ static_cast<uint32_t>(a) };
   uint32_t const col{ cell % 3U };
   uint32_t const row{ cell / 3U };
-  // floor_div, not `/`: the slack is negative whenever the content is wider
-  // than its rect, and truncation toward zero would bias that case one way.
+  // Slack is negative when the content exceeds `r`; centring halves it with `floor_div`.
   int32_t const slack_x{ r.w - w };
   int32_t const slack_y{ r.h - h };
   auto const place = [](int32_t origin, int32_t slack, uint32_t lane) {
@@ -115,8 +113,7 @@ void push_arrowhead(DrawList &d,
   if (size <= 0) { return; }
   Wide const dx{ static_cast<Wide>(tip.x) - from.x };
   Wide const dy{ static_cast<Wide>(tip.y) - from.y };
-  // isqrt floors, so the barbs sit a shade long rather than a shade short --
-  // the same direction every other rounding here leans.
+  // `isqrt` floors `len`, so the barbs come out slightly long.
   Wide const len{ static_cast<Wide>(isqrt(static_cast<uint64_t>((dx * dx) + (dy * dy)))) };
   if (len == 0) { return; }
 

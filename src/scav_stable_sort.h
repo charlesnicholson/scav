@@ -11,16 +11,14 @@
 
 namespace scav {
 
-// Stable insertion sort over a raw range. The merge below allocates a scratch
-// buffer per call, and a layout runs hundreds of thousands of sorts of two or
-// three elements, where that allocation is the whole of the cost.
+// Stable insertion sort over [first, last); allocates nothing.
 template <typename T, typename Less>
 void scav_insertion_sort(T *first, T *last, Less less) {
   if (first == last) { return; }
   for (T *i = first + 1; i < last; ++i) {
     T const key{ *i };
     T *j{ i };
-    // Move only past strictly greater keys, which is the stability guarantee.
+    // Shifts only past strictly greater keys, so equal keys keep their order.
     while ((j > first) && less(key, *(j - 1))) {
       *j = *(j - 1);
       --j;
@@ -29,10 +27,10 @@ void scav_insertion_sort(T *first, T *last, Less less) {
   }
 }
 
-// Where a merge pass would cost more in scratch than it saves in comparisons.
+// Inputs up to this size use insertion sort.
 inline constexpr size_t SCAV_SORT_SMALL{ 32 };
 
-// Over the caller's `scratch`, which it grows as needed and leaves unspecified.
+// Sorts `v` stably; `scratch` grows as needed and its contents are left unspecified.
 template <typename T, typename Less>
 void scav_stable_sort(std::vector<T> &v, std::vector<T> &scratch, Less less) {
   size_t const n{ v.size() };
@@ -54,8 +52,7 @@ void scav_stable_sort(std::vector<T> &v, std::vector<T> &scratch, Less less) {
       size_t b{ mid };
       size_t o{ lo };
       while ((a < mid) && (b < hi)) {
-        // Take from the right run only on strict less: equal keys keep the
-        // left run's order, which is the stability guarantee.
+        // Takes from the right run only on strict less, so equal keys keep left-run order.
         if (less(src[b], src[a])) {
           dst[o++] = src[b++];
         } else {

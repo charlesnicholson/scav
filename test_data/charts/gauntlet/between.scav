@@ -1,0 +1,15 @@
+// A route into a composite through a port on its left border, held to the bottom face of
+// `Inner`, a composite inside it: it runs down between the two left borders a pad off each.
+chart between "a route between two nested composites' borders keeps a pad from each" {
+  state Outside,
+  state Box {
+    state Inner { state Deep },
+    state Low,
+    state Under,
+    trans Inner -> Low,
+    trans Inner -> Under,
+  },
+
+  trans * -> Outside,
+  trans Outside -> Box/Inner "enter",
+}

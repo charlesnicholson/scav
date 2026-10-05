@@ -1,7 +1,7 @@
 # How scav lays out a statechart
 
 `scav-explained.html` is an interactive walk through scav's layout: the model,
-decomposition, ordering, sizing, routing, labels, the cost, the search, what makes
+decomposition, ordering, sizing, routing, labels, decorated states, the cost, the search, what makes
 it fast, and determinism, with a glossary. Every real drawing on the page is scav's
 own output for a corpus chart; the algorithm figures run small, correct toy
 implementations in the page.
@@ -28,7 +28,7 @@ $(./bin/envy product python3) docs/explainer/assemble.py
 
 `build_data.py` runs the newest `out/*/bin/scav` unless `--scav BIN` names one,
 and `--only charts,faces` rebuilds a subset. The committed data came from
-`out/macos-clang-libcxx-release/bin/scav`, which rebuilds all of it in about 30 s;
+`out/macos-clang-libcxx-release/bin/scav`, which rebuilds all of it in about 70 s;
 an unoptimised or sanitized build is much slower. The script runs scav from the
 repository root with a timeout on each run (`--timeout`, 240 s), keeps its SVGs in a temporary
 directory, and records the binary and the checkout's `HEAD` in `charts.json`'s
@@ -45,7 +45,7 @@ trace scored. A `false` there means the narration needs reading again.
 
 | file | builder | holds |
 |---|---|---|
-| `charts.json` | `extract/charts.py` | estop, led, brew, dock, tcp, axis, toolchanger, bottler: source, model, real-text geometry, and no-text geometry for estop and brew |
+| `charts.json` | `extract/charts.py` | estop, led, brew, dock, tcp, axis, toolchanger, bottler, kiln: source, model, real-text geometry, and no-text geometry for estop and brew |
 | `rows.json` | `extract/rows.py` | brew and tcp, Level 2 rows 0–15, each unsearched and searched; the shipped row and the row Level 2 alone picks |
 | `search.json` | `extract/search.py` | brew's search path from its trace (row start, Level 1 moves, kick, re-search, settle), each step laid out again; tcp's Level 1 path; round summaries; for brew's rounds 1 and 2, each candidate's label bound and whether it could still win, which 11-fast draws |
 | `stages.json` | `extract/stages.py` | brew and toolchanger stage by stage, from the shipped drawing's trace |
@@ -174,7 +174,7 @@ Units are scav grid units (1/16 pt), integers.
 geom = {
   chart, scale: "text" | "notext", pins,
   box: [x, y, w, h],
-  states: [{id, name, path, kind, parent_sub, rect, before, after, text: [lines]}],
+  states: [{id, name, path, kind, parent_sub, rect, before, after, lead, trail, text: [lines]}],
   subs:   [{id, owner, rect, ...}],
   trans:  [{id, src, dst, label, kind, points: [[x, y]...], label_box}],
   cost:   {t0, t1, t2, tier0: {...}, terms: {...}, shares_bp: {...}}
@@ -183,8 +183,11 @@ geom = {
 
 Geometry also carries `pins`, `pin_list`, `hash`, `ranks` (per frame) and `svg`.
 Every element has `draw`, the exact paint pieces, and transitions have `ports`
-(`{at, side 0 left/1 right/2 top/3 bottom, depth}`). Internal transitions have no
-points. Read a data file with a quick script before using it.
+(`{at, side 0 left/1 right/2 top/3 bottom, depth}`). `before`, `after`, `lead` and
+`trail` are the rects the four bands reserved (`h_before`, `h_after`, `w_before`,
+`w_after`), zero-sized where a state requests none. Every transition has points: an
+internal or local self-transition's are its loop inside its state. Read a data file
+with a quick script before using it.
 
 ### Look
 

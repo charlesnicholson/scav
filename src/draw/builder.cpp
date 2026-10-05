@@ -1,5 +1,5 @@
-// The reference builder: the measurement pass upstream of layout and the
-// emitters downstream. Standard appearance, not a claim on any other builder.
+// The reference builder: the standard palette, the measurement pass before layout, and
+// the emitters after it.
 
 #include "scav/scav_draw.h"
 
@@ -19,14 +19,12 @@ namespace scav {
 
 namespace {
 
-// One column's rows, copied out so nothing reads past a stride it did not
-// register. Empty when layout has not run.
+// Copies column `name`'s rows as `T`; empty when the column is absent or its element
+// size is not `sizeof(T)`.
 template <typename T>
 std::vector<T> rows_of(Chart const &c, char const *name) {
   ColumnId const id{ column_find(c, name) };
   if (id.v == INVALID) { return {}; }
-  // A narrower stride reports one row per entity over fewer bytes than that,
-  // so a copy sized from the row count would read past the column.
   if (c.columns[id.v].desc.elem_size != sizeof(T)) { return {}; }
   std::vector<T> rows(column_count(c, id));
   if (!rows.empty()) {
@@ -35,8 +33,7 @@ std::vector<T> rows_of(Chart const &c, char const *name) {
   return rows;
 }
 
-// One em below the top: vertical font metrics are off the table, so builder and
-// backend agree on this integer and the golden pins it.
+// One em below `top`, ignoring the font's ascent and descent.
 int32_t baseline_of(int32_t top, int32_t font_size_grid) { return top + font_size_grid; }
 
 ElemRef state_ref(uint32_t i) { return { .kind = ElemKind::State, .ordinal = i }; }
@@ -49,33 +46,14 @@ uint32_t style_for_kind(StateKind kind) {
   return (kind == StateKind::Normal) ? SCAV_STYLE_STATE : SCAV_STYLE_PSEUDO;
 }
 
-// A self-transition that does not cross its source border gets no route, so
-// nothing can slide a box along one; its label rides the source's own band.
-bool routeless(Chart const &c, uint32_t trans) {
-  Transition const &t{ c.transitions[trans] };
-  return (t.src == t.dst) && (t.kind != TransKind::External);
-}
-
-bool claims_after(Chart const &c, uint32_t trans, uint32_t src) {
-  return (c.transitions[trans].live != 0U) && (c.transitions[trans].label.len != 0U) &&
-         routeless(c, trans) && (c.transitions[trans].src.v == src);
-}
-
-// Which line of the source's after-band a label takes, and how many were
-// reserved: one per routeless labelled transition, in transition order.
-struct AfterSlot {
-  uint32_t index, total;
+// A rounded rect's band, top down: the name, half a pad, the rule, the rest of
+// the pad, the description. Offsets run from the band's top.
+struct Header {
+  int32_t rule, text, h;
 };
 
-AfterSlot after_slot(Chart const &c, uint32_t trans) {
-  uint32_t const src{ c.transitions[trans].src.v };
-  AfterSlot slot{ .index = 0, .total = 0 };
-  for (uint32_t i = 0; i < c.transitions.size(); ++i) {
-    if (!claims_after(c, i, src)) { continue; }
-    if (i < trans) { ++slot.index; }
-    ++slot.total;
-  }
-  return slot;
+Header header_of(int32_t name_h, int32_t text_h, int32_t pad) {
+  return { .rule = name_h + (pad / 2), .text = name_h + pad, .h = name_h + pad + text_h };
 }
 
 }  // namespace
@@ -118,8 +96,7 @@ Palette palette_standard() {
                            .stroke_w = PT,
                            .dash = 0,
                            .font_size_grid = 0 };
-  // Fill and no stroke: the triangle's geometry is its outline, and a stroke
-  // would put half its width past the tip the router aimed at the border.
+  // Fill only: the painted arrowhead matches its triangle.
   p[SCAV_STYLE_ARROW] = { .stroke_rgba = NONE,
                           .fill_rgba = INK,
                           .stroke_w = 0,
@@ -135,9 +112,8 @@ bool measure_chart(Chart const &c, Metrics const &m, scav_profile const &p, Spac
   int32_t const lh{ line_height(fs, p.line_height_k_num, p.line_height_k_den) };
   if (lh == 0) { return false; }
 
-  // The stated policy, whole: a state reserves its title, a submachine its name,
-  // every transition arrowhead room, a labelled one a path box. Nothing else, so
-  // a golden against it is reproducible from the profile and the font alone.
+  // Reserves a state's title and description, a submachine's name, arrowhead room on
+  // every transition, and a path box per labelled transition.
   auto const measure = [&](StrRef ref, scav_extent &ext) {
     std::string_view const text{ chart_string(c, ref) };
     return measure_block(m,
@@ -156,17 +132,31 @@ bool measure_chart(Chart const &c, Metrics const &m, scav_profile const &p, Spac
     scav_extent title{};
     if (!measure(c.states[i].name, title)) { return false; }
     if (title.w == 0) { continue; }  // a pseudostate has no name to reserve for
-    // A rounded rect keeps a title band and an inscribed diamond centres the
-    // text; every other kind draws a mark, so only these two reserve for a name.
+    // Only Normal (title band) and Choice (centred in the diamond) reserve for a name.
     StateKind const kind{ c.states[i].kind };
     if ((kind != StateKind::Normal) && (kind != StateKind::Choice)) { continue; }
     // A diamond inscribed in its box holds a centred label only where
     // `w/2a + h/2b <= 1`; twice the text on both axes satisfies that.
     bool const inscribed{ kind == StateKind::Choice };
     int32_t const grow{ inscribed ? 2 : 1 };
-    scav_box_space const box{ .min_w = grow * (title.w + (2 * pad)),
-                              .h_before = grow * (title.h + pad),
-                              .h_after = 0 };
+    scav_extent about{};
+    if (!inscribed && (c.states[i].label.len != 0U) &&
+        !measure(c.states[i].label, about)) {
+      return false;
+    }
+    bool composite{ false };
+    Span const subs{ c.states[i].submachines };
+    for (uint32_t k = 0; k < subs.len; ++k) {
+      composite =
+          composite || (c.submachines[c.submachine_ids[subs.off + k].v].live != 0U);
+    }
+    Header const header{ header_of(title.h, about.h, pad) };
+    // A composite with no description ends its band at the rule, which then marks bit 0.
+    bool const ruled{ !inscribed && composite && (c.states[i].label.len == 0U) };
+    scav_box_space const box{ .min_w = grow * (imax(title.w, about.w) + (2 * pad)),
+                              .h_before = grow * (ruled ? header.rule : header.h),
+                              .h_after = 0,
+                              .ruled = ruled ? 1U : 0U };
     if (!fits(box.min_w) || !fits(box.h_before)) { return false; }
     out.box_state[i] = box;
   }
@@ -198,15 +188,6 @@ bool measure_chart(Chart const &c, Metrics const &m, scav_profile const &p, Spac
     if (label.len == 0U) { continue; }
     scav_extent ext{};
     if (!measure(label, ext)) { return false; }
-    if (routeless(c, i)) {
-      // No route to slide along, so the source box reserves the room after its
-      // submachine area and the builder draws the label there.
-      scav_box_space &box{ out.box_state[c.transitions[i].src.v] };
-      box.min_w = imax(box.min_w, ext.w + (2 * pad));
-      box.h_after += ext.h;
-      if (!fits(box.min_w) || !fits(box.h_after)) { return false; }
-      continue;
-    }
     scav_path_box const box{ .subject = i, .w = ext.w + pad, .h = ext.h, .order = 0 };
     if (!fits(box.w) || !fits(box.h)) { return false; }
     out.path_box.push_back(box);
@@ -216,8 +197,7 @@ bool measure_chart(Chart const &c, Metrics const &m, scav_profile const &p, Spac
 }
 
 scav_spaces as_spaces(Spaces const &s) {
-  // The strides are filled even though nothing in C++ reads them, so the view
-  // is one the C entry points accept as well.
+  // Fills the strides as well, so the C entry points accept the view.
   return { .box_state = s.box_state.empty() ? nullptr : s.box_state.data(),
            .n_box_state = static_cast<uint32_t>(s.box_state.size()),
            .box_state_stride = static_cast<uint32_t>(sizeof(scav_box_space)),
@@ -251,13 +231,11 @@ void emit_state(DrawList &d,
   StateKind const kind{ c.states[state].kind };
   uint32_t const shape{ drawlist_style(d, p[style_for_kind(kind)]) };
   ElemRef const origin{ state_ref(state) };
-  // The ring the band origin sits inside, which is what layout inset the
-  // children by; reading it back keeps the arc and the ring one number.
+  // The padding ring: the band origin's inset from the box, as layout placed it.
   int32_t const ring{ (state < befores.size()) ? (befores[state].x - box.x) : 0 };
   int32_t const radius{ state_corner_radius(kind, box, ring) };
 
-  // A glyph fills its box: layout gives a bare pseudostate no padding ring (11.4)
-  // so a route reaching the border reaches the mark. Inset leaves it one pad short.
+  // A pseudostate glyph fills its box.
   scav_point const middle{ .x = box.x + (box.w / 2), .y = box.y + (box.h / 2) };
   int32_t const glyph{ imin(box.w, box.h) / 2 };
   scav_rect const inner{ box };
@@ -287,8 +265,8 @@ void emit_state(DrawList &d,
       push_circle(d, depth, drawlist_style(d, p[SCAV_STYLE_STATE]), centre, glyph, origin);
       std::string_view const mark{ (kind == StateKind::History) ? "H" : "H*" };
       scav_extent ext{};
-      // Em equal to the radius: the widest mark is two monospace glyphs, 1.2r
-      // across inside the 1.41r square the circle inscribes.
+      // Em equals the radius; the two-glyph `H*` spans 1.2r, inside the circle's 1.41r
+      // inscribed square.
       scav_style title{ p[SCAV_STYLE_TITLE] };
       title.font_size_grid = imax(1, glyph);
       if (measure_text(m,
@@ -308,8 +286,7 @@ void emit_state(DrawList &d,
     }
   }
 
-  // The name goes in the rect its own h_before reserved. Layout never learned
-  // what a title is; it reserved the space and this decides what fills it.
+  // Draws the name in the rect its `h_before` reserved.
   std::string_view const name{ chart_string(c, c.states[state].name) };
   if (name.empty() || (state >= befores.size())) { return; }
   scav_rect const before{ befores[state] };
@@ -318,34 +295,65 @@ void emit_state(DrawList &d,
   uint32_t const title_style{ drawlist_style(d, title) };
   int32_t const lh{ line_height(title.font_size_grid, 1, 1) };
 
-  // An inscribed glyph holds its label in the middle or not at all; a rectangle
-  // keeps the band it was given.
+  // A Choice centres its name in the diamond; other kinds draw it in their title band.
   bool const inscribed{ kind == StateKind::Choice };
-  int32_t lines{ 0 };
-  for (std::string_view const &text : text_lines(name)) {
-    (void)text;
-    ++lines;
-  }
-  int32_t const block{ imax(lines, 1) * lh };
-  int32_t const top{ inscribed ? (middle.y - (block / 2)) : before.y };
+  std::vector<std::string_view> const names{ text_lines(name) };
+  int32_t const name_lines{ static_cast<int32_t>(names.size()) };
+  int32_t const top{ inscribed ? (middle.y - ((name_lines * lh) / 2)) : before.y };
 
   int32_t line{ 0 };
-  for (std::string_view const &text : text_lines(name)) {
+  for (std::string_view const &text : names) {
     int32_t left{ before.x + (before.w / 8) };
-    if (inscribed) {
-      scav_extent ext{};
-      if (measure_text(m,
-                       reinterpret_cast<scav_byte const *>(text.data()),
-                       static_cast<uint32_t>(text.size()),
-                       title.font_size_grid,
-                       ext) == MeasureStatus::Ok) {
-        left = middle.x - (ext.w / 2);
-      }
+    scav_extent ext{};
+    if (measure_text(m,
+                     reinterpret_cast<scav_byte const *>(text.data()),
+                     static_cast<uint32_t>(text.size()),
+                     title.font_size_grid,
+                     ext) == MeasureStatus::Ok) {
+      left = inscribed ? (middle.x - (ext.w / 2))
+                       : (before.x + floor_div(before.w - ext.w, 2));
     }
     push_text(d,
               depth,
               title_style,
               { .x = left, .y = baseline_of(top + (line * lh), title.font_size_grid) },
+              text,
+              origin);
+    ++line;
+  }
+  if (kind != StateKind::Normal) { return; }
+
+  std::string_view const about{ chart_string(c, c.states[state].label) };
+  Span const subs{ c.states[state].submachines };
+  bool composite{ false };
+  for (uint32_t k = 0; k < subs.len; ++k) {
+    composite = composite || (c.submachines[c.submachine_ids[subs.off + k].v].live != 0U);
+  }
+  if (about.empty() && !composite) { return; }
+
+  std::vector<std::string_view> notes;
+  if (!about.empty()) { notes = text_lines(about); }
+  int32_t const note_lines{ static_cast<int32_t>(notes.size()) };
+  // The band is one pad plus every line, or half a pad and the name where it ends at the
+  // rule.
+  int32_t const each{ (before.h - ((note_lines == 0) ? (ring / 2) : ring)) /
+                      (name_lines + note_lines) };
+  if (each <= 0) { return; }
+  Header const header{ header_of(name_lines * each, note_lines * each, ring) };
+  int32_t const rule{ before.y + header.rule };
+  push_line(d,
+            depth,
+            shape,
+            { .x = box.x, .y = rule },
+            { .x = box.x + box.w, .y = rule },
+            origin);
+  line = 0;
+  for (std::string_view const &text : notes) {
+    int32_t const at{ before.y + header.text + (line * lh) };
+    push_text(d,
+              depth,
+              title_style,
+              { .x = before.x + ring, .y = baseline_of(at, title.font_size_grid) },
               text,
               origin);
     ++line;
@@ -365,14 +373,12 @@ void emit_submachine(DrawList &d,
   if (sub >= rects.size()) { return; }
   scav_rect const r{ rects[sub] };
   if ((r.w == 0) || (r.h == 0)) { return; }
-  // Only a sibling draws a divider: the first submachine of a state has no
-  // boundary above it, and a lone submachine is not a concurrent region.
+  // Only a submachine after the first draws a divider, against its previous live sibling.
   if (c.submachines[sub].ordinal == 0U) { return; }
   StateId const owner{ c.submachines[sub].owner };
   if (owner.v == INVALID) { return; }
 
-  // In the gap, on whichever axis separates them: LR-rectpacking puts same-height
-  // regions side by side, and a rule across one of those separates nothing.
+  // The divider bisects the gap on whichever axis separates the two regions.
   Span const kids{ c.states[owner.v].submachines };
   uint32_t previous{ INVALID };
   for (uint32_t k = 0; k < kids.len; ++k) {
@@ -386,8 +392,7 @@ void emit_submachine(DrawList &d,
 
   uint32_t const style{ drawlist_style(d, p[SCAV_STYLE_SUB]) };
   if ((q.x + q.w) <= r.x) {
-    // Side by side: a vertical rule down the middle of the gap, spanning both
-    // regions so it reads as one divider and not as one region's edge.
+    // Side by side: a vertical rule down the middle of the gap, spanning both regions.
     int32_t const x{ (q.x + q.w) + ((r.x - (q.x + q.w)) / 2) };
     push_line(d,
               depth,
@@ -424,34 +429,38 @@ void emit_route(DrawList &d,
 
   uint32_t const style{ drawlist_style(d, p[SCAV_STYLE_ROUTE]) };
   ElemRef const origin{ trans_ref(trans) };
-  push_polyline(d, depth, style, points.data() + r.off, r.len, origin);
-
-  // The tip goes where the route ended *before* its path clear, which is the
-  // border the router aimed at. The clear is room to draw the head, not a gap.
-  scav_point const last{ points[r.off + r.len - 1U] };
-  scav_point const prior{ points[r.off + r.len - 2U] };
-  // What this transition asked layout for, not a value re-derived from the
-  // palette: the request came from the profile's font size, which differs.
+  // The head is the clear this transition requested, and at least half the label font.
   int32_t const asked{ ((s.path_clear != nullptr) && (trans < s.n_path_clear))
                            ? s.path_clear[trans].dst
                            : 0 };
-  // Layout caps a clear at half the leg it trims, so what is left of that leg is
-  // the cap when it fired; the smaller of the two recovers it exactly.
-  int32_t const leg{ (last.x == prior.x) ? imax(last.y - prior.y, prior.y - last.y)
-                                         : imax(last.x - prior.x, prior.x - last.x) };
-  int32_t const clear{ imin(asked, leg) };
-  scav_point tip{ last };
-  if (last.x == prior.x) {
-    tip.y += (last.y > prior.y) ? clear : -clear;
-  } else if (last.y == prior.y) {
-    tip.x += (last.x > prior.x) ? clear : -clear;
+  int32_t const head{ imax(asked, p[SCAV_STYLE_LABEL].font_size_grid / 2) };
+  // The head's tip is the route's end; the drawn line stops at the head's base.
+  scav_point const tip{ points[r.off + r.len - 1U] };
+  scav_point const prior{ points[r.off + r.len - 2U] };
+  std::vector<scav_point> line(points.begin() + r.off, points.begin() + r.off + r.len);
+  Wide const dx{ Wide{ tip.x } - prior.x };
+  Wide const dy{ Wide{ tip.y } - prior.y };
+  Wide const leg{ static_cast<Wide>(isqrt(static_cast<uint64_t>((dx * dx) + (dy * dy)))) };
+  if (leg > head) {
+    line.back() = { .x = tip.x - static_cast<int32_t>(floor_div(dx * head, leg)),
+                    .y = tip.y - static_cast<int32_t>(floor_div(dy * head, leg)) };
+  } else {
+    line.pop_back();  // the head covers the whole last leg
+  }
+  if (line.size() >= 2U) {
+    push_polyline(d,
+                  depth,
+                  style,
+                  line.data(),
+                  static_cast<uint32_t>(line.size()),
+                  origin);
   }
   push_arrowhead(d,
                  depth,
                  drawlist_style(d, p[SCAV_STYLE_ARROW]),
                  tip,
                  prior,
-                 imax(clear, p[SCAV_STYLE_LABEL].font_size_grid / 2),
+                 head,
                  origin);
 }
 
@@ -463,23 +472,6 @@ bool label_box(Chart const &c,
                scav_rect &out) {
   if ((trans >= c.transitions.size()) || (c.transitions[trans].live == 0U)) {
     return false;
-  }
-  if (routeless(c, trans)) {
-    // The band the source reserved, sliced into one line per label that claimed
-    // it. Nothing placed a box, because there was no route to slide one along.
-    if (c.transitions[trans].label.len == 0U) { return false; }
-    std::vector<scav_rect> const afters{ rows_of<scav_rect>(c, "scav.geom.state_after") };
-    uint32_t const src{ c.transitions[trans].src.v };
-    if ((src >= afters.size()) || (afters[src].h == 0)) { return false; }
-    AfterSlot const slot{ after_slot(c, trans) };
-    scav_rect const band{ afters[src] };
-    int32_t const each{ (slot.total > 0U) ? (band.h / static_cast<int32_t>(slot.total))
-                                          : band.h };
-    out = { .x = band.x,
-            .y = band.y + (static_cast<int32_t>(slot.index) * each),
-            .w = band.w,
-            .h = each };
-    return true;
   }
   for (uint32_t i = 0; i < s.n_path_box; ++i) {
     if (s.path_box[i].subject != trans) { continue; }
@@ -511,8 +503,7 @@ void emit_label(DrawList &d,
   std::vector<std::string_view> const lines{ text_lines(text) };
   int32_t const block_h{ lh * static_cast<int32_t>(lines.size()) };
 
-  // Centred in the rect layout placed. A placed box may exceed its request, so
-  // recomputing one here would drift.
+  // Centred in the rect layout placed; a placed rect may exceed its request.
   int32_t const top{ box.y + floor_div(box.h - block_h, 2) };
   int32_t line{ 0 };
   for (std::string_view const &one : lines) {
@@ -546,8 +537,7 @@ bool emit_chart(DrawList &d,
   if ((p.size() < SCAV_STYLE_COUNT) || (column_find(c, "scav.geom.state").v == INVALID)) {
     return false;
   }
-  // Submachines, states, routes, then labels. Every primitive lands at the depth
-  // it was given, so a caller wanting layering calls the emitters itself.
+  // Submachines, states, routes, then labels, all at `depth`.
   for (uint32_t i = 0; i < c.submachines.size(); ++i) {
     emit_submachine(d, c, p, i, depth);
   }

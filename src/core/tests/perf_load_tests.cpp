@@ -1,5 +1,5 @@
-// Loader floors, never times, over documents generated in RAM. Catches a
-// per-document scan going quadratic in discovery, resolution or the rebuild.
+// Loader throughput floors and scaling ratios over documents generated in RAM.
+// Catches quadratic per-document scans in discovery, resolution or the rebuild.
 
 #include "core/tests/perf_support.h"
 #include "core/tests/test_support.h"
@@ -27,12 +27,10 @@ constexpr bool ASSERT_FLOOR{ SCAV_PERF_ASSERT_FLOOR != 0 };
 // An order of magnitude under a 2020-era laptop, like every other floor here.
 constexpr uint64_t LOAD_FLOOR_MB_PER_S{ 5 };
 
-// Doubling the network must not more than treble the work. Generous, because
-// the point is catching a quadratic and not tracking a constant factor.
+// The doubled network must load in under 2 * SCALING_SLACK (6x) the small one's time.
 constexpr double SCALING_SLACK{ 3.0 };
 
-// Instrumentation makes the absolute numbers describe the instrumentation, so
-// those rows run a smaller network; the ratio is what carries the assertion.
+// Documents in the large network: 60 in light configs (4 MiB input), else 200.
 constexpr uint32_t WIDE{ (SCAV_PERF_INPUT_BYTES <= 4U * 1024U * 1024U) ? 60U : 200U };
 constexpr uint32_t NARROW{ WIDE / 2U };
 
@@ -60,8 +58,8 @@ std::vector<Doc> chain(uint32_t count, uint32_t states_each) {
     for (uint32_t s = 0; s + 1 < states_each; ++s) {
       text += "trans S" + std::to_string(s) + " -> S" + std::to_string(s + 1) + ",\n";
     }
-    // A cross-document endpoint per document, which is the path that could not
-    // resolve at all before the whole network was attached.
+    // A cross-document endpoint per document; it resolves only once the whole
+    // network is attached.
     if (i + 1 < count) { text += "trans S0 -> nxt/S0,\n"; }
     text += "}\n";
     out.push_back({ .name = "d" + std::to_string(i) + ".scav", .text = text });
@@ -172,8 +170,8 @@ TEST_CASE("perf: chain load is linear in the number of documents" *
 
 TEST_CASE("perf: instantiation is linear in the number of instantiations" *
           doctest::test_suite("full")) {
-  // One document, many instances: parse-once must not be paid per instance,
-  // and the span rebuilds must stay one-per-network.
+  // One document, many instances: the parse runs once and the span rebuilds
+  // once per network.
   std::vector<Doc> const small{ star(NARROW, 20) };
   std::vector<Doc> const large{ star(WIDE, 20) };
 

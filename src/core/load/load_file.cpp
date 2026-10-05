@@ -1,5 +1,4 @@
-// The filesystem transport: the loader primitives with `fopen` in the fetch
-// slot. Reads in chunks, which works on a pipe and avoids `ftell`'s `long`.
+// Filesystem transport: runs the loader with `fopen` reads in 64 KiB chunks.
 
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"
@@ -18,8 +17,7 @@ namespace {
 
 constexpr size_t READ_CHUNK{ size_t{ 64 } * 1024U };
 
-// Document names are `/`-separated on every transport. Windows only: off it, a
-// backslash is a legal filename byte and this would corrupt a name.
+// Converts a native path to a `/`-separated key; on Windows, backslashes become `/`.
 std::string native_to_key(char const *path) {
   std::string out{ (path == nullptr) ? "" : path };
 #ifdef _WIN32
@@ -38,8 +36,7 @@ bool read_file(char const *path, std::vector<scav_byte> &out) {
   std::FILE *const file{ std::fopen(path, "rb") };
   if (file == nullptr) { return false; }
 
-  // The loop exits on the stream's own flags rather than on a short read: once
-  // either is set the stream may not be touched again, short read or not.
+  // Reads until `ferror` or `feof` is set; a read error clears `out`.
   std::array<scav_byte, READ_CHUNK> buffer{};
   bool ok{ true };
   for (;;) {
@@ -61,8 +58,7 @@ bool write_file(char const *path, scav_byte const *bytes, size_t len) {
   std::FILE *const file{ std::fopen(path, "wb") };
   if (file == nullptr) { return false; }
   bool const wrote{ (len == 0) || (std::fwrite(bytes, 1, len, file) == len) };
-  // Closed either way, and the close itself can fail: a short write often
-  // surfaces only when the buffer is flushed.
+  // Always closes; false when the write or the close fails.
   return (std::fclose(file) == 0) && wrote;
 }
 
@@ -83,8 +79,8 @@ bool load_file(char const *path,
     return load_finish(loader, out, diags);
   }
 
-  // The pending view dies on the next add, so each round copies out first.
-  // Every round marks a document arrived or returns, bounding the loop.
+  // Copies the pending names each round; `load_add` invalidates the pending view.
+  // Each round loads every pending document or returns.
   std::vector<std::string> wanted;
   for (;;) {
     wanted.clear();

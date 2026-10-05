@@ -1,6 +1,5 @@
-// Advance widths from `hmtx`, codepoints to glyphs through `cmap` or the bundled
-// font's generated table, and the one scaling formula. Advances never come from
-// `glyf` or `CFF`, and no float is involved anywhere.
+// Advance widths from `hmtx`, codepoint-to-glyph lookup through `cmap` or the bundled
+// font's generated table, and the integer scaling formula.
 
 #include "scav/scav_draw.h"
 
@@ -18,8 +17,7 @@ namespace scav {
 
 namespace {
 
-// Bounds-checked big-endian reads. A font is untrusted input, so every read
-// returns false past the end rather than trusting a length in the file.
+// Bounds-checked big-endian reads; each returns false past `len`.
 struct Reader {
   scav_byte const *bytes;
   uint32_t len;
@@ -53,8 +51,8 @@ constexpr uint32_t tag(char a, char b, char c, char d) {
          static_cast<scav_byte>(d);
 }
 
-// The table directory: 12-byte header then 16 bytes per record. A record whose
-// extent runs off the end is rejected rather than clamped.
+// Table directory lookup: 12-byte header, then 16 bytes per record. False when `want`
+// is absent or its extent runs past the end.
 bool find_table(Reader const &r, uint32_t want, Span &out) {
   uint32_t count{ 0 };
   if (!read_u16(r, 4, count)) { return false; }
@@ -75,15 +73,14 @@ bool find_table(Reader const &r, uint32_t want, Span &out) {
   return false;
 }
 
-// Format 12 beats format 4: it reaches past the BMP, and a chart may name a
-// state in any plane. Within a format, the Unicode platform beats Windows only
-// because one of them has to win and the subtables agree.
 struct CmapPick {
   uint32_t off{ 0 };
   uint32_t format{ 0 };
   uint32_t rank{ 0 };
 };
 
+// Ranks a cmap subtable: format 12 (beyond the BMP) over format 4, Unicode platform over
+// Windows within a format; 0 for an unsupported subtable.
 uint32_t cmap_rank(uint32_t platform, uint32_t encoding, uint32_t format) {
   bool const unicode_full{ (platform == 0U) && (encoding == 4U) };
   bool const windows_full{ (platform == 3U) && (encoding == 10U) };
@@ -122,9 +119,7 @@ bool pick_cmap(Reader const &r, Span cmap, CmapPick &out) {
   return out.rank != 0U;
 }
 
-// Segment search over format 4. Linear rather than the binary search the
-// header's searchRange invites: those fields are routinely wrong in the wild,
-// and a chart's label is a few dozen codepoints.
+// Linear segment search over format 4; the header's `searchRange` fields are unused.
 uint32_t lookup_format4(Reader const &r, uint32_t sub, uint32_t cp) {
   if (cp > 0xFFFFU) { return 0U; }
   uint32_t seg_x2{ 0 };
@@ -148,8 +143,7 @@ uint32_t lookup_format4(Reader const &r, uint32_t sub, uint32_t cp) {
       return 0U;
     }
     if (range == 0U) { return (cp + static_cast<uint32_t>(delta)) & 0xFFFFU; }
-    // idRangeOffset is a byte offset from its own slot, which is the one place
-    // in the format that is relative to where it was read from.
+    // `idRangeOffset` is a byte offset from its own slot.
     uint32_t const at{ range_base + (2U * i) + range + (2U * (cp - start)) };
     uint32_t glyph{ 0 };
     if (!read_u16(r, at, glyph) || (glyph == 0U)) { return 0U; }
@@ -176,9 +170,8 @@ uint32_t lookup_format12(Reader const &r, uint32_t sub, uint32_t cp) {
   return 0U;
 }
 
-// One codepoint out of NFC UTF-8, or false. Rejects overlongs, surrogates and
-// anything past U+10FFFF: the pool is normalized, so a violation is a bug
-// upstream and silence would measure the wrong string.
+// Decodes one codepoint from NFC UTF-8 at `at` and advances `at`. False on malformed
+// or truncated input, overlongs, surrogates, or anything past U+10FFFF.
 bool decode_utf8(scav_byte const *s, uint32_t len, uint32_t &at, uint32_t &cp) {
   if (at >= len) { return false; }
   uint32_t const lead{ s[at] };
@@ -228,7 +221,7 @@ uint32_t bundled_glyph(uint32_t cp) {
   return BUNDLED_GLYPHS[BUNDLED_RUN_INDEX[i] + offset];
 }
 
-// Step 0 is glyph 0, so the step found is never before the first.
+// The advance of the last step at or below `row`; step 0 starts at glyph 0.
 uint32_t bundled_advance(uint32_t row) {
   auto const after{ static_cast<size_t>(std::ranges::upper_bound(BUNDLED_STEP_GLYPH, row) -
                                         BUNDLED_STEP_GLYPH.begin()) };
@@ -270,8 +263,8 @@ bool metrics_create(scav_byte const *ttf, uint32_t len, Metrics &out) {
       !read_u16(r, hhea.off + 34U, h_metrics)) {
     return false;
   }
-  // Tables that disagree with each other: an hmtx shorter than it claims, or a
-  // record count above the glyph count, would index past the table later.
+  // Rejects a zero upem, glyph count or record count, more records than glyphs, or an
+  // `hmtx` shorter than its records.
   if ((upem == 0U) || (glyphs == 0U) || (h_metrics == 0U) || (h_metrics > glyphs) ||
       ((4ULL * h_metrics) > hmtx.len)) {
     return false;
@@ -302,8 +295,7 @@ uint32_t metrics_glyph(Metrics const &m, uint32_t codepoint) {
 }
 
 uint32_t metrics_advance(Metrics const &m, uint32_t glyph) {
-  // The tail rule: past the last record, that record's advance applies to every
-  // remaining glyph. Missing it breaks monospaced fonts specifically.
+  // Glyphs past the last hmtx record take that record's advance.
   uint32_t const row{ imin(glyph, m.num_h_metrics - 1U) };
   if (m.bundled) { return bundled_advance(row); }
   Reader const r{ .bytes = m.ttf.data(), .len = static_cast<uint32_t>(m.ttf.size()) };
@@ -330,13 +322,11 @@ MeasureStatus measure_text(Metrics const &m,
     if (!decode_utf8(utf8_nfc, len, at, cp)) { return MeasureStatus::BadUtf8; }
     if (cp == 0x0AU) { return MeasureStatus::Newline; }
     uint32_t const glyph{ metrics_glyph(m, cp) };
-    // Loud, because a silent zero produces a box narrower than its own text.
     if (glyph == 0U) { return MeasureStatus::MissingGlyph; }
     funits += metrics_advance(m, glyph);
   }
 
-  // Accumulate wide, divide exactly once, ceil never round-to-nearest: an
-  // under-sized box is a diagram that lies.
+  // Sums in `Wide`, divides once, and rounds up.
   Wide const w{ ceil_div(funits * font_size_grid, static_cast<Wide>(m.units_per_em)) };
   if (w > COORD_MAX) { return MeasureStatus::BadSize; }
   out = { .w = static_cast<int32_t>(w), .h = font_size_grid };
@@ -363,7 +353,6 @@ MeasureStatus measure_block(Metrics const &m,
   out = {};
   int32_t const lh{ line_height(font_size_grid, k_num, k_den) };
   if (lh == 0) { return MeasureStatus::BadSize; }
-  // Before the scan below, which reads a byte per index rather than per line.
   if ((utf8_nfc == nullptr) && (len != 0U)) { return MeasureStatus::BadUtf8; }
 
   int32_t widest{ 0 };

@@ -1,5 +1,5 @@
-// The C projection of scav_layout.h. Each function converts its arguments,
-// calls one layout function, and converts the result.
+// C API over scav_layout.h. Each function converts its arguments, calls one layout
+// function, and converts the result.
 
 #include "scav/scav_layout_c.h"
 
@@ -13,13 +13,11 @@
 #include <cstring>
 #include <vector>
 
-static_assert(sizeof(scav_box_space) == 12);
+static_assert(sizeof(scav_box_space) == 24);
 static_assert(sizeof(scav_path_clear) == 8);
 static_assert(sizeof(scav_path_box) == 16);
-static_assert(sizeof(scav_profile) == 52 * sizeof(int32_t));
-// Four {pointer, count, stride} triples and nothing else: the strides landed in
-// the padding the pointer-and-count pairs left, so a hole here would mean one of
-// them moved.
+static_assert(sizeof(scav_profile) == 49 * sizeof(int32_t));
+// `scav_spaces` is four {pointer, count, stride} triples with no padding.
 static_assert(sizeof(scav_spaces) ==
               (4 * (sizeof(scav_box_space const *) + (2 * sizeof(uint32_t)))));
 

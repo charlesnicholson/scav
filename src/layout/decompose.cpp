@@ -16,8 +16,7 @@ namespace scav {
 
 namespace {
 
-// `s` plus every enclosing state, innermost first. Capped at one entry per
-// state, so a containment cycle stops instead of growing without end.
+// `s` plus every enclosing state, innermost first; at most one entry per state.
 void chain_of(Chart const &c, StateId s, std::vector<StateId> &out) {
   out.clear();
   for (StateId x{ s }; (x.v != INVALID) && (out.size() < c.states.size());
@@ -26,11 +25,41 @@ void chain_of(Chart const &c, StateId s, std::vector<StateId> &out) {
   }
 }
 
+// `tr`'s `CommonAncestor` from its ends' chains; `i` and `j` count each chain's divergent
+// prefix.
+CommonAncestor common_of(Chart const &c,
+                         Transition const &tr,
+                         std::vector<StateId> const &chain_src,
+                         std::vector<StateId> const &chain_dst,
+                         size_t i,
+                         size_t j) {
+  if (tr.src == tr.dst) {
+    return { .state = tr.src,
+             .frame = c.states[tr.src.v].parent,
+             .child = { tr.src, tr.src } };
+  }
+  CommonAncestor out;
+  out.state = (i < chain_src.size()) ? chain_src[i] : StateId{ INVALID };
+  out.child = { (i > 0) ? chain_src[i - 1] : StateId{ INVALID },
+                (j > 0) ? chain_dst[j - 1] : StateId{ INVALID } };
+  SubmachineId const a{ (i > 0) ? c.states[chain_src[i - 1].v].parent
+                                : SubmachineId{ INVALID } };
+  SubmachineId const b{ (j > 0) ? c.states[chain_dst[j - 1].v].parent
+                                : SubmachineId{ INVALID } };
+  if (a.v == INVALID) {
+    out.frame = b;
+  } else if ((b.v == INVALID) || (a == b)) {
+    out.frame = a;
+  }
+  return out;
+}
+
 // One planned boundary crossing, in route order.
 struct Crossing {
-  enum : uint32_t { Exit, SepSrc, SepDst, Enter } kind;
-  StateId state;     // Exit and Enter
-  SubmachineId sub;  // SepSrc and SepDst
+  enum : uint32_t { Exit, Divider, Enter } kind;
+  StateId state;      // Exit and Enter
+  SubmachineId sub;   // Divider: the region left
+  SubmachineId into;  // Divider: the region entered
 };
 
 }  // namespace
@@ -39,6 +68,13 @@ StateId enclosing_state(Chart const &c, StateId s) {
   if (s.v == INVALID) { return { INVALID }; }
   SubmachineId const parent{ c.states[s.v].parent };
   return (parent.v == INVALID) ? StateId{ INVALID } : c.submachines[parent.v].owner;
+}
+
+bool inner_loop(Chart const &c, uint32_t t) {
+  Transition const &tr{ c.transitions[t] };
+  return (tr.live != 0) && (tr.src == tr.dst) && (tr.src.v < c.states.size()) &&
+         ((tr.kind == TransKind::Internal) || (tr.kind == TransKind::Local)) &&
+         (c.states[tr.src.v].live != 0) && (c.states[tr.src.v].kind == StateKind::Normal);
 }
 
 bool ancestor_or_self(Chart const &c, StateId ancestor, StateId of) {
@@ -61,64 +97,77 @@ SplitGraph decompose(Chart const &c) {
     chain_of(c, { s }, chain_src);
     g.state_depth[s] = static_cast<uint32_t>(chain_src.size() - 1);
   }
-  vec_assign(g.state_crossings, c.states.size(), 0);
   vec_assign(g.trans_segments, c.transitions.size(), Span{});
+  vec_assign(g.trans_common, c.transitions.size(), CommonAncestor{});
 
   for (uint32_t t = 0; t < c.transitions.size(); ++t) {
     Transition const &tr{ c.transitions[t] };
-    if ((tr.live == 0) || (tr.src.v == INVALID) || (tr.dst.v == INVALID) ||
-        (c.states[tr.src.v].live == 0) || (c.states[tr.dst.v].live == 0)) {
+    if ((tr.src.v >= c.states.size()) || (tr.dst.v >= c.states.size())) { continue; }
+    chain_of(c, tr.src, chain_src);
+    chain_of(c, tr.dst, chain_dst);
+    size_t i{ chain_src.size() };
+    size_t j{ chain_dst.size() };
+    while ((i > 0) && (j > 0) && (chain_src[i - 1] == chain_dst[j - 1])) {
+      --i;
+      --j;
+    }
+    // `i` and `j` count each chain's divergent prefix, endpoint included.
+    g.trans_common[t] = common_of(c, tr, chain_src, chain_dst, i, j);
+    if ((tr.live == 0) || (c.states[tr.src.v].live == 0) ||
+        (c.states[tr.dst.v].live == 0)) {
       continue;
     }
-    // An internal or local self-transition has no route: the app reserves a
-    // band and draws it inside the state's own rect.
-    if ((tr.src == tr.dst) && (tr.kind != TransKind::External)) { continue; }
-
     route.clear();
     bool src_inner{ false };  // route starts on the source border's inner face
     bool dst_inner{ false };  // route ends on the target border's inner face
     if (tr.src != tr.dst) {
-      chain_of(c, tr.src, chain_src);
-      chain_of(c, tr.dst, chain_dst);
-      size_t i{ chain_src.size() };
-      size_t j{ chain_dst.size() };
-      while ((i > 0) && (j > 0) && (chain_src[i - 1] == chain_dst[j - 1])) {
-        --i;
-        --j;
-      }
-      // i and j now count the divergent prefix of each chain, endpoint
-      // included. One shape covers every case: an empty run contributes nothing.
-      if (i == 0) {  // src encloses dst; its border splits only when external
-        src_inner = tr.kind != TransKind::External;
+      bool const external{ tr.kind == TransKind::External };
+      if (i == 0) {  // src encloses dst; its border splits unless internal or local
+        src_inner = (tr.kind == TransKind::Internal) || (tr.kind == TransKind::Local);
         if (!src_inner) {
-          vec_push_back(route, { .kind = Crossing::Enter, .state = tr.src, .sub = {} });
+          vec_push_back(
+              route,
+              { .kind = Crossing::Enter, .state = tr.src, .sub = {}, .into = {} });
         }
       }
       for (size_t k = 1; k < i; ++k) {
-        vec_push_back(route, { .kind = Crossing::Exit, .state = chain_src[k], .sub = {} });
+        vec_push_back(
+            route,
+            { .kind = Crossing::Exit, .state = chain_src[k], .sub = {}, .into = {} });
       }
       if ((i > 0) && (j > 0) && (i < chain_src.size())) {
-        // The chains meet at a state; entering through two of its submachines
-        // crosses their separator, never that state's border.
+        // The chains meet at a state. An external route out of a machine exits and
+        // re-enters it; any other crosses the divider between two of its submachines.
         SubmachineId const sub_src{ c.states[chain_src[i - 1].v].parent };
         SubmachineId const sub_dst{ c.states[chain_dst[j - 1].v].parent };
-        if (sub_src != sub_dst) {
-          vec_push_back(route, { .kind = Crossing::SepSrc, .state = {}, .sub = sub_src });
-          vec_push_back(route, { .kind = Crossing::SepDst, .state = {}, .sub = sub_dst });
+        if (external && ((i > 1) || (j > 1) || (sub_src != sub_dst))) {
+          vec_push_back(
+              route,
+              { .kind = Crossing::Exit, .state = chain_src[i], .sub = {}, .into = {} });
+          vec_push_back(
+              route,
+              { .kind = Crossing::Enter, .state = chain_src[i], .sub = {}, .into = {} });
+        } else if (sub_src != sub_dst) {
+          vec_push_back(
+              route,
+              { .kind = Crossing::Divider, .state = {}, .sub = sub_src, .into = sub_dst });
         }
       }
-      for (size_t k = j; k-- > 1;) {
+      // `j == 0` when dst encloses src: an external route exits dst and ends on its
+      // border; any other ends inside dst, on its inner face.
+      if ((j == 0) && external) {
         vec_push_back(route,
-                      { .kind = Crossing::Enter, .state = chain_dst[k], .sub = {} });
+                      { .kind = Crossing::Exit, .state = tr.dst, .sub = {}, .into = {} });
       }
-      // The target chain ran out first, so dst is one of src's ancestors and
-      // the last frame is a submachine of dst: the route arrives inside it
-      // without crossing anything. i == 0 is the mirror and cannot coincide,
-      // since both chains running out means src == dst.
-      dst_inner = (j == 0);
+      for (size_t k = j; k-- > 1;) {
+        vec_push_back(
+            route,
+            { .kind = Crossing::Enter, .state = chain_dst[k], .sub = {}, .into = {} });
+      }
+      dst_inner = (j == 0) && !external;
     }
 
-    // The state an Enter at `at` opens into next, which owns the next frame.
+    // The state entered after the Enter at `at`, or dst; its parent is the next frame.
     auto entered_next = [&](size_t at) {
       return ((at + 1) < route.size()) ? route[at + 1].state : tr.dst;
     };
@@ -130,14 +179,12 @@ SplitGraph decompose(Chart const &c) {
     uint32_t prev{ INVALID };
     for (size_t k = 0; k < route.size(); ++k) {
       Crossing const &x{ route[k] };
+      bool const divider{ x.kind == Crossing::Divider };
       uint32_t const port{ static_cast<uint32_t>(g.ports.size()) };
       vec_push_back(g.ports,
-                    { .state = (x.kind == Crossing::Exit) || (x.kind == Crossing::Enter)
-                                   ? x.state
-                                   : StateId{ INVALID },
-                      .sub = (x.kind == Crossing::SepSrc) || (x.kind == Crossing::SepDst)
-                                 ? x.sub
-                                 : SubmachineId{ INVALID },
+                    { .state = divider ? StateId{ INVALID } : x.state,
+                      .sub = divider ? x.sub : SubmachineId{ INVALID },
+                      .into = divider ? x.into : SubmachineId{ INVALID },
                       .trans = { t },
                       .crossing = static_cast<uint32_t>(k) });
       vec_push_back(g.segments,
@@ -146,22 +193,12 @@ SplitGraph decompose(Chart const &c) {
                       .frame = frame,
                       .src_port = prev,
                       .dst_port = port,
-                      .separator = (x.kind == Crossing::SepDst) ? 1U : 0U,
                       .src_inner = ((k == 0) && src_inner) ? 1U : 0U,
                       .dst_inner = 0 });
       switch (x.kind) {
-        case Crossing::Exit:
-          frame = c.states[x.state.v].parent;
-          ++g.state_crossings[x.state.v];
-          break;
-        case Crossing::SepSrc:
-          frame = c.states[c.submachines[x.sub.v].owner.v].parent;
-          break;
-        case Crossing::SepDst: frame = x.sub; break;
-        case Crossing::Enter:
-          frame = c.states[entered_next(k).v].parent;
-          ++g.state_crossings[x.state.v];
-          break;
+        case Crossing::Exit: frame = c.states[x.state.v].parent; break;
+        case Crossing::Divider: frame = x.into; break;
+        case Crossing::Enter: frame = c.states[entered_next(k).v].parent; break;
         default: break;
       }
       prev = port;
@@ -172,14 +209,13 @@ SplitGraph decompose(Chart const &c) {
                     .frame = frame,
                     .src_port = prev,
                     .dst_port = INVALID,
-                    .separator = 0,
                     .src_inner = (route.empty() && src_inner) ? 1U : 0U,
                     .dst_inner = dst_inner ? 1U : 0U });
 
     g.trans_segments[t] =
         make_span(first_segment, static_cast<uint32_t>(g.segments.size()) - first_segment);
   }
-  // Filled apart from `g`, since `label_segment` reads the table once it is there.
+  // `g.trans_label` stays empty until every `label_segment` call returns.
   std::vector<uint32_t> label;
   vec_assign(label, c.transitions.size(), INVALID);
   for (uint32_t t = 0; t < label.size(); ++t) { label[t] = label_segment(c, g, t); }

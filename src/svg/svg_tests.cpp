@@ -94,9 +94,8 @@ TEST_CASE("svg: no float is printed, ever") {
   Written const w{ write(d, { .margin = 13 }) };
   REQUIRE(w.status == SvgStatus::Ok);
 
-  // No digit in the body is followed by a decimal point and another digit, and
-  // nothing carries an exponent. The XML declaration's own `version="1.0"` is
-  // the one literal that looks like one, so the scan starts after it.
+  // Checks the body after `<svg` for decimal fractions and exponents; the XML
+  // declaration's `version="1.0"` precedes it.
   auto const digit = [](char c) { return (c >= '0') && (c <= '9'); };
   size_t const body{ w.doc.find("<svg") };
   REQUIRE(body != std::string::npos);
@@ -126,8 +125,7 @@ TEST_CASE("svg: the viewBox carries the extent and the frame is whole points") {
   CHECK(has(margined.doc, "viewBox=\"24 8 176 112\""));
   CHECK(has(margined.doc, "width=\"11\""));
 
-  // An extent that does not divide into whole points is ceiled, so the frame
-  // can only ever be a sliver large.
+  // An extent that does not divide into whole points rounds up.
   DrawList odd;
   push_rect(odd,
             0,
@@ -150,8 +148,8 @@ TEST_CASE("svg: bounds are the tight box, and a circle reaches its radius") {
   CHECK(one.x == 10);
   CHECK(one.w == 10);
 
-  // The circle's centre is inside the rect but its radius is not, so the box
-  // has to grow: a backend sizing to centres would clip it.
+  // The circle's centre is inside the rect and its radius reaches past it; the
+  // bounds cover the whole circle.
   push_circle(d, 0, s, { .x = 15, .y = 15 }, 40, NONE);
   scav_rect const two{ svg_bounds(d) };
   CHECK(two.x == -25);
@@ -181,8 +179,7 @@ TEST_CASE("svg: each kind lands as the element a viewer expects") {
   CHECK(has(w.doc, "<polyline points=\"0,0 10,0 10,10\""));
   CHECK(has(w.doc, "<polygon points=\"0,0 10,0 10,10\""));
   CHECK(has(w.doc, "<circle cx=\"0\" cy=\"0\" r=\"5\""));
-  // Colours are #rrggbb: the CSS Color 4 alpha pair is ignored rather than
-  // refused by older consumers, which is worse than not using it.
+  // Colours are written as #rrggbb, with no alpha pair.
   CHECK(has(w.doc, "fill=\"#102030\""));
   CHECK(has(w.doc, "stroke=\"#aabbcc\""));
   CHECK(has(w.doc, "stroke-width=\"16\""));
@@ -205,8 +202,7 @@ TEST_CASE("svg: a transparent paint is none, and a partial one is a fixed decima
   Written const w{ write(d) };
   REQUIRE(w.status == SvgStatus::Ok);
   CHECK(has(w.doc, "fill=\"none\""));
-  // 0x80 of 255 is 501 thousandths, assembled from integer division rather
-  // than converted from a double.
+  // 0x80 of 255 is 501 thousandths, computed by integer division.
   CHECK(has(w.doc, "fill-opacity=\"0.501\""));
 }
 
@@ -242,8 +238,7 @@ TEST_CASE("svg: text the metrics refuse for any other reason is an invalid drawl
   DrawList d;
   push_text(d, 0, drawlist_style(d, glyphs(160)), { .x = 0, .y = 0 }, "two\nlines", NONE);
   Written const w{ write(d) };
-  // A text primitive is one line: the break is the builder's bug, and it is
-  // named rather than measured around.
+  // A text primitive is one line; a newline makes the list invalid.
   CHECK(w.status == SvgStatus::InvalidDrawList);
   CHECK(w.bad == 0);
   CHECK(w.doc.empty());
@@ -273,8 +268,7 @@ TEST_CASE("svg: text carries textLength from our own advance sum") {
   string_append_u32(expected, static_cast<uint32_t>(want.w));
   expected += '"';
   CHECK(has(w.doc, expected));
-  // spacing, not glyph scaling: a substituted font goes slightly loose rather
-  // than overflowing its box.
+  // `lengthAdjust="spacing"` fits text to `textLength` by adjusting spacing only.
   CHECK(has(w.doc, "lengthAdjust=\"spacing\""));
   CHECK(has(w.doc, "font-size=\"160\""));
   CHECK(has(w.doc, ">Idle</text>"));
@@ -329,7 +323,7 @@ TEST_CASE("svg: a class is synthesized from the origin, never carried in the IR"
 
   CHECK(svg_class(d.prims[0]) == "scav-state scav-id-1234");
   CHECK(svg_class(d.prims[1]) == "scav-trans scav-id-7");
-  // A primitive belonging to no entity gets no class rather than an empty one.
+  // A primitive with no origin entity has no class.
   CHECK(svg_class(d.prims[2]).empty());
   CHECK(!has(w.doc, "class=\"\""));
 }
@@ -370,7 +364,7 @@ TEST_CASE("svg: --embed-font base64s the bundled TTF whole") {
 
   // Whole, not subsetted: base64 is four characters per three bytes.
   CHECK(embedded.doc.size() > (bare.doc.size() + (size_t{ len / 3U } * 4U)));
-  // And never converted to paths, which would discard selection.
+  // Text stays as `<text>`; the document has no `<path>`.
   CHECK(!has(embedded.doc, "<path"));
 }
 
@@ -443,8 +437,7 @@ TEST_CASE("svg: an unrenderable primitive is refused, and names itself") {
   push_rect(d, 0, s, { .x = 0, .y = 0, .w = 1, .h = 1 }, NONE);
   push_arc(d, 0, s, { .x = 0, .y = 0, .w = 8, .h = 8 }, 0, 90 * 64, NONE);
   Written const w{ write(d) };
-  // An arc needs endpoints, and deriving them from an angle needs trigonometry
-  // no integer path here supplies. Refused rather than approximated.
+  // The SVG writer refuses arcs.
   CHECK(w.status == SvgStatus::UnsupportedPrim);
   CHECK(w.bad == 1);
   CHECK(w.doc.empty());  // nothing half-written
@@ -497,8 +490,7 @@ TEST_CASE("svg: an extent past an integer viewBox is refused on either axis") {
   CHECK(across.status == SvgStatus::ExtentOverflow);
   CHECK(across.doc.empty());
 
-  // The same content turned on its side: a viewBox that fits on x and not on y
-  // is no more writable than the other way round.
+  // The same content along y: a viewBox that overflows on y is refused too.
   DrawList tall;
   uint32_t const t{ drawlist_style(tall, shape(0x000000FFU, 0)) };
   push_rect(tall, 0, t, { .x = 0, .y = -COORD_MAX, .w = 1, .h = COORD_MAX }, NONE);
@@ -546,8 +538,7 @@ TEST_CASE("svg: an origin kind scav has no name for carries no class") {
   CHECK(svg_class(d.prims[0]).empty());
   Written const w{ write(d) };
   REQUIRE(w.status == SvgStatus::Ok);
-  // The rect is still drawn: an unrecognized origin costs the selector, not the
-  // primitive.
+  // An unrecognized origin drops the class; the rect is still drawn.
   CHECK(has(w.doc, "<rect"));
   CHECK(!has(w.doc, "class="));
 }
@@ -610,7 +601,7 @@ TEST_CASE("svg: the C surface queries then writes, and refuses nulls") {
   REQUIRE(count > 0);
 
   std::vector<scav_byte> buffer(count);
-  // A cap too small writes the required count rather than truncating.
+  // A cap one byte short returns `SCAV_E_CAPACITY` and reports the required count.
   uint32_t again{ 0 };
   CHECK(scav_svg_write(list,
                        metrics,
@@ -675,9 +666,7 @@ TEST_CASE("svg: the C surface queries then writes, and refuses nulls") {
                        &again) == SCAV_E_INVALID_ARG);
   CHECK(scav_svg_bounds(nullptr, &bounds, RECT_SIZE) == SCAV_E_INVALID_ARG);
 
-  // A size that disagrees with this library's is refused before anything else,
-  // NULL options and a NULL rect included: the size is the caller's claim about
-  // its own headers, so it outranks every other refusal.
+  // A wrong struct size is `SCAV_E_ABI`, checked before any null argument.
   uint32_t const unmoved{ again };
   for (int32_t delta : { -4, 4 }) {
     CAPTURE(delta);

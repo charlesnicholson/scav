@@ -1,0 +1,10 @@
+// A route out of a composite through a port on its right border, held to `Below`'s
+// bottom face: it turns once past the port and runs down the border a pad off it.
+chart outside "a route out of a composite runs along its border a pad off it" {
+  state Box { state Inside, state Next, trans * -> Inside, trans Inside -> Next },
+  state Below,
+
+  trans * -> Box,
+  trans Box -> Below,
+  trans Box/Inside -> Below "leave",
+}

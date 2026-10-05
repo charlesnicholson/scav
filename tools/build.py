@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
-"""One command from a clean checkout to a green test run.
-
-envy is scav's own CI convenience, not a build prerequisite, so this only ever hands
-CMake paths it discovered; the CMake tree itself asks envy for nothing.
+"""One command from a clean checkout to a green test run; hands CMake the tool
+paths envy provides.
 
 ./build.sh                          host default preset, build, test
 ./build.sh --preset linux-gcc-libstdcxx-release
@@ -41,7 +39,7 @@ def run(*cmd: str | Path) -> None:
 
 
 def envy_cache_root() -> str:
-    """Asked of envy rather than derived; `--root` skips the usage scan."""
+    """The envy cache root, or "unknown"; `--root` skips envy's usage scan."""
     return subprocess.run(
         [str(ENVY), "cache", "--root"], cwd=REPO_ROOT, check=False,
         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
@@ -49,7 +47,7 @@ def envy_cache_root() -> str:
 
 
 def envy_product(name: str) -> Path:
-    """envy narrates to stderr and prints the path to stdout."""
+    """Runs `envy product` and returns the path it prints to stdout."""
     out = subprocess.run(
         [str(ENVY), "product", name], cwd=REPO_ROOT, check=True,
         stdout=subprocess.PIPE, text=True,
@@ -76,8 +74,7 @@ def resolve_preset(args: argparse.Namespace) -> str:
     if args.preset:
         return args.preset
     suffix = args.sanitizer or ("coverage" if args.coverage else args.config)
-    # Not every triple supports every suffix, so fall through rather than naming a
-    # preset that was never going to exist.
+    # The first host triple with a preset for this suffix, else the host default.
     available = available_presets()
     return next((f"{t}-{suffix}" for t in host_triples() if f"{t}-{suffix}" in available),
                 f"{host_triples()[0]}-{suffix}")
@@ -108,28 +105,20 @@ def cached_compiler(build_dir: Path) -> str | None:
     return None
 
 
-# A ninja failure names what it could not make: a `stamp/` edge is a red test,
-# anything else -- an object, an executable, a generated header -- is a bad tree.
+# Ninja's failed edge targets; `stamp/` ones are tests, any other is a broken build.
 FAILED_EDGE = re.compile(r"^FAILED: (?:\[[^\]]*\] )?(\S+)", re.MULTILINE)
 
 
 def build_is_stale(output: str) -> bool:
-    """Whether a failed build left binaries that no longer match the sources.
-
-    A test failure leaves them current, and they are what a red test is
-    diagnosed and a golden regenerated with. A compile failure stopped ninja at
-    the broken edge, so anything already linked is the previous build's."""
+    """True when the build failed at a non-`stamp/` edge, or named no edge."""
     edges = FAILED_EDGE.findall(output)
     if not edges:
-        return True  # a failure that named nothing: assume the worst
+        return True
     return any(not edge.startswith("stamp/") for edge in edges)
 
 
 def discard_binaries(build_dir: Path) -> None:
-    """Delete every executable, after a build that failed to compile.
-
-    A stale binary answers a question about code no longer in the tree, with
-    the same exit code and output as a real answer. Costs one relink."""
+    """Deletes every executable file in `build_dir`/bin."""
     binaries = build_dir / "bin"
     if not binaries.is_dir():
         return
@@ -160,8 +149,7 @@ def link_compile_commands(build_dir: Path) -> None:
     try:
         link.symlink_to(os.path.relpath(source, link.parent))
     except OSError:
-        # Windows without developer mode cannot symlink, and a copy is equivalent
-        # here.
+        # Copies where symlinks are unavailable (Windows without developer mode).
         source.copy(link)
 
 
@@ -210,8 +198,7 @@ def main() -> int:
 
     build_dir = REPO_ROOT / "out" / preset
 
-    # The presets name a compiler unqualified, since every matrix host keeps its
-    # own somewhere different. Resolving here pins and prints the choice.
+    # The preset's compiler resolved on PATH; passed as CMAKE_CXX_COMPILER below.
     resolved = which(c) if (c := preset_compiler(preset)) else None
     resolved = Path(resolved).as_posix() if resolved else None
 
@@ -219,8 +206,7 @@ def main() -> int:
         print(f"+ rm -rf {build_dir}", flush=True)
         rmtree(build_dir)
     elif resolved and (was := cached_compiler(build_dir)) and was != resolved:
-        # A changed compiler resets the cache, and the -D arguments below do not
-        # survive that re-run: configure then blames a missing doctest.
+        # A changed compiler deletes the build tree before configuring.
         print(f"+ rm -rf {build_dir}\n    compiler changed: {was} -> {resolved}",
               flush=True)
         rmtree(build_dir)
@@ -228,14 +214,12 @@ def main() -> int:
     extra = [a for a in args.cmake_args if a != "--"]
     if resolved:
         extra.append(f"-DCMAKE_CXX_COMPILER={resolved}")
-    # Always stated, so a --no-test run cannot stick in the cache and turn
-    # every later plain build into a silent test skip.
+    # Sets SCAV_RUN_TESTS on every configure, overriding any cached value.
     extra.append(f"-DSCAV_RUN_TESTS={'OFF' if args.no_test else 'ON'}")
     if not any("SCAV_TEST_TIER" in a for a in extra):
         extra.append("-DSCAV_TEST_TIER=fast")
 
-    # MSan without an instrumented libc++ reports false positives forever, and one
-    # command has to cover that rather than documenting a step.
+    # MSan presets get an instrumented libc++ from msan_libcxx.py.
     if preset.endswith("-msan") and not any("SCAV_MSAN_LIBCXX_DIR" in a for a in extra):
         libcxx = subprocess.run(
             [str(python), str(REPO_ROOT / "tools/msan_libcxx.py")],
@@ -246,8 +230,7 @@ def main() -> int:
     run(cmake, "--preset", preset, f"-DCMAKE_MAKE_PROGRAM={ninja}",
         f"-DSCAV_DOCTEST_DIR={doctest}", f"-DPython3_EXECUTABLE={python}", *extra)
     link_compile_commands(build_dir)
-    # Tests are build steps, so this one command builds and verifies. A second
-    # run is a no-op: every test stamp is newer than its inputs.
+    # Builds and runs the tests, which are build steps.
     transcript, code = build_and_relay(cmake, preset)
     if code != 0:
         if build_is_stale(transcript):

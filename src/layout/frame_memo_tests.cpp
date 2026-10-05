@@ -1,5 +1,5 @@
-// The per-frame memos of ordering and sizing against the steps they stand in for. A traced
-// run derives every frame and remembers nothing, which gives the uncached answer.
+// The per-frame order and size memos checked against a traced run, which derives every
+// frame and stores nothing.
 
 #include "core/tests/corpus.h"
 #include "layout/decompose.h"
@@ -20,21 +20,6 @@
 #include <string>
 #include <utility>
 #include <vector>
-
-namespace scav {
-
-void order_test_reuse(bool on);
-void order_test_reuse_verify(bool on);
-uint64_t order_test_reused();
-uint64_t order_test_reuse_mismatches();
-void size_test_reuse(bool on);
-void size_test_reuse_verify(bool on);
-void size_test_reuse_ignore_dar(bool on);
-uint64_t size_test_reused();
-uint64_t size_test_framed();
-uint64_t size_test_reuse_mismatches();
-
-}  // namespace scav
 
 namespace {
 
@@ -205,8 +190,8 @@ Scatter scattered(uint32_t seed) {
   return out;
 }
 
-// pack_tests' late arrival as four disconnected states, scaled from a separation of 10: a
-// fourth rect that compaction takes into the hole under the third.
+// pack_tests' late-arrival rects as four disconnected states, scaled to `node_sep`:
+// compaction moves the fourth into the hole under the third.
 Scatter late_arrival(scav_profile const &p) {
   Scatter out;
   SubmachineId const root{ build_chart(out.c, "late", {}) };
@@ -320,8 +305,8 @@ TEST_CASE("size memo: a remembered frame is the layout those inputs size to" *
     REQUIRE(base.ok);
     Targets const t{ targets_of(c, g, o) };
 
-    // Orders that differ in one frame's ranks or direction: the frames around it hit, and
-    // it must not.
+    // Orders differing in one frame's ranks or direction: the other frames hit, that one
+    // misses.
     SearchPins turned;
     if (t.frame.v != INVALID) { turned.orients.push_back({ .frame = t.frame }); }
     SearchPins pinned;
@@ -360,8 +345,7 @@ TEST_CASE("size memo: a remembered frame is the layout those inputs size to" *
     pad.pad += 4;
     scav_profile trybox{ p };
     trybox.trybox = (p.trybox != 0) ? 0 : 1;
-    // Compaction moves only what the row packer did not win, so its variant is
-    // weighed against the same profile without the box packer.
+    // The compaction variant is compared against `plain`, the profile with `trybox` off.
     scav_profile plain{ p };
     plain.trybox = 0;
     Sized const plain_base{
@@ -550,9 +534,10 @@ TEST_CASE("size memo: a port on a cross border keys on the port it continues thr
   TransId const reach{ static_cast<uint32_t>(c.transitions.size()) - 1 };
   SubmachineId const outer_frame{ c.submachine_ids[c.states[outer].submachines.off] };
   SubmachineId const inner_frame{ c.submachine_ids[c.states[inner].submachines.off] };
-  SearchPins const pins{ .orients = { { .frame = outer_frame }, { .frame = inner_frame } },
-                         .sides = { { .trans = reach, .leg = 1, .end = 0, .side = 0 },
-                                    { .trans = reach, .leg = 2, .end = 0, .side = 0 } } };
+  SearchPins const pins{ .ends = { { .trans = reach, .leg = 1, .end = 0, .face = 0 },
+                                   { .trans = reach, .leg = 2, .end = 0, .face = 0 } },
+                         .orients = { { .frame = outer_frame },
+                                      { .frame = inner_frame } } };
 
   std::array<SplitGraph, 2> const g{ decompose(charts[0]), decompose(charts[1]) };
   std::array<SubmachineOrders, 2> const o{
@@ -682,458 +667,4 @@ TEST_CASE("size memo: a port on a rank border keys on the port it continues thro
   CHECK(got.ok);
   CHECK(same(got.z, want.z));
   CHECK_FALSE(same(want.z, warm.z));
-}
-
-namespace {
-
-// Every field, the inputs recorded for a later call included.
-bool same_all(SubmachineOrders const &a, SubmachineOrders const &b) {
-  return same(a, b) && (a.edges == b.edges) && (a.sub_fold == b.sub_fold) &&
-         (a.sub_fold_cut == b.sub_fold_cut) && (a.labels == b.labels) &&
-         (a.seg_cross == b.seg_cross) && (a.seg_sided == b.seg_sided) &&
-         (a.serial == b.serial) && (a.seg_pins == b.seg_pins) &&
-         (a.seg_label == b.seg_label) && (a.state_pin == b.state_pin);
-}
-
-struct ReuseGuard {
-  ReuseGuard() = default;
-  ReuseGuard(ReuseGuard const &) = delete;
-  ReuseGuard &operator=(ReuseGuard const &) = delete;
-  ~ReuseGuard() {
-    order_test_reuse(true);
-    order_test_reuse_verify(false);
-  }
-};
-
-}  // namespace
-
-TEST_CASE("order reuse: a move in one frame leaves the others taken from the base") {
-  ReuseGuard const guard;
-  // Two composites side by side, each with a frame of its own: three frames, `B`'s
-  // ordered before `A`'s, and in `B`'s a long edge chained through one bend.
-  Chart c;
-  SubmachineId const root{ build_chart(c, "two", {}) };
-  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
-  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  SubmachineId const in_b{ build_submachine(c, b, {}, {}) };
-  SubmachineId const in_a{ build_submachine(c, a, {}, {}) };
-  StateId const a1{ build_state(c, in_a, "A1", StateKind::Normal, {}) };
-  StateId const a2{ build_state(c, in_a, "A2", StateKind::Normal, {}) };
-  StateId const b1{ build_state(c, in_b, "B1", StateKind::Normal, {}) };
-  StateId const b2{ build_state(c, in_b, "B2", StateKind::Normal, {}) };
-  StateId const b3{ build_state(c, in_b, "B3", StateKind::Normal, {}) };
-  build_trans(c, a1, a2, TransKind::External, {});
-  build_trans(c, b1, b2, TransKind::External, {});
-  build_trans(c, b2, b3, TransKind::External, {});
-  TransId const longest{ build_trans(c, b1, b3, TransKind::External, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  SplitGraph const g{ decompose(c) };
-  scav_profile const p{ readable() };
-  scav_spaces const s{};
-
-  SubmachineOrders const base{ order_submachines(c, g, s, p, 1, {}) };
-  SearchPins moved;
-  moved.cuts.push_back({ .trans = longest, .leg = 0 });  // drops `B`'s bend
-  SubmachineOrders const want{ ordered(c, g, s, p, moved, true) };
-  REQUIRE(want.nodes.size() < base.nodes.size());
-
-  order_test_reuse_verify(false);
-  SubmachineOrders const got{ order_submachines(c, g, s, p, 1, moved, &base) };
-  CHECK(order_test_reused() == 2);  // the root's and `A`'s, not `B`'s
-  CHECK(same_all(got, want));
-  CHECK(got.sub_nodes[in_a.v].off < base.sub_nodes[in_a.v].off);  // moved up, not copied
-  for (uint32_t m : { root.v, in_a.v }) {
-    Span const was{ base.sub_nodes[m] };
-    Span const now{ got.sub_nodes[m] };
-    REQUIRE(was.len == now.len);
-    for (uint32_t k = 0; k < was.len; ++k) {
-      CHECK(got.nodes[now.off + k] == base.nodes[was.off + k]);
-    }
-  }
-
-  // The same pin is no move: every frame is taken.
-  order_test_reuse_verify(false);
-  SubmachineOrders const again{ order_submachines(c, g, s, p, 1, moved, &got) };
-  CHECK(order_test_reused() == 3);
-  CHECK(same_all(again, want));
-
-  // A different profile takes nothing.
-  scav_profile swept{ p };
-  swept.sweep_count = 0;
-  order_test_reuse_verify(false);
-  (void)order_submachines(c, g, s, swept, 1, moved, &got);
-  CHECK(order_test_reused() == 0);
-}
-
-TEST_CASE("order reuse: a frame taken from the base is the frame its inputs order to") {
-  ReuseGuard const guard;
-  scav_profile const p{ readable() };
-  constexpr uint32_t VARIANTS{ 7 };
-  std::vector<uint64_t> taken(VARIANTS, 0);
-  for (char const *name : CHARTS) {
-    if (scav::test::corpus_skipped(name)) { continue; }
-    CAPTURE(name);
-    Chart c;
-    load(name, c);
-    SplitGraph const g{ decompose(c) };
-    Requests const req{ requests_for(c) };
-    scav_spaces const s{ req.view() };
-    SubmachineOrders const base{ ordered(c, g, s, p, {}, false) };
-    Targets const t{ targets_of(c, g, base) };
-
-    // Each variant changes one input the ordering reads.
-    std::vector<SearchPins> pins(6);
-    if (t.state.v != INVALID) { pins[0].ranks.push_back({ .state = t.state, .rank = 2 }); }
-    if (t.trans.v != INVALID) {
-      pins[1].reverses.push_back({ .trans = t.trans, .leg = t.leg });
-      pins[5].sides.push_back({ .trans = t.trans, .leg = t.leg, .end = 0, .side = 2 });
-    }
-    if (t.chained.v != INVALID) {
-      pins[2].cuts.push_back({ .trans = t.chained, .leg = t.chained_leg });
-    }
-    if (t.frame.v != INVALID) { pins[3].orients.push_back({ .frame = t.frame }); }
-    scav_profile swept{ p };
-    swept.sweep_count = 0;
-    Requests wider{ req };
-    for (scav_path_box &b : wider.path) { b.w += 45; }
-
-    struct Variant {
-      SearchPins const *pins;
-      scav_profile const *p;
-      Requests const *req;
-    };
-    std::array<Variant, VARIANTS> const variants{
-      { { .pins = pins.data(), .p = &p, .req = &req },
-        { .pins = &pins[1], .p = &p, .req = &req },
-        { .pins = &pins[2], .p = &p, .req = &req },
-        { .pins = &pins[3], .p = &p, .req = &req },
-        { .pins = &pins[4], .p = &swept, .req = &req },
-        { .pins = &pins[4], .p = &p, .req = &wider },
-        { .pins = &pins[5], .p = &p, .req = &req } }
-    };
-    for (uint32_t k = 0; k < VARIANTS; ++k) {
-      CAPTURE(k);
-      Variant const &v{ variants[k] };
-      scav_spaces const vs{ v.req->view() };
-      order_test_reuse_verify(false);
-      SubmachineOrders const got{ order_submachines(c, g, vs, *v.p, 1, *v.pins, &base) };
-      taken[k] += order_test_reused();
-      SubmachineOrders const want{ ordered(c, g, vs, *v.p, *v.pins, true) };
-      CHECK(same_all(got, want));
-    }
-  }
-  // Every pin leaves some frame to take; a profile changed takes none.
-  for (uint32_t const k : { 0U, 1U, 2U, 3U, 6U }) {
-    CAPTURE(k);
-    CHECK(taken[k] > 0);
-  }
-  CHECK(taken[4] == 0);
-}
-
-namespace {
-
-// `layout_run` on a corpus or gauntlet chart, with every frame a search takes from a base
-// ordered again and compared; label boxes of one fabricated size where `labelled`.
-void lay_out_checked(char const *name, bool labelled) {
-  CAPTURE(name);
-  CAPTURE(labelled);
-  Chart c;
-  load(name, c);
-  std::vector<scav_path_box> boxes;
-  for (uint32_t t = 0; labelled && (t < c.transitions.size()); ++t) {
-    Transition const &tr{ c.transitions[t] };
-    if ((tr.live == 0) || ((tr.src == tr.dst) && (tr.kind != TransKind::External))) {
-      continue;
-    }
-    boxes.push_back({ .subject = t, .w = 40, .h = 12, .order = 0 });
-  }
-  scav_spaces const s{ .box_state_stride = sizeof(scav_box_space),
-                       .path_box = boxes.data(),
-                       .n_path_box = static_cast<uint32_t>(boxes.size()),
-                       .path_box_stride = sizeof(scav_path_box) };
-  std::vector<scav_placed> placed;
-  std::vector<Diagnostic> diags;
-  scav_layout_opts const opts{ .profile = readable(), .router = 0, .threads = 0 };
-  order_test_reuse_verify(true);
-  REQUIRE(layout_run(c, s, opts, placed, diags));
-  CHECK(order_test_reused() > 0);
-  CHECK(order_test_reuse_mismatches() == 0);
-}
-
-}  // namespace
-
-TEST_CASE("order reuse: every frame a search takes is the frame ordering it gives" *
-          doctest::test_suite("full")) {
-  ReuseGuard const guard;
-  constexpr std::array<char const *, 8> SMALL{ "axis.scav",
-                                               "brew.scav",
-                                               "dock.scav",
-                                               "ota.scav",
-                                               "vac.scav",
-                                               "gauntlet/carried.scav",
-                                               "gauntlet/through.scav",
-                                               "gauntlet/level.scav" };
-  for (char const *name : SMALL) {
-    lay_out_checked(name, false);
-    lay_out_checked(name, true);
-  }
-}
-
-TEST_CASE("order reuse: every corpus and gauntlet chart at both scales" *
-          doctest::skip()) {
-  ReuseGuard const guard;
-  constexpr std::array<char const *, 39> ALL{ "axis.scav",
-                                              "bottler.scav",
-                                              "brew.scav",
-                                              "dock.scav",
-                                              "estop.scav",
-                                              "led.scav",
-                                              "mill.scav",
-                                              "ota.scav",
-                                              "tcp.scav",
-                                              "toolchanger.scav",
-                                              "vac.scav",
-                                              "gauntlet/above.scav",
-                                              "gauntlet/carried.scav",
-                                              "gauntlet/chain.scav",
-                                              "gauntlet/corner.scav",
-                                              "gauntlet/crossing.scav",
-                                              "gauntlet/crowd.scav",
-                                              "gauntlet/enclosing.scav",
-                                              "gauntlet/entered.scav",
-                                              "gauntlet/fanin.scav",
-                                              "gauntlet/folded.scav",
-                                              "gauntlet/fork.scav",
-                                              "gauntlet/lane.scav",
-                                              "gauntlet/level.scav",
-                                              "gauntlet/long.scav",
-                                              "gauntlet/loop.scav",
-                                              "gauntlet/marks.scav",
-                                              "gauntlet/mutual.scav",
-                                              "gauntlet/ported.scav",
-                                              "gauntlet/pulled.scav",
-                                              "gauntlet/regions.scav",
-                                              "gauntlet/roundtrip.scav",
-                                              "gauntlet/seated.scav",
-                                              "gauntlet/stretch.scav",
-                                              "gauntlet/through.scav",
-                                              "gauntlet/tight.scav",
-                                              "gauntlet/transit.scav",
-                                              "gauntlet/under.scav",
-                                              "gauntlet/unfolded.scav" };
-  for (char const *name : ALL) {
-    lay_out_checked(name, false);
-    lay_out_checked(name, true);
-  }
-}
-
-namespace {
-
-struct SizeReuseGuard {
-  SizeReuseGuard() = default;
-  SizeReuseGuard(SizeReuseGuard const &) = delete;
-  SizeReuseGuard &operator=(SizeReuseGuard const &) = delete;
-  ~SizeReuseGuard() {
-    size_test_reuse(true);
-    size_test_reuse_ignore_dar(false);
-    size_test_reuse_verify(false);
-  }
-};
-
-// `layout_run` on a corpus or gauntlet chart with every sizing that copies a frame sized
-// again without a base and compared; the sizings that differed.
-uint64_t sized_checked(char const *name,
-                       bool labelled,
-                       uint64_t &copied,
-                       uint64_t &framed) {
-  CAPTURE(name);
-  CAPTURE(labelled);
-  Chart c;
-  load(name, c);
-  std::vector<scav_path_box> boxes;
-  for (uint32_t t = 0; labelled && (t < c.transitions.size()); ++t) {
-    Transition const &tr{ c.transitions[t] };
-    if ((tr.live == 0) || ((tr.src == tr.dst) && (tr.kind != TransKind::External))) {
-      continue;
-    }
-    boxes.push_back({ .subject = t, .w = 40, .h = 12, .order = 0 });
-  }
-  scav_spaces const s{ .box_state_stride = sizeof(scav_box_space),
-                       .path_box = boxes.data(),
-                       .n_path_box = static_cast<uint32_t>(boxes.size()),
-                       .path_box_stride = sizeof(scav_path_box) };
-  std::vector<scav_placed> placed;
-  std::vector<Diagnostic> diags;
-  scav_layout_opts const opts{ .profile = readable(), .router = 0, .threads = 0 };
-  size_test_reuse_verify(true);
-  REQUIRE(layout_run(c, s, opts, placed, diags));
-  uint64_t live{ 0 };
-  for (Submachine const &m : c.submachines) { live += (m.live != 0) ? 1U : 0U; }
-  std::string const what{ std::string{ name } + (labelled ? " labelled: " : " bare: ") };
-  MESSAGE(what << size_test_reused() << " of " << size_test_framed()
-               << " frames copied, over " << (size_test_framed() / live) << " passes of "
-               << live);
-  copied += size_test_reused();
-  framed += size_test_framed();
-  return size_test_reuse_mismatches();
-}
-
-}  // namespace
-
-TEST_CASE("size reuse: a move in one composite copies its sibling's subtree") {
-  SizeReuseGuard const guard;
-  // `A` and `B` side by side, each with a frame; a cut in `B`'s drops a bend there.
-  Chart c;
-  SubmachineId const root{ build_chart(c, "two", {}) };
-  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
-  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  SubmachineId const in_b{ build_submachine(c, b, {}, {}) };
-  SubmachineId const in_a{ build_submachine(c, a, {}, {}) };
-  StateId const a1{ build_state(c, in_a, "A1", StateKind::Normal, {}) };
-  StateId const a2{ build_state(c, in_a, "A2", StateKind::Normal, {}) };
-  StateId const b1{ build_state(c, in_b, "B1", StateKind::Normal, {}) };
-  StateId const b2{ build_state(c, in_b, "B2", StateKind::Normal, {}) };
-  StateId const b3{ build_state(c, in_b, "B3", StateKind::Normal, {}) };
-  build_trans(c, a1, a2, TransKind::External, {});
-  build_trans(c, b1, b2, TransKind::External, {});
-  build_trans(c, b2, b3, TransKind::External, {});
-  TransId const longest{ build_trans(c, b1, b3, TransKind::External, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  SplitGraph const g{ decompose(c) };
-  scav_profile const p{ readable() };
-  scav_spaces const s{};
-  SearchPins moved;
-  moved.cuts.push_back({ .trans = longest, .leg = 0 });
-  SubmachineOrders const was{ order_submachines(c, g, s, p, 1, {}) };
-  SubmachineOrders const now{ order_submachines(c, g, s, p, 1, moved) };
-
-  for (DarSource const dar : { DarSource::Profile, DarSource::OwnerHole }) {
-    CAPTURE(static_cast<uint32_t>(dar));
-    uint32_t const passes{ (dar == DarSource::Profile) ? 1U : 2U };
-    SizeRecord base;
-    SizedLayout first;
-    std::vector<Diagnostic> diags;
-    REQUIRE(size_layout(c, g, was, s, p, first, diags, dar, {}, {}, nullptr, &base));
-    Sized const want{ sized(c, g, now, s, p, dar, Compaction::Off, Fold::Scale, true) };
-    REQUIRE(want.ok);
-
-    size_test_reuse_verify(true);
-    SizedLayout got;
-    SizeRecord again;
-    REQUIRE(size_layout(c, g, now, s, p, got, diags, dar, {}, {}, &base, &again));
-    CHECK(size_test_reused() == passes);  // `A`'s frame, not `B`'s or the root's
-    CHECK(size_test_framed() == 3 * passes);
-    CHECK(size_test_reuse_mismatches() == 0);
-    CHECK(same(got, want.z));
-    Span const at{ now.sub_nodes[in_a.v] };
-    Span const had{ was.sub_nodes[in_a.v] };
-    REQUIRE(at.len == had.len);
-    for (uint32_t k = 0; k < at.len; ++k) {
-      scav_point const &x{ got.node[at.off + k] };
-      scav_point const &y{ first.node[had.off + k] };
-      CHECK((x.x - got.sub[in_a.v].x) == (y.x - first.sub[in_a.v].x));
-      CHECK((x.y - got.sub[in_a.v].y) == (y.y - first.sub[in_a.v].y));
-    }
-
-    // The same ordering copies every frame from the record the second sizing left.
-    size_test_reuse_verify(true);
-    SizedLayout same_again;
-    REQUIRE(size_layout(c, g, now, s, p, same_again, diags, dar, {}, {}, &again, nullptr));
-    CHECK(size_test_reused() == 3 * passes);
-    CHECK(size_test_reuse_mismatches() == 0);
-    CHECK(same(same_again, want.z));
-
-    // Another profile copies nothing.
-    scav_profile wider{ p };
-    wider.node_sep += 4;
-    size_test_reuse_verify(true);
-    SizedLayout other;
-    REQUIRE(size_layout(c, g, now, s, wider, other, diags, dar, {}, {}, &again, nullptr));
-    CHECK(size_test_reused() == 0);
-  }
-}
-
-TEST_CASE("size reuse: every frame a search copies is the frame sizing gives" *
-          doctest::test_suite("full")) {
-  SizeReuseGuard const guard;
-  constexpr std::array<char const *, 8> SMALL{ "axis.scav",
-                                               "brew.scav",
-                                               "dock.scav",
-                                               "ota.scav",
-                                               "vac.scav",
-                                               "gauntlet/carried.scav",
-                                               "gauntlet/through.scav",
-                                               "gauntlet/level.scav" };
-  uint64_t copied{ 0 };
-  uint64_t framed{ 0 };
-  for (char const *name : SMALL) {
-    CHECK(sized_checked(name, false, copied, framed) == 0);
-    CHECK(sized_checked(name, true, copied, framed) == 0);
-  }
-  CHECK(copied > 0);
-  MESSAGE("copied " << copied << " of " << framed << " frames");
-}
-
-TEST_CASE("size reuse: a comparison that leaves out the owner's ratio is caught" *
-          doctest::test_suite("full")) {
-  SizeReuseGuard const guard;
-  size_test_reuse_ignore_dar(true);
-  uint64_t copied{ 0 };
-  uint64_t framed{ 0 };
-  uint64_t wrong{ 0 };
-  for (char const *name : { "ota.scav", "vac.scav", "axis.scav" }) {
-    wrong += sized_checked(name, false, copied, framed);
-    wrong += sized_checked(name, true, copied, framed);
-  }
-  CHECK(wrong > 0);
-}
-
-TEST_CASE("size reuse: every corpus and gauntlet chart at both scales" * doctest::skip()) {
-  SizeReuseGuard const guard;
-  constexpr std::array<char const *, 39> ALL{ "axis.scav",
-                                              "bottler.scav",
-                                              "brew.scav",
-                                              "dock.scav",
-                                              "estop.scav",
-                                              "led.scav",
-                                              "mill.scav",
-                                              "ota.scav",
-                                              "tcp.scav",
-                                              "toolchanger.scav",
-                                              "vac.scav",
-                                              "gauntlet/above.scav",
-                                              "gauntlet/carried.scav",
-                                              "gauntlet/chain.scav",
-                                              "gauntlet/corner.scav",
-                                              "gauntlet/crossing.scav",
-                                              "gauntlet/crowd.scav",
-                                              "gauntlet/enclosing.scav",
-                                              "gauntlet/entered.scav",
-                                              "gauntlet/fanin.scav",
-                                              "gauntlet/folded.scav",
-                                              "gauntlet/fork.scav",
-                                              "gauntlet/lane.scav",
-                                              "gauntlet/level.scav",
-                                              "gauntlet/long.scav",
-                                              "gauntlet/loop.scav",
-                                              "gauntlet/marks.scav",
-                                              "gauntlet/mutual.scav",
-                                              "gauntlet/ported.scav",
-                                              "gauntlet/pulled.scav",
-                                              "gauntlet/regions.scav",
-                                              "gauntlet/roundtrip.scav",
-                                              "gauntlet/seated.scav",
-                                              "gauntlet/stretch.scav",
-                                              "gauntlet/through.scav",
-                                              "gauntlet/tight.scav",
-                                              "gauntlet/transit.scav",
-                                              "gauntlet/under.scav",
-                                              "gauntlet/unfolded.scav" };
-  uint64_t copied{ 0 };
-  uint64_t framed{ 0 };
-  for (char const *name : ALL) {
-    CHECK(sized_checked(name, false, copied, framed) == 0);
-    CHECK(sized_checked(name, true, copied, framed) == 0);
-  }
-  MESSAGE("copied " << copied << " of " << framed << " frames");
 }

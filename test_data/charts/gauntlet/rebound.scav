@@ -1,0 +1,8 @@
+// A child out to its own composite, marked external: the route leaves the composite's
+// border and ends on it from outside.
+chart rebound "an external transition from a child to its composite" {
+  state Outer { state Inner, state Other, trans * -> Inner, trans Inner -> Other },
+
+  trans * -> Outer,
+  trans external Outer/Other -> Outer "restart",
+}

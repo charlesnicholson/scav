@@ -71,28 +71,24 @@ TEST_CASE("digest: the document name is not part of the model") {
 }
 
 TEST_CASE("digest: reformatting the source is not a model change") {
-  // Whitespace and the short keyword spellings are the printer's business.
+  // Whitespace and short keyword spellings hash alike.
   Chart const spaced{ lowered("chart c {\n  state A,\n  trans * -> A,\n}") };
   Chart const dense{ lowered("chart c { s A, t * -> A, }") };
   CHECK(chart_structural_hash(spaced) == chart_structural_hash(dense));
 }
 
 TEST_CASE("digest: the order two attributes were written in is not a model change") {
-  // `scav fmt` sorts attributes by key bytes, so the authored order and the
-  // canonical one are two producers of one model and have to agree.
   Chart const authored{ lowered(R"(chart c { @zeta = "1", @alpha = "2", })") };
   Chart const sorted{ lowered(R"(chart c { @alpha = "2", @zeta = "1", })") };
   CHECK(chart_structural_hash(authored) == chart_structural_hash(sorted));
 
-  // Namespaced keys compose to `ns:key`, which is what the printer sorts on.
+  // Namespaced keys compose to `ns:key` before sorting.
   Chart const blocked{ lowered(R"(chart c { @ns { b = "2", a = "1" }, })") };
   Chart const split{ lowered(R"(chart c { @ns:a = "1", @ns:b = "2", })") };
   CHECK(chart_structural_hash(blocked) == chart_structural_hash(split));
 }
 
 TEST_CASE("digest: one key's values keep the order they were written in") {
-  // The sort is stable for exactly this: a repeated key is a list, and a list
-  // that reordered itself would be a different model.
   Chart const ab{ lowered(R"(chart c { @k = "a", @k = "b", })") };
   Chart const ba{ lowered(R"(chart c { @k = "b", @k = "a", })") };
   CHECK(chart_structural_hash(ab) != chart_structural_hash(ba));
@@ -185,8 +181,7 @@ TEST_CASE("digest: the interned key id is not hashed, only its bytes") {
   CHECK(chart_attr_key_find(first, "alpha").v == 0);
   CHECK(chart_attr_key_find(second, "alpha").v == 1);  // different ids, same key
 
-  // The second chart holds a tombstoned Z, so the models differ overall; the
-  // narrower claim is that the digest carries each key's bytes.
+  // The tombstoned Z makes the digests differ; both must carry each key's bytes.
   auto const encoded = [](std::string_view text) {
     std::string out;
     for (uint32_t i = 0; i < 4; ++i) {

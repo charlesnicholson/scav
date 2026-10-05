@@ -1,0 +1,16 @@
+// A state whose only transition enters its composite through the composite's
+// trailing face: it sits at the composite's trailing end, nearest that face.
+chart resumed "a state entered through its composite's trailing face" {
+  state Box {
+    state First,
+    state Second,
+    state Resumed,
+    trans * -> First,
+    trans First -> Second,
+  },
+  state Outside,
+
+  trans * -> Box,
+  trans Box -> Outside "leave",
+  trans Outside -> Box/Resumed "back",
+}

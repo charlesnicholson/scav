@@ -1,11 +1,10 @@
-# Three subsystems: `lang` is bytes to statements and knows nothing about
-# entities, `model` is the entity arrays, `load` composes the two.
+# Three subsystems: `lang` turns bytes into statements, `model` holds the entity
+# arrays, and `load` composes the two.
 scav_static_library(scavcore
   # src/-root primitives belonging to no library; core compiles them, so anything
   # linking core reaches them.
   ../scav_xxhash.cpp
-  # Core-wide, owned by no subsystem: every layer below produces diagnostics,
-  # and c_api.cpp is the C projection of the whole public header.
+  # Core-wide sources outside the three subsystems: the C API and the diagnostics table.
   c_api.cpp
   diagnostics.cpp
   lang/lexer.cpp
@@ -28,18 +27,15 @@ scav_static_library(scavcore
 scav_install_library(scavcore core)
 scav_optimize_for_size(scavcore)
 
-# The redistributable: one shared object, with the static archives a build-time
-# decomposition. Each later library contributes its own c_api.cpp.
-# scavcore itself arrives transitively: every later library links it PUBLIC,
-# and a direct link here would repeat the archive on the link line.
+# The redistributable shared library, `scav`. Each later library adds its c_api.cpp
+# here and links in; scavcore comes transitively through their PUBLIC links.
 add_library(scav_shared SHARED c_api.cpp)
 scav_settings(scav_shared)
 target_include_directories(scav_shared PUBLIC
   "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>")
 set_target_properties(scav_shared PROPERTIES
   OUTPUT_NAME scav
-  # OUTPUT_NAME would land this on the scav executable's own PDB, and the two
-  # links race for the write. The PDB alone keeps the target name.
+  # The PDB keeps the target name, distinct from the scav executable's PDB.
   PDB_NAME scav_shared
 )
 scav_export_c_abi(scav_shared "${PROJECT_SOURCE_DIR}/abi/scav_abi.json")
@@ -47,8 +43,7 @@ scav_dead_code_strip(scav_shared)
 # The build tree keeps its symbols; `cmake --install --strip` removes them.
 install(TARGETS scav_shared)
 
-# Not in ALL and not a dependency of unicode_nfc.cpp: the .inc files are
-# committed, so a build needs neither the network nor Python.
+# Manual target: regenerates the committed NFC .inc tables, downloading the UCD.
 find_package(Python3 3.14 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
   add_custom_target(scav_core_unicode_tables
@@ -62,8 +57,8 @@ if(Python3_Interpreter_FOUND)
 endif()
 
 if(SCAV_BUILD_TESTS)
-  # Unit tests pair with their subject; everything suite-level lives in tests/,
-  # named by its class beside the fixtures it drives.
+  # Unit tests sit beside their subject; suite-level tests live in tests/, prefixed
+  # by class (functional, fuzz, perf).
   scav_tests(scav_core_tests
     TIMING "perf:*"
     c_api_tests.cpp
@@ -95,11 +90,10 @@ if(SCAV_BUILD_TESTS)
     tests/perf_model_tests.cpp
     tests/test_synth.cpp
     scav_core_tests.cpp
-    # The src/-root primitives standing in for the standard library's: they
-    # belong to no subsystem, so their tests sit beside them.
+    # Tests for the src/-root primitives that replace standard-library facilities.
     ../scav_int_tests.cpp
     ../scav_hash_map_tests.cpp
-    ../scav_inflate.cpp  # compiled into its tests and the CLI; no library carries it
+    ../scav_inflate.cpp  # also compiled into the inflate driver and the CLI
     ../scav_inflate_tests.cpp
     ../scav_stable_sort_tests.cpp
     ../scav_xxhash_tests.cpp
@@ -110,25 +104,18 @@ if(SCAV_BUILD_TESTS)
   add_executable(scav_inflate_driver ../scav_inflate_driver.cpp ../scav_inflate.cpp)
   scav_settings(scav_inflate_driver)
   target_link_libraries(scav_inflate_driver PRIVATE scavcore)
-  # A harness reporting nothing looks identical to one where all is well.
+  # Checks that the test binary reports a deliberately failing test as a failure.
   scav_expect_test_failure(scav_core_tests "*deliberate failure*")
 
-  # Floors, not times. Under instrumentation the numbers describe the
-  # instrumentation, so those configs shrink the input and skip the floor.
+  # Sanitizer and coverage builds are light: a smaller perf input and no MiB/s floors.
   set(scav_perf_light OFF)
   if(NOT SCAV_SANITIZER STREQUAL "NONE" OR SCAV_COVERAGE)
     set(scav_perf_light ON)
   endif()
-  # $<CONFIG:Debug> as well, because CMAKE_BUILD_TYPE is empty on the
-  # multi-config generators.
+  # Debug is light too, on single- and multi-config generators.
   set(scav_light "$<OR:$<BOOL:${scav_perf_light}>,$<CONFIG:Debug>>")
-  # Instrumentation makes a timing describe the instrumentation, so a light config
-  # never asserts one even when floors are asked for.
   set(scav_floors "$<AND:$<BOOL:${SCAV_PERF_FLOORS}>,$<NOT:${scav_light}>>")
-  # 100 MB is for the timing floors, which assert only on a named machine; 8 MB
-  # exposes a quadratic to the scaling and memory bounds in seconds.
-  # A rate needs a named machine; a ratio does not, and instrumentation scales
-  # both of its sides. So scaling asserts wherever the numbers mean anything.
+  # Input bytes: 4 MiB light, 100 MiB with timing floors, 8 MiB otherwise.
   target_compile_definitions(scav_core_tests PRIVATE
     "SCAV_PERF_INPUT_BYTES=$<IF:${scav_light},4194304,$<IF:${scav_floors},104857600,8388608>>"
     "SCAV_PERF_ASSERT_FLOOR=$<IF:${scav_floors},1,0>"

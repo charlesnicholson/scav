@@ -1,14 +1,14 @@
 #ifndef SCAV_LAYOUT_SIZE_H_INCLUDED
 #define SCAV_LAYOUT_SIZE_H_INCLUDED
 
-// Phase 2: extents composed bottom-up by the box formula, frame-local
-// positions from the ranks and the cross-axis assignment, then one descent
-// that makes every position root-absolute.
+// Phase 2: the box formula composes extents bottom-up, ranks and the cross-axis
+// assignment give frame-local positions, one descent makes them root-absolute.
 
 #include "layout/decompose.h"
 #include "layout/order.h"
 #include "layout/pack.h"
 #include "scav/scav_core.h"
+#include "scav/scav_layout.h"
 #include "scav/scav_layout_c.h"
 
 #include <array>
@@ -21,8 +21,11 @@ namespace scav {
 // Tombstones stay all-zero.
 struct SizedLayout {
   std::vector<scav_rect> state, before, after;  // parallel to states
-  std::vector<scav_rect> sub;                   // parallel to submachines
-  std::vector<scav_point> node;                 // parallel to the orders' nodes
+  std::vector<scav_rect> lead, trail;           // parallel to states: the side bands
+  std::vector<scav_rect> loop;      // parallel to states: its inner loops' room
+  std::vector<uint8_t> loop_place;  // parallel to states: the room's `face * 2 + end`
+  std::vector<scav_rect> sub;       // parallel to submachines
+  std::vector<scav_point> node;     // parallel to the orders' nodes
   // Parallel to the segments, or empty: 1 where a straight leg seats at the leading end of
   // its ends' overlap, with its label's room on the trailing side.
   std::vector<uint8_t> lean;
@@ -30,57 +33,85 @@ struct SizedLayout {
   scav_rect chart{};
 };
 
-// A desired aspect ratio as a pair, in the profile's own `[1, 1024]` bounds so
-// the packer's products stay where it proved them. `num` 0 is no ratio at all.
+// A desired aspect ratio as a pair in the profile's `[1, 1024]` bounds; `num` 0 means
+// no ratio.
 struct FrameDar {
   int32_t num{ 0 }, den{ 0 };
 };
 
-// Which ratio every packing inside a state's interior aims at: the profile's
-// one ratio at every depth, or the aspect of the hole the state leaves between
-// its two text bands, which is the rect its submachines are packed into
-// (11.4, 11.10). The hole is only knowable once the state is sized, so
-// `OwnerHole` sizes twice -- once at the profile's ratio to find the holes,
-// then again against them.
+// The ratio packings in a state's interior aim at: the profile's, or the aspect of the
+// hole inside its bands. `OwnerHole` sizes twice, first at the profile's ratio.
 enum class DarSource : uint32_t { Profile, OwnerHole };
 
-// Whether a frame's rank run may wrap. 11.4 lays a component out twice, once
-// unwrapped and once cut at the aspect target, and `Scale` keeps whichever the
-// scale measure prefers -- a local ratio that cannot see area. `Always` hands
-// `Cost` the folded shape instead, so the choice is scored rather than
-// arbitrated (11.10a). `Never` keeps the run unwrapped; a fold pin names one frame's.
+// Whether a frame's run may wrap; a fold pin overrides it per frame. `Scale` takes the
+// scale measure's pick, `Always` any fold that wraps, `Never` keeps the run unwrapped.
 enum class Fold : uint32_t { Scale, Always, Never };
 
-// One sizing pass's frame-local results and what its frames read, so a later pass copies
-// every frame whose inputs and descendants' inputs match rather than laying it out.
-struct SizePassRecord {
-  bool ok{ false };
-  uint32_t serial{ 0 };
-  scav_profile profile{};
-  Compaction compaction{ Compaction::Off };
+// One row of the search's table: the profile and the phase-2 tuple it lays out with.
+struct Row {
+  scav_profile knobs{};
+  DarSource dar{ DarSource::Profile };
+  Compaction pack{ Compaction::Off };
   Fold fold{ Fold::Scale };
-  SubmachineOrders orders;  // only the frame columns sizing reads are kept
-  std::vector<int32_t> seg_label_h, seg_label_w;
-  std::vector<uint32_t> port_seg;
-  std::vector<FrameDar> dar;          // per state, the ratio its interior packs to
-  std::vector<scav_box_space> box;    // per state
-  std::vector<scav_point> pre_node;   // per node, before its owner's packing moved it
-  std::vector<scav_point> pre_sub;    // per submachine, the extent before that packing
-  std::vector<uint8_t> edge_lean;     // per edge, its segment's lean as its frame left it
-  std::vector<scav_point> sub_local;  // per submachine, its place in its owner's packing
-  SizedLayout local;                  // the pass before its descent, frame-local
 };
 
-// A sizing's passes: the one at the profile's ratio, then the owner-hole one if any.
-struct SizeRecord {
-  std::array<SizePassRecord, 2> pass;
-};
+// A state's walls: top, bottom, the side bands stretched from the top band's top to the
+// bottom band's bottom, and the loop room extended to the free interior's boundary its
+// loops leave by.
+std::array<scav_rect, 5> state_walls(SizedLayout const &z, uint32_t st);
 
-// False on an extent that would leave the coordinate domain, with one
-// diagnostic per offending entity and `out` left partly written. `dar` and
-// `compaction` default to the row-0 tuple, which is the pipeline as it ran
-// before the portfolio existed. `base`, where given, is an earlier sizing's record whose
-// matching frames are copied; `record` receives this one's.
+// A loop room's face of the free interior (0 left, 1 right, 2 top, 3 bottom) and its end
+// on that face (0 leading, 1 trailing).
+struct LoopPlace {
+  uint32_t face{ 1 };
+  uint32_t end{ 1 };
+};
+// `z.loop_place[st]`, or the unpinned placement where `z` has no entry.
+LoopPlace loop_place(SizedLayout const &z, uint32_t st);
+// The unpinned placement: the trailing end of the first anchored face of right, left,
+// bottom, top; the right face where none is.
+LoopPlace loop_place_default(scav_spaces const &s, uint32_t state);
+// Whether legs leaving by `face` end on a drawn edge: no band lines it, or its band is
+// ruled.
+bool loop_anchored(scav_spaces const &s, uint32_t state, uint32_t face);
+// Where the legs of loops leaving by `face` end: the border, or the band's inner edge.
+int32_t loop_boundary(SizedLayout const &z, uint32_t st, uint32_t face);
+
+// Whether a band of `state` lines `face` (0 left, 1 right, 2 top, 3 bottom), which then
+// takes no port.
+bool face_lined(scav_spaces const &s, uint32_t state, uint32_t face);
+
+// One inner loop's row in its state's room: rows stack across the exit face in transition
+// order. The far leg runs `loop_reach` in from the exit face and spans the label stack
+// beyond it; `cross` runs along the exit face, `along` away from it.
+struct LoopRow {
+  int32_t label_w, label_h, lane, cross, along;  // `lane` between the legs
+};
+LoopRow loop_row(scav_profile const &p, scav_extent label, bool vertical);
+
+// Per inner loop, the extent its path boxes stack to.
+void loop_labels(Chart const &c, scav_spaces const &s, std::vector<scav_extent> &label);
+
+// Per state, the room its inner loops stack into for the placement `place[st]` gives
+// (`face * 2 + end`; the right face where `place` is short), and `label` as `loop_labels`.
+void loop_rooms(Chart const &c,
+                scav_spaces const &s,
+                scav_profile const &p,
+                std::vector<uint8_t> const &place,
+                std::vector<scav_extent> &label,
+                std::vector<scav_extent> &room);
+
+// Per transition, its inner loop's row across its state's room, zero for any other; and
+// `label` as `loop_labels` gives it.
+void loop_rows(Chart const &c,
+               SizedLayout const &z,
+               scav_spaces const &s,
+               scav_profile const &p,
+               std::vector<scav_extent> &label,
+               std::vector<scav_rect> &row);
+
+// False when an extent would leave the coordinate domain: one diagnostic per entity and
+// `out` partly written. The defaults are row 0's tuple.
 bool size_layout(Chart const &c,
                  SplitGraph const &g,
                  SubmachineOrders const &o,
@@ -90,9 +121,7 @@ bool size_layout(Chart const &c,
                  std::vector<Diagnostic> &diags,
                  DarSource dar = DarSource::Profile,
                  Compaction compaction = Compaction::Off,
-                 Fold fold = Fold::Scale,
-                 SizeRecord const *base = nullptr,
-                 SizeRecord *record = nullptr);
+                 Fold fold = Fold::Scale);
 
 }  // namespace scav
 

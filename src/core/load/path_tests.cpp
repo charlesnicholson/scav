@@ -1,5 +1,4 @@
-// A table, pinning the keys one include graph produces on a filesystem, in a
-// zip, and over HTTP.
+// Pins the keys `path_resolve` produces for filesystem, drive-letter and URL paths.
 
 #include "scav/scav_core.h"
 
@@ -13,7 +12,7 @@ namespace {
 
 using namespace scav;
 
-// Named so a failure reads as the claim rather than as three arguments.
+// Returns the resolved key, or "<rejected>" when `path_resolve` fails.
 std::string resolved(std::string_view base, std::string_view ref) {
   std::string out{ "pre-existing content" };  // assigned, never appended to
   return path_resolve(base, ref, out) ? out : std::string{ "<rejected>" };
@@ -42,8 +41,6 @@ TEST_CASE("path: `.` folds away and `//` collapses") {
 }
 
 TEST_CASE("path: two spellings of one document give one key") {
-  // The whole reason this function exists: if these disagreed, one transport
-  // would see two documents where another saw one.
   CHECK(resolved("x/vac.scav", "./dock.scav") == resolved("x/vac.scav", "dock.scav"));
   CHECK(resolved("x/vac.scav", "sub/../dock.scav") == resolved("x/vac.scav", "dock.scav"));
   CHECK(resolved("x/vac.scav", "./sub/./dock.scav") ==
@@ -58,8 +55,6 @@ TEST_CASE("path: `..` pops a segment") {
 }
 
 TEST_CASE("path: a `..` above a relative base is kept, not dropped") {
-  // Dropping it would fold `../x` and `../../x` onto the same key, which
-  // merges two genuinely different documents into one.
   CHECK(resolved("a/vac.scav", "../../dock.scav") == "../dock.scav");
   CHECK(resolved("a/vac.scav", "../../../dock.scav") == "../../dock.scav");
   CHECK(resolved("vac.scav", "../dock.scav") == "../dock.scav");
@@ -68,16 +63,13 @@ TEST_CASE("path: a `..` above a relative base is kept, not dropped") {
 }
 
 TEST_CASE("path: a `..` above an opaque root is dropped") {
-  // There is nothing above `/` or above an authority, so `/../x` and `/x` are
-  // the same document and folding them together is correct.
+  // Nothing lies above `/` or an authority, so `/../x` resolves to `/x`.
   CHECK(resolved("/a/vac.scav", "../../dock.scav") == "/dock.scav");
   CHECK(resolved("/a/vac.scav", "../dock.scav") == "/dock.scav");
   CHECK(resolved("https://h/a/vac.scav", "../../../dock.scav") == "https://h/dock.scav");
 }
 
 TEST_CASE("path: an absolute or scheme-carrying ref passes through verbatim") {
-  // Core does not interpret these: whether two of them name one file is fetch
-  // policy, and guessing would be worse than declining.
   CHECK(resolved("a/vac.scav", "/srv/dock.scav") == "/srv/dock.scav");
   CHECK(resolved("a/vac.scav", "https://h/dock.scav") == "https://h/dock.scav");
   CHECK(resolved("a/vac.scav", "/srv/./x/../dock.scav") == "/srv/./x/../dock.scav");
@@ -106,14 +98,13 @@ TEST_CASE("path: a drive letter is an opaque root, and stays one") {
   CHECK(resolved("C:/proj/vac.scav", "dock.scav") == "C:/proj/dock.scav");
   CHECK(resolved("C:/proj/vac.scav", "../dock.scav") == "C:/dock.scav");
   CHECK(resolved("C:/proj/vac.scav", "../../../dock.scav") == "C:/dock.scav");
-  // Drive-relative is a different place from drive-absolute, so no separator
-  // is invented here.
+  // A drive-relative base resolves with no separator after the drive.
   CHECK(resolved("C:vac.scav", "dock.scav") == "C:dock.scav");
 }
 
 TEST_CASE("path: a drive letter needs its separator to resolve under it") {
-  // What load_file's native-path conversion is for: spelled with backslashes,
-  // the drive prefix is the whole root and a sibling lands beside the drive.
+  // With backslashes the drive prefix is the whole root and a sibling resolves
+  // beside the drive; `load_file` converts them on Windows.
   CHECK(resolved("D:\\a\\vac.scav", "dock.scav") == "D:dock.scav");
   CHECK(resolved("D:/a/vac.scav", "dock.scav") == "D:/a/dock.scav");
 }
@@ -143,8 +134,8 @@ TEST_CASE("path: a rejected ref clears out rather than leaving it stale") {
 }
 
 TEST_CASE("path: resolving a resolved key against itself is a fixed point") {
-  // What the loader relies on when a document's own includes resolve against
-  // the key it was claimed under.
+  // The loader resolves a document's includes against the key it was claimed
+  // under.
   std::string const key{ resolved("a/b/vac.scav", "../c/dock.scav") };
   CHECK(key == "a/c/dock.scav");
   CHECK(resolved(key, "led.scav") == "a/c/led.scav");

@@ -1,5 +1,5 @@
-// Section 6's thread axis: every geometry column byte for byte and all three
-// hashes, serial against the pool and under the delay injector.
+// Thread determinism: every geometry column byte for byte and all three hashes, serial
+// against the pool and under the delay injector.
 
 #include "core/tests/corpus.h"
 #include "layout/shard.h"
@@ -17,12 +17,12 @@
 #include <string>
 #include <vector>
 
-// The shim's own hook, declared here rather than in a header: a no-op on the
-// null backend, and it must be set before any worker exists.
 namespace scav {
+// Seeds the thread shim's delay injector, 0 to disable; a no-op on the null backend.
+// Set it before any worker exists.
 void thread_test_delay_seed(uint64_t seed);
-// The portfolio's row count, which `layout.cpp` brackets with SCAV_INTERNAL.
-uint32_t search_tuple_count(scav_profile const &p, uint32_t entity_count);
+// The portfolio's row count; SCAV_INTERNAL in `layout.cpp`.
+uint32_t search_tuple_count(scav_profile const &p);
 }  // namespace scav
 
 namespace {
@@ -34,16 +34,24 @@ constexpr std::array<char const *, 4> CHARTS{ "brew.scav",
                                               "tcp.scav",
                                               "vac.scav" };
 
-// Every geometry column, `scav.geom.gen` included: each run below is on a
-// fresh chart, so its run count is one like every other's.
-constexpr std::array<char const *, 11> GEOM{
-  "scav.geom.state",  "scav.geom.state_before", "scav.geom.state_after",
-  "scav.geom.sub",    "scav.geom.route",        "scav.geom.port",
-  "scav.geom.point",  "scav.geom.portslot",     "scav.geom.chart",
-  "scav.geom.inputs", "scav.geom.gen"
-};
+// Every geometry column, `scav.geom.gen` included; each run below uses a fresh chart.
+constexpr std::array<char const *, 15> GEOM{ "scav.geom.state",
+                                             "scav.geom.state_before",
+                                             "scav.geom.state_after",
+                                             "scav.geom.state_lead",
+                                             "scav.geom.state_trail",
+                                             "scav.geom.state_loop",
+                                             "scav.geom.state_loop_place",
+                                             "scav.geom.sub",
+                                             "scav.geom.route",
+                                             "scav.geom.port",
+                                             "scav.geom.point",
+                                             "scav.geom.portslot",
+                                             "scav.geom.chart",
+                                             "scav.geom.inputs",
+                                             "scav.geom.gen" };
 
-// Restores the injector however a case leaves it, failed assertion included.
+// Disables the delay injector on scope exit.
 struct DelayGuard {
   DelayGuard() = default;
   DelayGuard(DelayGuard const &) = delete;
@@ -67,11 +75,7 @@ scav_profile readable() {
   return p;
 }
 
-// The 2k shapes with the move sweep off. What one thread count has to agree
-// with another about *in the search* is covered on the corpus below, at the
-// shipped depth and on every chart; what the scale targets are here for is the
-// sharded phases, and a blind sweep over a 2k neighbourhood multiplies those by
-// thousands of layouts that test nothing new (11.10).
+// Readable with Level 1 off and one portfolio row, for the 2k shapes.
 scav_profile scale_readable() {
   scav_profile p{ readable() };
   p.portfolio_k = 0;
@@ -113,15 +117,11 @@ Snapshot lay_out(Chart &c,
   return out;
 }
 
-// Reports which column moved rather than only that something did.
+// Compares the tuple, each hash and each column; a failure names the one that differs.
 void check_same(Snapshot const &got, Snapshot const &want) {
-  // The portfolio's own answer, beside the geometry it chose: a worker count
-  // that moved the pick would move every column under it, and this says which
-  // of the two happened.
   CHECK(got.tuple == want.tuple);
   for (uint32_t i = 0; i < HASHES.size(); ++i) {
-    // A `std::string`, because this doctest prints a `char const *` as the
-    // pointer and the point of the capture is which one moved.
+    // CAPTURE prints a `char const *` as a pointer.
     std::string const hash{ HASHES[i] };
     CAPTURE(hash);
     CHECK(got.hashes[i] == want.hashes[i]);
@@ -133,8 +133,7 @@ void check_same(Snapshot const &got, Snapshot const &want) {
   }
 }
 
-// A fresh load per run, so the pooled run reads no columns the serial one wrote:
-// `layout_run` rewrites them in place.
+// Lays out one fresh load serially and another on the pool, and compares them.
 void check_corpus_chart(std::string const &name, scav_profile const &p) {
   CAPTURE(name);
   Chart first;
@@ -145,8 +144,7 @@ void check_corpus_chart(std::string const &name, scav_profile const &p) {
   check_same(lay_out(c, p, 0), want);
 }
 
-// Shards with a frame to work on: the count comes from every entity, the
-// ranges are cut over submachines, so a one-frame chart busies one shard.
+// Shards whose submachine range is nonempty; a one-frame chart busies one shard.
 uint32_t busy_shards(Chart const &c) {
   uint32_t const shards{ layout_shard_count(c) };
   uint32_t const subs{ static_cast<uint32_t>(c.submachines.size()) };
@@ -163,9 +161,7 @@ void check_scale_chart(std::string const &name,
                        bool concurrent_frames) {
   CAPTURE(name);
   Chart first{ build() };
-  // Asserted rather than assumed, so neither case can quietly cover the other's
-  // path: the nested chart runs frames concurrently, the flat one has one frame
-  // and every other shard empty.
+  // The nested chart busies more than one shard; the flat chart busies exactly one.
   uint32_t const shards{ layout_shard_count(first) };
   uint32_t const busy{ busy_shards(first) };
   REQUIRE(shards > 1);
@@ -180,12 +176,8 @@ void check_scale_chart(std::string const &name,
   check_same(lay_out(c, p, 0), want);
 }
 
-// Three states nested one inside the next, and a self-loop on the innermost.
-// Every frame holds exactly one node in exactly one rank, so every packing in
-// the chart -- components, fold pieces, sibling submachines -- has one rect to
-// place and the box packer cannot produce a different one. A self-loop
-// contributes no ordering edge (11.3), so it gives the chart a route to score
-// without giving a frame a second node.
+// Three states nested one inside the next, with a self-loop on the innermost: every
+// packing places one rect, and the self-loop adds a route but no ordering edge.
 Chart tied_chart() {
   Chart c;
   SubmachineId parent{ build_chart(c, "tied", {}) };
@@ -194,7 +186,7 @@ Chart tied_chart() {
     at = build_state(c, parent, "S", StateKind::Normal, {});
     parent = build_submachine(c, at, {}, {});
   }
-  build_trans(c, at, at, TransKind::External, {});
+  build_trans(c, at, at, TransKind::Default, {});
   return c;
 }
 
@@ -212,25 +204,16 @@ int64_t timed(Chart &c, uint32_t threads) {
 }  // namespace
 
 TEST_CASE("determinism: the corpus lays out to one answer at every thread count") {
-  // Four chart-global candidates on each of these charts, since none of them
-  // reaches the 1,024 entities the scaling rule starts halving at: the pick is
-  // a real choice here rather than the one row a 2k shape runs. Four rather
-  // than the two that ship, so the claim covers the compaction rows the table
-  // holds unshipped -- a row nothing runs is a row nothing proves determinate.
+  // Four Level 2 rows: both box packers, each with and without compaction.
   scav_profile p{ readable() };
   p.portfolio_m = 4;
-  // **Not the shipped move budget.** What this case covers is breadth -- four
-  // charts, every worker count, every row of the table -- and the sweep is a
-  // multiplier on all three. The search's own thread-invariance is the case
-  // below, at the depth that ships, on the charts that move the most (11.10).
+  // A move budget of 24, below the shipped 1024; the next case runs the shipped depth.
   p.portfolio_k = 24;
   REQUIRE(profile_validate(p));
+  REQUIRE(search_tuple_count(p) == 4);
   std::string shards;
   for (char const *name : CHARTS) {
     if (scav::test::corpus_skipped(name)) { continue; }
-    Chart sized;
-    load_corpus(name, sized);
-    REQUIRE(search_tuple_count(p, layout_entity_count(sized)) == 4);
     check_corpus_chart(name, p);
 
     Chart c;
@@ -240,23 +223,17 @@ TEST_CASE("determinism: the corpus lays out to one answer at every thread count"
     shards += std::to_string(layout_shard_count(c));
     shards += ' ';
   }
-  // Most of the corpus is under 64 entities and shards to one, so the corpus
-  // alone does not reach the multi-shard path; the scale targets below do.
+  // Reports each chart's shard count; the scale targets below cover multiple shards.
   MESSAGE("corpus shard counts: ", shards);
 }
 
 TEST_CASE("determinism: a searched drawing is the same drawing at every thread count" *
           doctest::test_suite("full")) {
-  // The depth that ships. **This is the case that matters now that candidates
-  // are scored in parallel** (11.10c) and rows, finishes and kicks run side by
-  // side (11.10f): every one of them is fanned out and reduced in enumeration
-  // order, and if a reduction were order-dependent it is here it would show.
-  // Breadth is the case above; this one is depth. Small charts, because
-  // single-threaded `mill` at the depth that ships is over twelve minutes and
-  // these exercise every stage: `estop` and `led` accept a reversal kick,
-  // `dock` and `brew` finish more than one row.
+  // The shipped search depth on small charts: parallel candidates, rows, finishes and
+  // kicks reduce in enumeration order at every thread count.
   scav_profile const p{ readable() };
-  for (char const *name : { "estop.scav", "led.scav", "dock.scav", "brew.scav" }) {
+  for (char const *name :
+       { "estop.scav", "kiln.scav", "led.scav", "dock.scav", "brew.scav" }) {
     CAPTURE(name);
     Chart first;
     load_corpus(name, first);
@@ -313,10 +290,8 @@ TEST_CASE("determinism: the flat target survives the injector too" *
   }
 }
 
-// Skipped: `sealed_chart` no longer seals. Its seal was the router starting a
-// route outside the state it runs inside, and with the enclosure rule
-// (11.10g) it routes at its drawn size; no fixture is known that seals, so
-// the spacing retry these pin has nothing to retry on. [OWED] in 11.10g.
+// Skipped: `sealed_chart` routes at its drawn size, and no known fixture makes the
+// spacing retry run.
 TEST_CASE("determinism: an inflating retry re-enters the sharded phases the same way" *
           doctest::skip()) {
   scav_profile const p{ sealed_profile(readable()) };
@@ -332,17 +307,14 @@ TEST_CASE("determinism: an inflating retry re-enters the sharded phases the same
 }
 
 TEST_CASE("determinism: two tuples that tie keep the lower row, at every count") {
-  // One component per frame, so both packers place one rect and every row of
-  // the table produces the same geometry. `cost_less` is strict, so a tie is
-  // the lower index -- and a reduction that folded into a shared best-so-far
-  // would be free to answer differently per worker count.
+  // One component per frame: every table row yields the same geometry, and the strict
+  // `cost_less` keeps the lower row at every worker count.
   scav_profile const p{ readable() };
   Chart reference{ tied_chart() };
   Snapshot const want{ lay_out(reference, p, 1) };
   CHECK(want.tuple == 0);
 
-  // What makes it a tie rather than row 0 simply winning: the flipped row on
-  // its own writes the same bytes.
+  // The flipped row alone writes the same geometry: the rows tie.
   scav_profile flipped{ p };
   flipped.portfolio_m = 1;
   flipped.trybox = (p.trybox != 0) ? 0 : 1;
@@ -350,7 +322,7 @@ TEST_CASE("determinism: two tuples that tie keep the lower row, at every count")
   Snapshot const other{ lay_out(alone, flipped, 1) };
   CHECK(other.tuple == 0);
   for (uint32_t i = 0; i < GEOM.size(); ++i) {
-    // The inputs digest hears the flipped knob; nothing else does.
+    // Only the inputs column records the flipped knob.
     if (std::string{ GEOM[i] } != "scav.geom.inputs") {
       CHECK(other.columns[i] == want.columns[i]);
     }

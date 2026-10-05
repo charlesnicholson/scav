@@ -1,20 +1,17 @@
 #!/usr/bin/env python3
 """Generate scav's NFC tables and conformance vectors from the Unicode UCD.
 
-Lives beside the code it generates, and writes beside itself, because nothing
-outside src/core/lang/ has any use for it. Run it through the build:
+Run it through the build:
 
     cmake --build <dir> --target scav_core_unicode_tables
 
-or directly, which needs no arguments because every path is script-relative:
+or directly; default paths are relative to the script:
 
     src/core/lang/gen_unicode_tables.py --download
     src/core/lang/gen_unicode_tables.py --ucd-dir /path/to/ucd
 
-Text is normalized at parse, so NFC needs a
-table. The output is committed, so an ordinary build needs neither the network
-nor Python -- run this only when the pinned Unicode version moves, and remember
-that the version is a determinism input.
+The outputs are committed. Rerun only when UNICODE_VERSION changes; the version
+is a determinism input.
 
 Inputs (all from the same UCD release):
     UnicodeData.txt                canonical decompositions, combining classes
@@ -34,7 +31,7 @@ import sys
 import urllib.request
 from pathlib import Path
 
-# Beside this script, and the repo root four levels up: src/core/lang/ -> repo.
+# The script's directory, and the repo root three directories above it.
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[2]
 
@@ -46,7 +43,7 @@ UCD_FILES = (
     "NormalizationTest.txt",
 )
 
-# Hangul, composed algorithmically rather than from a table (Unicode 3.12).
+# Precomposed Hangul syllable block (Unicode 3.12).
 HANGUL_S_BASE = 0xAC00
 HANGUL_L_COUNT = 19
 HANGUL_V_COUNT = 21
@@ -76,9 +73,8 @@ def fetch(ucd_dir: Path, download: bool) -> dict[str, str]:
 
 def parse_unicode_data(text: str) -> tuple[dict[int, int], dict[int, list[int]]]:
     """-> (combining class by codepoint, canonical decomposition by codepoint).
-
-    Compatibility mappings carry a <tag> prefix and are not canonical, so they are
-    dropped: scav normalizes to NFC, never NFKC."""
+    Skips compatibility mappings, which carry a <tag> prefix.
+    """
     ccc: dict[int, int] = {}
     decomp: dict[int, list[int]] = {}
     for line in text.splitlines():
@@ -114,8 +110,7 @@ def parse_derived_props(text: str) -> tuple[set[int], set[int]]:
 
 
 def full_decompose(cp: int, decomp: dict[int, list[int]]) -> list[int]:
-    """Canonical decomposition is recursive; expanding here keeps the runtime a
-    single lookup instead of a fixed-point loop."""
+    """Full canonical decomposition of `cp`, expanded recursively."""
     if cp not in decomp:
         return [cp]
     out: list[int] = []
@@ -135,12 +130,9 @@ def to_ranges(codepoints: set[int]) -> list[tuple[int, int]]:
 
 
 def emit_array(name: str, ctype: str, values: list[str], per_line: int) -> str:
-    """std::array rather than a C array: the pinned clang-tidy rejects the latter,
-    and a generated file that cannot pass the project's own lint is a file
-    someone will end up excluding from the lint."""
+    """C++ source for a constexpr std::array `name`, `per_line` values per line."""
     if not values:
-        # std::array<T, 0>::data() may be null, so emit one dead element and let
-        # the count constant be the guard.
+        # One placeholder element; the count constant bounds reads.
         return f"constexpr std::array<{ctype}, 1> {name}{{ 0 }};\n"
     lines = []
     for i in range(0, len(values), per_line):
@@ -288,11 +280,10 @@ def build_tables(ccc: dict[int, int],
     return "".join(out)
 
 
-# Part 1 shares UnicodeData.txt with the tables, so it thins to a fixed stride
-# plus every Hangul row. Other parts stay whole.
+# Part 1 keeps non-Hangul rows whose index in the part is a multiple of PART1_STRIDE.
+# Other parts are kept whole.
 PART1_STRIDE = 6
-# The 11,172 precomposed Hangul syllables are uniform by construction, so a
-# coprime stride walks every L / V / T position without carrying all of them.
+# Part 1 keeps every PART1_HANGUL_STRIDE-th Hangul row, covering every L, V and T index.
 PART1_HANGUL_STRIDE = 41
 HANGUL_RANGES = ((0x1100, 0x11FF), (0xA960, 0xA97F), (0xAC00, 0xD7FF))
 
@@ -304,16 +295,9 @@ def is_hangul(codepoints: list[int]) -> bool:
 
 
 def build_vectors(text: str) -> str:
-    """The conformance suite as codepoint arrays.
-
-    Only the NFC invariants are kept -- scav does not implement NFD or NFK*, so
-    carrying those columns would be dead data. For each row `c1;c2;c3;c4;c5`:
-    NFC(c1) == NFC(c2) == NFC(c3) == c2, and NFC(c4) == NFC(c5) == c4.
-
-    A case is `source` then `expected` back to back in one flat array, so only
-    the two lengths are stored and the offsets accumulate at read time. An
-    expected length of zero means "expected equals source", which is a third of
-    the suite and would otherwise be stored twice."""
+    """NFC cases per row `c1;c2;c3;c4;c5`: c1, c2, c3 map to c2; c4, c5 map to c4.
+    `flat` holds each source then expected; expected length 0 means equal to source.
+    """
     flat: list[int] = []
     lens: list[tuple[int, int]] = []
     kept: dict[int, int] = {}
@@ -390,8 +374,7 @@ def main() -> int:
     ccc, decomp = parse_unicode_data(ucd["UnicodeData.txt"])
     qc_not_yes, excluded = parse_derived_props(ucd["DerivedNormalizationProps.txt"])
 
-    # Hangul is algorithmic in both directions, so a table entry would be dead
-    # weight and a source of disagreement with the code path that handles it.
+    # Drops Hangul syllable decompositions; unicode_nfc.cpp computes them.
     for cp in range(HANGUL_S_BASE, HANGUL_S_BASE + HANGUL_S_COUNT):
         decomp.pop(cp, None)
 

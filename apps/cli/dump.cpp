@@ -1,5 +1,5 @@
-// The model, entity rows rather than syntax: for a terminal by default, `--json`
-// for a consumer that is not C++, `--hash` for comparing two transports.
+// `scav dump`: the model's entity rows as text or `--json`, or its structural hash
+// with `--hash`; `--layout` adds geometry.
 
 #include "cli.h"
 
@@ -22,13 +22,13 @@ namespace {
 
 // The text dump ============================================================
 
-// Where a statement started, as "file:line". False when the element has no
-// statement -- built from code, or the chart row of a hand-made model.
+// Where a statement starts: document path and one-based line.
 struct Loc {
   std::string_view file;
   uint32_t line;
 };
 
+// False when `stmt` names no statement in `c`, as for an element built from code.
 bool stmt_loc(Chart const &c, StmtId stmt, Loc &out) {
   if ((stmt.v == INVALID) || (stmt.v >= c.stmts.size())) { return false; }
   Statement const &st{ c.stmts[stmt.v] };
@@ -57,7 +57,7 @@ void append_indent(std::string &out, uint32_t depth) {
 
 void append_quoted(std::string &out, std::string_view text) {
   out += " \"";
-  out += text;  // verbatim; this is a dump, not the canonical printer
+  out += text;  // verbatim, unescaped
   out += '"';
 }
 
@@ -105,8 +105,7 @@ void append_model(std::string &out, Chart const &c) {
   out += '\n';
   append_attrs(out, c, { .kind = ElemKind::Chart, .ordinal = 0 }, 1);
 
-  // Bounds-checked throughout: dump prints a model validation may have
-  // rejected, so no reference here can be assumed good.
+  // Every reference is bounds-checked; dump also prints models validation rejected.
   auto const trans_by_sub{ [&] {
     std::vector<std::vector<uint32_t>> by_sub(c.submachines.size());
     for (uint32_t i = 0; i < c.transitions.size(); ++i) {
@@ -198,7 +197,7 @@ void append_model(std::string &out, Chart const &c) {
           chart_path_of(c, t.src, out);
           out += " -> ";
           chart_path_of(c, t.dst, out);
-          if (t.kind != TransKind::External) {
+          if (t.kind != TransKind::Default) {
             out += ' ';
             out += syntax_trans_kind_name(t.kind);
           }
@@ -215,8 +214,7 @@ void append_model(std::string &out, Chart const &c) {
     }
   }
 
-  // The edge list, after the tree. An include's content already printed under
-  // its alias state; this says which alias instantiates which document.
+  // The include edges, after the tree: each alias and the document it instantiates.
   for (Include const &inc : c.includes) {
     append_indent(out, 1);
     out += "include ";
@@ -235,8 +233,7 @@ void append_model(std::string &out, Chart const &c) {
 
 // The geometry projection ==================================================
 
-// A cost term, which is int64: the core's appender stops at u32 and the
-// weighted sum reaches 2^54. Negating through unsigned so INT64_MIN prints.
+// Appends `v` in decimal, INT64_MIN included.
 void append_i64v(std::string &out, int64_t v) {
   bool const neg{ v < 0 };
   uint64_t mag{ neg ? (~static_cast<uint64_t>(v) + 1U) : static_cast<uint64_t>(v) };
@@ -250,7 +247,7 @@ void append_i64v(std::string &out, int64_t v) {
   while (n != 0U) { out += digits[--n]; }
 }
 
-// A signed grid coordinate; the domain is symmetric, so minus must print.
+// Appends a signed grid coordinate in decimal.
 void append_i32v(std::string &out, int32_t v) {
   if (v < 0) {
     out += '-';
@@ -282,18 +279,123 @@ void append_rect(std::string &out, scav_rect r) {
   append_i32v(out, r.h);
 }
 
-// The Tier-2 terms in CostTerms order, which is the order `cost_shares`
-// answers in, so a name and a share never come apart.
+// Tier-2 term names in CostTerms order, the order `cost_shares` returns.
 constexpr std::array<char const *, TIER2_TERMS> TERMS{
   "bends",  "corridor",      "crossings", "excess_len", "adjacency",
   "label",  "label_near",    "aspect",    "area",       "crowding",
   "length", "transit_bends", "whitespace"
 };
 
+// Per Tier-2 term, the power of the em it is divided by before weighting: 0 counts, 1
+// lengths, 2 areas.
+constexpr std::array<uint32_t, TIER2_TERMS> EM_POWER{
+  0, 1, 0, 1, 0, 0, 1, 1, 2, 1, 1, 0, 2
+};
+
 std::array<int64_t, TIER2_TERMS> term_values(CostTerms const &t) {
   return { t.bends,  t.corridor,      t.crossings, t.excess_len, t.adjacency,
            t.label,  t.label_near,    t.aspect,    t.area,       t.crowding,
            t.length, t.transit_bends, t.whitespace };
+}
+
+// The profile values layout reads and the spacing it derives from them, parallel to
+// `profile_values`.
+constexpr std::array<char const *, 35> PROFILE{ "em",
+                                                "line_height",
+                                                "pad",
+                                                "rank_sep",
+                                                "node_sep",
+                                                "sub_sep",
+                                                "dar_num",
+                                                "dar_den",
+                                                "route_clearance",
+                                                "border_band",
+                                                "box_clearance",
+                                                "bend_penalty",
+                                                "label_leader",
+                                                "loop_gap",
+                                                "loop_reach",
+                                                "loop_lane",
+                                                "w_bends",
+                                                "w_corridor",
+                                                "w_crossings",
+                                                "w_excess_len",
+                                                "w_adjacency",
+                                                "w_label",
+                                                "w_label_near",
+                                                "w_aspect",
+                                                "w_area",
+                                                "w_crowding",
+                                                "w_length",
+                                                "w_transit_bends",
+                                                "w_whitespace",
+                                                "portfolio_m",
+                                                "lane_pitch",
+                                                "portfolio_k",
+                                                "sweep_count",
+                                                "spacing_inflation_cap",
+                                                "spacing_inflation_increment" };
+
+int64_t imax64(int64_t a, int64_t b) { return (a > b) ? a : b; }
+
+std::array<int64_t, PROFILE.size()> profile_values(scav_profile const &p) {
+  return { p.font_size_grid,
+           label_line_height(p),
+           p.pad,
+           p.rank_sep,
+           p.node_sep,
+           p.sub_sep,
+           p.dar_num,
+           p.dar_den,
+           route_clearance(p),
+           border_band(p),
+           box_clearance(p),
+           route_bend_penalty(p),
+           label_leader(p),
+           loop_gap(p),
+           loop_reach(p),
+           loop_lane(p),
+           p.w_bends,
+           p.w_corridor,
+           p.w_crossings,
+           p.w_excess_len,
+           p.w_adjacency,
+           p.w_label,
+           p.w_label_near,
+           p.w_aspect,
+           p.w_area,
+           p.w_crowding,
+           p.w_length,
+           p.w_transit_bends,
+           p.w_whitespace,
+           p.portfolio_m,
+           imax64(route_clearance(p), p.font_size_grid),  // the orthogonal router's lanes
+           p.portfolio_k,
+           p.sweep_count,
+           p.spacing_inflation_cap,
+           p.spacing_inflation_increment };
+}
+
+// Appends ` name value` per state kind: `kind_min_w` and `kind_min_h`, the least interior.
+template <typename Write>
+void each_kind_min(scav_profile const &p, Write write) {
+  for (uint32_t k = 0; k < 9; ++k) {
+    std::string name{ "min_w." };
+    name += syntax_state_kind_name(static_cast<StateKind>(k));
+    write(name, p.kind_min_w[k]);
+    name.replace(0, 5, "min_h");
+    write(name, p.kind_min_h[k]);
+  }
+}
+
+// The least straight run at each end of transition `t`, zero past the table.
+scav_path_clear trans_clear(scav_spaces const &s, uint32_t t) {
+  return (t < s.n_path_clear) ? s.path_clear[t] : scav_path_clear{};
+}
+
+// `scav_box_space::ruled` per state, 0 past the table.
+uint32_t state_ruled(scav_spaces const &s, uint32_t st) {
+  return (st < s.n_box_state) ? s.box_state[st].ruled : 0U;
 }
 
 void append_geometry_text(std::string &out,
@@ -308,6 +410,10 @@ void append_geometry_text(std::string &out,
   auto const state{ geom_rows<scav_rect>(c, "scav.geom.state") };
   auto const before{ geom_rows<scav_rect>(c, "scav.geom.state_before") };
   auto const after{ geom_rows<scav_rect>(c, "scav.geom.state_after") };
+  auto const lead{ geom_rows<scav_rect>(c, "scav.geom.state_lead") };
+  auto const trail{ geom_rows<scav_rect>(c, "scav.geom.state_trail") };
+  auto const loop{ geom_rows<scav_rect>(c, "scav.geom.state_loop") };
+  auto const loop_place{ geom_rows<uint32_t>(c, "scav.geom.state_loop_place") };
   auto const sub{ geom_rows<scav_rect>(c, "scav.geom.sub") };
   auto const routes{ geom_rows<scav_span>(c, "scav.geom.route") };
   auto const points{ geom_rows<scav_point>(c, "scav.geom.point") };
@@ -327,8 +433,7 @@ void append_geometry_text(std::string &out,
     out += '\n';
   }
 
-  // The objective over those columns, so a candidate carries the number that
-  // ranked it beside the geometry it ranked (11.6, 11.10).
+  // The objective over those columns, printed beside the geometry it scored.
   Cost const scored{ cost_of(terms, p) };
   std::array<int64_t, TIER2_TERMS> const values{ term_values(terms) };
   std::array<int64_t, TIER2_TERMS> const shares{ cost_shares(terms, p) };
@@ -336,35 +441,43 @@ void append_geometry_text(std::string &out,
   append_i32v(out, scored.t0_violations);
   out += " t2 ";
   append_i64v(out, scored.t2);
-  out += "\n    tier0 through_box ";
-  append_i32v(out, terms.through_box);
-  out += " box_overlap ";
-  append_i32v(out, terms.box_overlap);
-  out += " flush ";
-  append_i32v(out, terms.flush);
-  out += " through_region ";
-  append_i32v(out, terms.through_region);
-  out += " retrace ";
-  append_i32v(out, terms.retrace);
-  out += " label_over_box ";
-  append_i32v(out, terms.label_over_box);
-  out += " label_over_route ";
-  append_i32v(out, terms.label_over_route);
+  out += "\n    tier0";
+  std::array<int32_t, TIER0_TERMS> const t0{ tier0_terms(terms) };
+  for (uint32_t i = 0; i < TIER0_TERMS; ++i) {
+    out += ' ';
+    out += TIER0_NAMES[i];
+    out += ' ';
+    append_i32v(out, t0[i]);
+  }
   out += '\n';
   for (uint32_t i = 0; i < TIER2_TERMS; ++i) {
     out += "    ";
     out += TERMS[i];
     out += ' ';
     append_i64v(out, values[i]);
+    out += " em_power ";
+    string_append_u32(out, EM_POWER[i]);
     out += " share ";
     append_i64v(out, shares[i]);
     out += "bp\n";
   }
-  out += "  label leader ";
-  append_i32v(out, label_leader(p));
+  out += "  profile";
+  std::array<int64_t, PROFILE.size()> const prof{ profile_values(p) };
+  for (uint32_t i = 0; i < PROFILE.size(); ++i) {
+    out += ' ';
+    out += PROFILE[i];
+    out += ' ';
+    append_i64v(out, prof[i]);
+  }
+  each_kind_min(p, [&](std::string const &name, int32_t v) {
+    out += ' ';
+    out += name;
+    out += ' ';
+    append_i32v(out, v);
+  });
   out += '\n';
   for (uint32_t i = 0; i < placed.size(); ++i) {
-    out += "    placed t";
+    out += "  placed t";
     string_append_u32(out, (i < s.n_path_box) ? s.path_box[i].subject : INVALID);
     out += ' ';
     append_rect(out, placed[i]);
@@ -380,6 +493,44 @@ void append_geometry_text(std::string &out,
     append_rect(out, before[i]);
     out += " after ";
     append_rect(out, after[i]);
+    if ((i < lead.size()) && (i < trail.size()) &&
+        ((lead[i].w != 0) || (trail[i].w != 0))) {
+      out += " lead ";
+      append_rect(out, lead[i]);
+      out += " trail ";
+      append_rect(out, trail[i]);
+    }
+    if (int32_t const r{ state_corner_radius(c.states[i].kind, state[i], p.pad) };
+        r != 0) {
+      out += " corner ";
+      append_i32v(out, r);
+    }
+    if (state_ruled(s, i) != 0) {
+      out += " ruled ";
+      string_append_u32(out, state_ruled(s, i));
+    }
+    if ((i < loop.size()) && (i < loop_place.size()) &&
+        ((loop[i].w != 0) || (loop[i].h != 0))) {
+      out += " loop ";
+      append_rect(out, loop[i]);
+      out += " face ";
+      string_append_u32(out, loop_place[i] / 2U);
+      out += " end ";
+      string_append_u32(out, loop_place[i] % 2U);
+    }
+    out += '\n';
+  }
+  std::vector<OccupiedSpan> occupied;
+  layout_occupied_spans(c, p, occupied);
+  for (OccupiedSpan const &o : occupied) {
+    out += "  occupied ";
+    chart_path_of(c, { o.obstacle }, out);
+    out += " face ";
+    string_append_u32(out, o.face);
+    out += ' ';
+    append_i32v(out, o.lo);
+    out += "..";
+    append_i32v(out, o.lo + o.len);
     out += '\n';
   }
   for (uint32_t m = 0; m < sub.size(); ++m) {
@@ -404,12 +555,24 @@ void append_geometry_text(std::string &out,
       append_i32v(out, pt.y);
       out += ')';
     }
+    scav_path_clear const clear{ trans_clear(s, t) };
+    if ((clear.src != 0) || (clear.dst != 0)) {
+      out += " clear ";
+      append_i32v(out, clear.src);
+      out += ' ';
+      append_i32v(out, clear.dst);
+    }
     for (uint32_t k = 0; k < port_spans[t].len; ++k) {
       scav_port_slot const sl{ slots[port_spans[t].off + k] };
       out += " port s";
       string_append_u32(out, sl.side);
       out += " d";
       string_append_u32(out, sl.boundary_depth);
+      out += " (";
+      append_i32v(out, sl.x);
+      out += ',';
+      append_i32v(out, sl.y);
+      out += ')';
     }
     out += '\n';
   }
@@ -418,7 +581,7 @@ void append_geometry_text(std::string &out,
 // The JSON projection ======================================================
 
 // One array per entity array, one field per row field, ids as numbers and
-// INVALID as null. Output only: no comments, and no canonical byte form.
+// INVALID as null.
 
 void append_json_string(std::string &out, std::string_view text) {
   constexpr std::string_view HEX{ "0123456789abcdef" };
@@ -439,7 +602,7 @@ void append_json_string(std::string &out, std::string_view text) {
           out += HEX[(b >> 4U) & 0xFU];
           out += HEX[b & 0xFU];
         } else {
-          out += ch;  // UTF-8 passes through, which JSON permits
+          out += ch;  // UTF-8 passes through unescaped
         }
         break;
     }
@@ -447,7 +610,7 @@ void append_json_string(std::string &out, std::string_view text) {
   out += '"';
 }
 
-// `null` rather than 4294967295, so a consumer need not know the sentinel.
+// An id, or `null` for INVALID.
 void append_json_id(std::string &out, uint32_t id) {
   if (id == INVALID) {
     out += "null";
@@ -456,8 +619,7 @@ void append_json_id(std::string &out, uint32_t id) {
   string_append_u32(out, id);
 }
 
-// One `{...}` object under construction. `n` counts fields written, which is
-// what puts the separator before the second and not the first.
+// One `{...}` object under construction; `n` counts the fields written.
 struct Row {
   std::string *out;
   uint32_t n;
@@ -497,8 +659,7 @@ void row_ids(Row &r, std::string_view key, Ids const &ids, Span span) {
   *r.out += ']';
 }
 
-// A span reads as the row indices it covers, which is how a consumer reaches
-// into the flat array it points at.
+// Writes a span as the list of row indices it covers.
 void row_range(Row &r, std::string_view key, Span span) {
   row_key(r, key);
   *r.out += '[';
@@ -567,8 +728,7 @@ void append_json_rect(std::string &out, scav_rect r) {
   out += ']';
 }
 
-// Row-major arrays keyed by entity ordinal, the columnar model's own shape, so
-// a renderer indexes geometry with the ids the entity arrays already use.
+// The geometry as JSON arrays indexed by entity ordinal.
 void append_geometry_json(std::string &out,
                           Chart const &c,
                           CostTerms const &terms,
@@ -592,8 +752,7 @@ void append_geometry_json(std::string &out,
     out += '"';
   }
 
-  // The objective over those columns, so a candidate carries the number that
-  // ranked it beside the geometry it ranked (11.6, 11.10).
+  // The objective over those columns, printed beside the geometry it scored.
   Cost const scored{ cost_of(terms, p) };
   std::array<int64_t, TIER2_TERMS> const values{ term_values(terms) };
   std::array<int64_t, TIER2_TERMS> const shares{ cost_shares(terms, p) };
@@ -601,45 +760,53 @@ void append_geometry_json(std::string &out,
   append_i32v(out, scored.t0_violations);
   out += ",\n      \"t2\": ";
   append_i64v(out, scored.t2);
-  out += ",\n      \"through_box\": ";
-  append_i32v(out, terms.through_box);
-  out += ",\n      \"box_overlap\": ";
-  append_i32v(out, terms.box_overlap);
-  out += ",\n      \"flush\": ";
-  append_i32v(out, terms.flush);
-  out += ",\n      \"through_region\": ";
-  append_i32v(out, terms.through_region);
-  out += ",\n      \"retrace\": ";
-  append_i32v(out, terms.retrace);
-  out += ",\n      \"label_over_box\": ";
-  append_i32v(out, terms.label_over_box);
-  out += ",\n      \"label_over_route\": ";
-  append_i32v(out, terms.label_over_route);
-  for (uint32_t i = 0; i < TIER2_TERMS; ++i) {
-    out += ",\n      ";
-    append_json_string(out, TERMS[i]);
-    out += ": ";
-    append_i64v(out, values[i]);
-  }
-  out += ",\n      \"shares_bp\": [";
-  for (uint32_t i = 0; i < TIER2_TERMS; ++i) {
+  out += ",\n      \"tier0\": {";
+  std::array<int32_t, TIER0_TERMS> const t0{ tier0_terms(terms) };
+  for (uint32_t i = 0; i < TIER0_TERMS; ++i) {
     if (i != 0) { out += ", "; }
-    append_i64v(out, shares[i]);
+    append_json_string(out, TIER0_NAMES[i]);
+    out += ": ";
+    append_i32v(out, t0[i]);
   }
-  out += "]\n    }";
+  out += '}';
+  // Tier 2 per term: its value, its share of t2 and its em power, in CostTerms order.
+  auto const tier2 = [&](char const *key, auto const &v) {
+    out += ",\n      \"";
+    out += key;
+    out += "\": {";
+    for (uint32_t i = 0; i < TIER2_TERMS; ++i) {
+      if (i != 0) { out += ", "; }
+      append_json_string(out, TERMS[i]);
+      out += ": ";
+      append_i64v(out, static_cast<int64_t>(v[i]));
+    }
+    out += '}';
+  };
+  tier2("tier2", values);
+  tier2("shares_bp", shares);
+  tier2("em_power", EM_POWER);
+  out += "\n    }";
 
-  // The placed label boxes and the leader each is held from its own polyline
-  // at, which is the only place the anchor invariant is checkable: it holds on
-  // the box, and the drawing shows the glyphs inside it (11.9.4).
-  out += ",\n    \"label_leader\": ";
-  append_i32v(out, label_leader(p));
-  out += ",\n    \"placed\": [";
+  out += ",\n    \"profile\": {";
+  std::array<int64_t, PROFILE.size()> const prof{ profile_values(p) };
+  for (uint32_t i = 0; i < PROFILE.size(); ++i) {
+    if (i != 0) { out += ", "; }
+    append_json_string(out, PROFILE[i]);
+    out += ": ";
+    append_i64v(out, prof[i]);
+  }
+  each_kind_min(p, [&](std::string const &name, int32_t v) {
+    out += ", ";
+    append_json_string(out, name);
+    out += ": ";
+    append_i32v(out, v);
+  });
+  out += "},\n    \"placed\": [";
   for (uint32_t i = 0; i < placed.size(); ++i) {
     if (i != 0) { out += ", "; }
     append_json_rect(out, placed[i]);
   }
-  // The transition each box belongs to, so a reader of this can pair a box
-  // with the polyline it is anchored to rather than guess at the order.
+  // The transition each placed box belongs to, or INVALID past `n_path_box`.
   out += "],\n    \"placed_subject\": [";
   for (uint32_t i = 0; i < placed.size(); ++i) {
     if (i != 0) { out += ", "; }
@@ -650,6 +817,9 @@ void append_geometry_json(std::string &out,
   for (char const *name : { "scav.geom.state",
                             "scav.geom.state_before",
                             "scav.geom.state_after",
+                            "scav.geom.state_lead",
+                            "scav.geom.state_trail",
+                            "scav.geom.state_loop",
                             "scav.geom.sub" }) {
     out += ",\n    ";
     append_json_string(out, std::string_view{ name }.substr(10));  // "state", ...
@@ -661,6 +831,56 @@ void append_geometry_json(std::string &out,
     }
     out += ']';
   }
+
+  // Per state: its loop room's [face, end], its corner radius and its bands' ruled bits.
+  auto const loop_place{ geom_rows<uint32_t>(c, "scav.geom.state_loop_place") };
+  out += ",\n    \"state_loop_place\": [";
+  for (uint32_t i = 0; i < loop_place.size(); ++i) {
+    if (i != 0) { out += ", "; }
+    out += '[';
+    string_append_u32(out, loop_place[i] / 2U);
+    out += ", ";
+    string_append_u32(out, loop_place[i] % 2U);
+    out += ']';
+  }
+  auto const state{ geom_rows<scav_rect>(c, "scav.geom.state") };
+  out += "],\n    \"state_corner\": [";
+  for (uint32_t i = 0; i < state.size(); ++i) {
+    if (i != 0) { out += ", "; }
+    append_i32v(out, state_corner_radius(c.states[i].kind, state[i], p.pad));
+  }
+  out += "],\n    \"state_ruled\": [";
+  for (uint32_t i = 0; i < c.states.size(); ++i) {
+    if (i != 0) { out += ", "; }
+    string_append_u32(out, state_ruled(s, i));
+  }
+  out += "],\n    \"path_clear\": [";
+  for (uint32_t t = 0; t < c.transitions.size(); ++t) {
+    if (t != 0) { out += ", "; }
+    scav_path_clear const clear{ trans_clear(s, t) };
+    out += '[';
+    append_i32v(out, clear.src);
+    out += ", ";
+    append_i32v(out, clear.dst);
+    out += ']';
+  }
+  // Each inner loop's [state, face, lo, len] on a face of its state.
+  std::vector<OccupiedSpan> occupied;
+  layout_occupied_spans(c, p, occupied);
+  out += "],\n    \"occupied\": [";
+  for (uint32_t i = 0; i < occupied.size(); ++i) {
+    if (i != 0) { out += ", "; }
+    out += '[';
+    string_append_u32(out, occupied[i].obstacle);
+    out += ", ";
+    string_append_u32(out, occupied[i].face);
+    out += ", ";
+    append_i32v(out, occupied[i].lo);
+    out += ", ";
+    append_i32v(out, occupied[i].len);
+    out += ']';
+  }
+  out += ']';
 
   auto const routes{ geom_rows<scav_span>(c, "scav.geom.route") };
   auto const points{ geom_rows<scav_point>(c, "scav.geom.point") };
@@ -777,8 +997,7 @@ void append_json(std::string &out, Chart const &c) {
   });
   out += ",\n";
 
-  // Descriptors only: a column's bytes are typed by its registrant, and JSON has
-  // no spelling for a `pod` this build may not understand.
+  // Column descriptors and row counts; the column bytes are omitted.
   append_json_array(out, "columns", c.columns.size(), [&](Row &r, uint32_t i) {
     ColumnDesc const &d{ c.columns[i].desc };
     row_str(r, "name", string_pool_view(c.column_names, d.name));
@@ -798,7 +1017,7 @@ int run_dump(char const *path,
              bool as_json,
              bool with_layout,
              bool trace,
-             bool trace_search,
+             TraceScope scope,
              LayoutArgs const &args) {
   Loaded net;
   load_and_report(path, true, net);
@@ -811,17 +1030,13 @@ int run_dump(char const *path,
   }
   if (args.no_search) { opts.profile.portfolio_k = 0; }
   CostTerms cost{};
-  // What the drawing rests on, for the line that lays it out again. Unknown
-  // under `--trace`, which runs its own two layouts.
+  // The winning row and taken pins, for `rests on`; INVALID under `--trace`.
   uint32_t won{ INVALID };
   SearchPins taken;
-  // Hoisted for the emitters: the anchor invariant holds on these boxes and
-  // nowhere else, so the dump is where it becomes checkable (11.9.4).
   std::vector<scav_placed> placed;
   Spaces spaces;
   if (with_layout) {
-    // The reference builder's measurement pass, which is the policy every
-    // corpus golden is stated against.
+    // The reference builder's measurement pass, on the bundled font.
     Metrics metrics;
     if (!args.no_text && (!metrics_create(nullptr, 0, metrics) ||
                           !measure_chart(net.chart, metrics, opts.profile, spaces))) {
@@ -830,15 +1045,15 @@ int run_dump(char const *path,
     }
     std::vector<Diagnostic> diags;
     std::vector<char> events;
-    bool const laid{ trace ? layout_trace_json(
-                                 net.chart,
-                                 as_spaces(spaces),
-                                 opts,
-                                 placed,
-                                 diags,
-                                 events,
-                                 args.row,
-                                 trace_search ? TraceScope::Search : TraceScope::Shipped)
+    bool const laid{ trace ? layout_trace_json(net.chart,
+                                               as_spaces(spaces),
+                                               opts,
+                                               placed,
+                                               diags,
+                                               events,
+                                               args.row,
+                                               scope,
+                                               &args.pins)
                            : layout_run(net.chart,
                                         as_spaces(spaces),
                                         opts,
@@ -850,8 +1065,7 @@ int run_dump(char const *path,
                                         nullptr,
                                         &taken,
                                         &args.pins) };
-    // To stdout, ahead of the model: the trace is the answer `--trace` asked
-    // for and the dump is the context it is read against.
+    // The trace goes to stdout, ahead of the model dump.
     if (trace) { write_stream(std::string{ events.begin(), events.end() }, stdout); }
     if (!diags.empty()) {
       std::string err;
@@ -859,9 +1073,7 @@ int run_dump(char const *path,
       write_stream(err, stderr);
     }
     if (!laid) { return EXIT_DIAGNOSED; }
-    // Scored from the columns the run just wrote, at the caller's profile and
-    // with the real-text tables beside them, so `label` and `label_near` have
-    // the placed boxes they are about.
+    // Scores this run's columns; `label` and `label_near` read the placed boxes.
     cost = layout_cost(net.chart, opts.profile, as_spaces(spaces), placed);
   }
 

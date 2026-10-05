@@ -1,5 +1,4 @@
-// Sizing against hand-written intermediates, so what is under test is the box
-// formula rather than whatever ordering produced.
+// `size_layout` tests, most on hand-written orders.
 
 #include "layout/size.h"
 
@@ -24,7 +23,6 @@ namespace {
 
 using namespace scav;
 
-// The C structs carry no operators; the tests compare them field-wise.
 constexpr bool operator==(scav_rect const &a, scav_rect const &b) {
   return (a.x == b.x) && (a.y == b.y) && (a.w == b.w) && (a.h == b.h);
 }
@@ -35,8 +33,7 @@ scav_profile profile() {
   return p;
 }
 
-// A desired aspect so wide that folding a rank run can never beat leaving it
-// flat, which is what lets a test measure the layering axis on its own.
+// Rank runs stay flat at a 1024:1 desired aspect.
 scav_profile unfolded() {
   scav_profile p{ profile() };
   p.dar_num = 1024;
@@ -44,8 +41,7 @@ scav_profile unfolded() {
   return p;
 }
 
-// Depths only: sizing reads nothing else from the split unless a route
-// terminates on a frame border, which the boundary case below supplies.
+// Only `state_depth` set: sizing finds no segments, hence no ports and no label boxes.
 SplitGraph depths(std::vector<uint32_t> const &state_depth) {
   SplitGraph g;
   g.state_depth = state_depth;
@@ -112,7 +108,7 @@ TEST_CASE("size: two ranks sit rank_sep apart along the layering axis") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
   scav_profile const p{ unfolded() };
 
   SizedLayout z;
@@ -139,7 +135,7 @@ TEST_CASE("size: a label's gap widens the boundary it was charged to") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
   scav_profile const p{ unfolded() };
 
   SizedLayout z;
@@ -159,8 +155,7 @@ TEST_CASE("size: a label's gap widens the boundary it was charged to") {
 }
 
 TEST_CASE("size: a rank run folds when folding scales larger") {
-  // Six ranks in a chain: flat they draw a strip far off the desired aspect,
-  // folded they stack into something nearer it, and the scale measure picks.
+  // Six chained ranks, sized flat at 1024:1 and folded at the readable 16:10.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   std::vector<OrderNode> nodes;
@@ -201,8 +196,8 @@ TEST_CASE("size: two nodes in one rank stack node_sep apart") {
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, a, d, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, a, d, TransKind::Default, {});
   scav_profile const p{ profile() };
 
   SizedLayout z;
@@ -225,15 +220,13 @@ TEST_CASE("size: two nodes in one rank stack node_sep apart") {
 }
 
 TEST_CASE("size: an edge within one rank stacks its ends rather than aligning them") {
-  // A rank pin can leave both ends of an edge in one rank. Brandes-Kopf reads
-  // an edge as joining consecutive layers, and handed this one it made the two
-  // ends one block at one coordinate: `ota`'s `Writing` drawn over `Fetching`.
+  // Both edges join two nodes in rank 0, as a rank pin can leave them.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, b, a, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, b, a, TransKind::Default, {});
   scav_profile const p{ unfolded() };
 
   SizedLayout z;
@@ -255,20 +248,15 @@ TEST_CASE("size: an edge within one rank stacks its ends rather than aligning th
 }
 
 TEST_CASE("size: states joined inside one column share the widest one's centre line") {
-  // Left-aligned in one column, the only face a narrow state shares with a
-  // wide one above it is the narrow one's own width at the column's leading
-  // edge, and `dock`'s `vacuum docked` went round `On`'s far side instead; on
-  // one centre line both routes between them run straight down the overlap
-  // (11.10g). `F`, a bar, would be met through its cap, so it keeps the
-  // column's leading edge.
+  // The bar `F` keeps the column's leading edge.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const wide{ build_state(c, root, "W", StateKind::Normal, {}) };
   StateId const narrow{ build_state(c, root, "N", StateKind::Normal, {}) };
   StateId const bar{ build_state(c, root, "F", StateKind::Fork, {}) };
-  build_trans(c, narrow, wide, TransKind::External, {});
-  build_trans(c, wide, narrow, TransKind::External, {});
-  build_trans(c, wide, bar, TransKind::External, {});
+  build_trans(c, narrow, wide, TransKind::Default, {});
+  build_trans(c, wide, narrow, TransKind::Default, {});
+  build_trans(c, wide, bar, TransKind::Default, {});
   scav_profile const p{ unfolded() };
   std::vector<scav_box_space> boxes(c.states.size(), scav_box_space{});
   boxes[wide.v].min_w = 2000;
@@ -300,10 +288,10 @@ TEST_CASE("size: states joined inside one column share the widest one's centre l
   REQUIRE(sized);
   scav_rect const &w{ z.state[wide.v] };
   scav_rect const &n{ z.state[narrow.v] };
-  REQUIRE(w.w > (2 * n.w));  // the column really is wider than `N`
+  REQUIRE(w.w > (2 * n.w));  // `W` is over twice `N`'s width
   CHECK(n.x + (n.w / 2) == w.x + (w.w / 2));
   CHECK(z.state[bar.v].x == w.x);
-  // The trace says who moved, and by how much.
+  // One ColumnCentred event, for `N`, by its offset from `W`'s leading edge.
   uint32_t centred{ 0 };
   for (TraceEvent const &e : t.events) {
     if (e.kind != TraceKind::ColumnCentred) { continue; }
@@ -315,17 +303,13 @@ TEST_CASE("size: states joined inside one column share the widest one's centre l
 }
 
 TEST_CASE("size: two labelled edges inside one column widen it for a label either side") {
-  // `ota`'s `chunk ready` and `chunk written` run as a pair down one centre
-  // line with a label outside each leg, and a column as wide as `Writing`
-  // left the second label nowhere but over `Writing` (11.10g). One label
-  // needs the room on one side only, and takes the trailing one when the
-  // leading side is short of it.
+  // One label takes its room on the trailing side when the leading side is short.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, b, a, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, b, a, TransKind::Default, {});
   SplitGraph const g{ decompose(c) };
   scav_profile const p{ unfolded() };
   constexpr int32_t LABEL_W{ 1500 };
@@ -352,7 +336,7 @@ TEST_CASE("size: two labelled edges inside one column widen it for a label eithe
   REQUIRE(sized(2, pair));
   int32_t const line{ (2 * (label_leader(p) + LABEL_W)) + p.node_sep };
   scav_rect const &pa{ pair.state[a.v] };
-  REQUIRE(line > (2 * pa.w));  // the room really is wider than the states
+  REQUIRE(line > (2 * pa.w));  // the two-label line is over twice `A`'s width
   CHECK(pair.sub[root.v].w >= line);
   CHECK(pa.x + (pa.w / 2) == pair.state[b.v].x + (pair.state[b.v].w / 2));
   int32_t const off{ (pa.x + (pa.w / 2)) - (line / 2) };
@@ -362,14 +346,13 @@ TEST_CASE("size: two labelled edges inside one column widen it for a label eithe
   REQUIRE(sized(1, one));
   scav_rect const &oa{ one.state[a.v] };
   int32_t const room{ label_leader(p) + LABEL_W + (p.node_sep / 2) };
-  CHECK(oa.x == one.state[b.v].x);  // one column, nothing to centre
+  CHECK(oa.x == one.state[b.v].x);  // one column at the states' width
   CHECK(one.sub[root.v].w == (oa.w / 2) + room);
 }
 
 namespace {
 
-// A tall hole, so every fold stacks its pieces one above the other, with the
-// profile's own spacing kept for the labels to need room against.
+// A 1:1024 desired aspect: a fold stacks its pieces one above the other.
 scav_profile tall() {
   scav_profile p{ profile() };
   p.dar_num = 1;
@@ -380,16 +363,13 @@ scav_profile tall() {
 }  // namespace
 
 TEST_CASE("size: a fold that stacks its pieces carries no label room onto the second") {
-  // The room a cut's label was charged goes on the new piece's leading edge
-  // only where the packing puts that piece beside the one before: stacked,
-  // the leg runs down the gap the two ends' own reserve opened, and the room
-  // pushed `brew`'s `Pumping` and `dock`'s `Charging` a label's width from
-  // the state they join (11.10g). `B` starts at the frame's leading edge.
+  // A cut's label room goes on the next piece's leading edge only when packed beside the
+  // one before; stacked, `B` keeps `A`'s x.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
   std::vector<scav_path_box> const labels{
     { .subject = 0, .w = 1500, .h = 200, .order = 0 }
   };
@@ -424,21 +404,18 @@ TEST_CASE("size: a fold that stacks its pieces carries no label room onto the se
       CHECK(e.fold.carried == 0);
     }
   }
-  REQUIRE(cut);  // the fixture does what it is for
+  REQUIRE(cut);                                             // the fold made a cut
   CHECK(z.state[b.v].y > z.state[a.v].y + z.state[a.v].h);  // stacked
   CHECK(z.state[b.v].x == z.state[a.v].x);
 }
 
 TEST_CASE("size: a fold never cuts a boundary node away from the node it joins") {
-  // A boundary node is the point a route crosses its frame's border at, and a
-  // piece of its own is packed below the node it joins, taking the port with
-  // it: `vac`'s `battery low` left `Ready` a whole state's height low
-  // (11.10g). So the cut before its rank is refused, and it stays level.
+  // The fold refuses the cut before rank 2; the boundary there stays level with `B`.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
   std::vector<scav_box_space> boxes(c.states.size(), scav_box_space{});
   boxes[a.v].min_w = 3000;
   boxes[b.v].min_w = 3000;
@@ -481,15 +458,12 @@ TEST_CASE("size: a fold never cuts a boundary node away from the node it joins")
 }
 
 TEST_CASE("size: a labelled pair a fold stacks has room for a label either side") {
-  // Two labelled edges between one pair, their ends in two stacked pieces,
-  // run as a pair of legs down the gap with a label outside each; room on one
-  // side each left `ota`'s pair printing over both its states (11.10g).
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, b, a, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, b, a, TransKind::Default, {});
   constexpr int32_t LABEL_W{ 1500 };
   std::vector<scav_path_box> const labels{
     { .subject = 0, .w = LABEL_W, .h = 200, .order = 0 },
@@ -530,18 +504,18 @@ TEST_CASE("size: a labelled pair a fold stacks has room for a label either side"
 
 TEST_CASE(
     "size: a labelled leg passing a column to a stacked piece has its room beside it") {
-  // `Clear` and `Tripped` share a column and `Latched` is folded under it, so the
-  // back edge's leg runs up the column's leading side, where its label goes.
+  // `Clear` over `Tripped` in one column, `Latched` folded under it; the labelled back
+  // edge's leg runs up the column's leading side, between it and the initial.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const start{ build_state(c, root, {}, StateKind::Initial, {}) };
   StateId const clear{ build_state(c, root, "Clear", StateKind::Normal, {}) };
   StateId const tripped{ build_state(c, root, "Tripped", StateKind::Normal, {}) };
   StateId const latched{ build_state(c, root, "Latched", StateKind::Normal, {}) };
-  build_trans(c, start, clear, TransKind::External, {});
-  build_trans(c, clear, tripped, TransKind::External, {});
-  build_trans(c, tripped, latched, TransKind::External, {});
-  build_trans(c, latched, clear, TransKind::External, {});
+  build_trans(c, start, clear, TransKind::Default, {});
+  build_trans(c, clear, tripped, TransKind::Default, {});
+  build_trans(c, tripped, latched, TransKind::Default, {});
+  build_trans(c, latched, clear, TransKind::Default, {});
   constexpr int32_t LABEL_W{ 1500 };
   constexpr int32_t INNER_W{ 700 };
   std::vector<scav_path_box> const labels{
@@ -579,9 +553,9 @@ TEST_CASE(
   scav_rect const &rl{ z.state[latched.v] };
   REQUIRE(rt.y > rc.y + rc.h);  // one column
   REQUIRE(rl.y > rt.y + rt.h);  // stacked under it
-  int32_t const room{ route_clearance(p) + label_leader(p) + LABEL_W + (p.node_sep / 2) };
+  int32_t const room{ box_clearance(p) + label_leader(p) + LABEL_W + (p.node_sep / 2) };
   CHECK(imin(rc.x, rt.x) - (rs.x + rs.w) >= room);
-  // The edge inside the column keeps its label's room on the other side of its leg.
+  // The labelled edge inside the column has its label's room on the leg's trailing side.
   int32_t const lo{ imax(rc.x, rt.x) };
   int32_t const leg{ lo + ((imin(rc.x + rc.w, rt.x + rt.w) - lo) / 2) };
   scav_rect const &frame{ z.sub[root.v] };
@@ -589,21 +563,19 @@ TEST_CASE(
 }
 
 TEST_CASE("size: a frame turned down runs its ranks top to bottom, and never folds") {
-  // A column of states in sequence is one frame's choice (11.10g). Turned
-  // down, each rank is a row: `B` under `A` and `C` under `B` on one centre
-  // line, the initial above the state it enters, and a hole wide enough to
-  // fold an across run into two rows still leaves the column one column.
+  // The initial, `A`, `B` and `C` run top to bottom on one centre line. A 1024:1 desired
+  // aspect under `Fold::Always` leaves the frame one column.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const start{ build_state(c, root, {}, StateKind::Initial, {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const d{ build_state(c, root, "C", StateKind::Normal, {}) };
-  build_trans(c, start, a, TransKind::External, {});
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, b, d, TransKind::External, {});
+  build_trans(c, start, a, TransKind::Default, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, b, d, TransKind::Default, {});
   scav_profile p{ profile() };
-  p.dar_num = 1024;  // wide: an across run this long would not fold either
+  p.dar_num = 1024;
   p.dar_den = 1;
   SubmachineOrders o{ one_frame(c,
                                 root,
@@ -641,18 +613,16 @@ TEST_CASE("size: a frame turned down runs its ranks top to bottom, and never fol
   CHECK(ra.x + (ra.w / 2) == rb.x + (rb.w / 2));
   CHECK(rb.x + (rb.w / 2) == rd.x + (rd.w / 2));
   CHECK(rb.y - (ra.y + ra.h) == p.rank_sep);
-  CHECK(z.sub[root.v].h > (3 * z.sub[root.v].w));  // one column, not wrapped
+  CHECK(z.sub[root.v].h > (3 * z.sub[root.v].w));  // one column
 }
 
 TEST_CASE("size: a bar lies down in a frame running down") {
-  // A bar is thin across the axis the flow crosses it on. Stood up in a
-  // frame running down, its long faces are beside the flow and every branch
-  // leaves through a cap, which put four of `fork`'s through them (11.10g).
+  // In a frame running down, a bar's kind minimum swaps its width and height.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const bar{ build_state(c, root, "F", StateKind::Fork, {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
-  build_trans(c, bar, a, TransKind::External, {});
+  build_trans(c, bar, a, TransKind::Default, {});
   scav_profile const p{ unfolded() };
   auto const sized = [&](bool down) {
     SubmachineOrders o{ one_frame(c,
@@ -674,16 +644,13 @@ TEST_CASE("size: a bar lies down in a frame running down") {
 }
 
 TEST_CASE("size: a label beside a leg between two ranks has its room on one side") {
-  // The reserve gives each side of a node half a label's room across the
-  // ranks; running down, that is half a label's width beside a vertical leg,
-  // and `axis`'s `approaching target` printed over `Decelerating` (11.10g). A
-  // node alone in its row takes no reserve, and the frame grows on the
-  // trailing side until one side of the leg holds the whole label.
+  // Running down, the frame grows on its trailing side until that side of the leg holds
+  // the whole label.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
   constexpr int32_t LABEL_W{ 3000 };
   std::vector<scav_path_box> const labels{
     { .subject = 0, .w = LABEL_W, .h = 200, .order = 0 }
@@ -706,21 +673,20 @@ TEST_CASE("size: a label beside a leg between two ranks has its room on one side
   scav_rect const &frame{ z.sub[root.v] };
   int32_t const leg{ ra.x + (ra.w / 2) };
   int32_t const room{ label_leader(p) + LABEL_W + (p.node_sep / 2) };
-  CHECK(ra.x == frame.x);  // no reserve beside a node alone in its row
+  CHECK(ra.x == frame.x);  // a node alone in its row takes zero reserve
   CHECK((frame.x + frame.w) - leg >= room);
-  CHECK((frame.x + frame.w) - leg < room + ra.w);  // one side, not both
+  CHECK((frame.x + frame.w) - leg < room + ra.w);  // room on one side only
 }
 
 TEST_CASE("size: an edge pointing back a rank still aligns its ends") {
-  // The other thing a pin leaves: an edge from a later rank to an earlier one,
-  // which is the same pair of layers read the other way round.
+  // Both edges run from rank 1 back to rank 0; alignment reads them with ends swapped.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
-  build_trans(c, b, a, TransKind::External, {});
-  build_trans(c, d, a, TransKind::External, {});
+  build_trans(c, b, a, TransKind::Default, {});
+  build_trans(c, d, a, TransKind::Default, {});
   scav_profile const p{ unfolded() };
 
   SizedLayout z;
@@ -738,8 +704,7 @@ TEST_CASE("size: an edge pointing back a rank still aligns its ends") {
       p,
       z,
       diags));
-  // `A` sits between its two upper neighbours, as it would with the edges
-  // written forward, rather than wherever an ignored edge leaves it.
+  // `A`'s centre lies between `B`'s and `D`'s, as with the edges written forward.
   int32_t const mid_a{ z.state[a.v].y + (z.state[a.v].h / 2) };
   int32_t const mid_b{ z.state[b.v].y + (z.state[b.v].h / 2) };
   int32_t const mid_d{ z.state[d.v].y + (z.state[d.v].h / 2) };
@@ -756,8 +721,8 @@ TEST_CASE("size: an initial pseudostate sits one rank gap before its target") {
   StateId const start{ build_state(c, root, {}, StateKind::Initial, {}) };
   StateId const wide{ build_state(c, root, "W", StateKind::Normal, {}) };
   StateId const x{ build_state(c, root, "X", StateKind::Normal, {}) };
-  build_trans(c, start, x, TransKind::External, {});
-  build_trans(c, wide, x, TransKind::External, {});
+  build_trans(c, start, x, TransKind::Default, {});
+  build_trans(c, wide, x, TransKind::Default, {});
   scav_profile const p{ unfolded() };
   std::vector<scav_box_space> boxes(c.states.size(), scav_box_space{});
   boxes[wide.v].min_w = 2000;
@@ -783,7 +748,7 @@ TEST_CASE("size: an initial pseudostate sits one rank gap before its target") {
       diags));
   scav_rect const &dot{ z.state[start.v] };
   scav_rect const &w{ z.state[wide.v] };
-  CHECK(w.w > (10 * dot.w));  // the layer really is wide
+  CHECK(w.w > (10 * dot.w));  // `W` is over ten dots wide
   CHECK(dot.y > z.state[x.v].y);
   CHECK((dot.y + dot.h) < (z.state[x.v].y + z.state[x.v].h));
   CHECK(dot.x == w.x + w.w + (p.node_sep / 2));
@@ -791,10 +756,8 @@ TEST_CASE("size: an initial pseudostate sits one rank gap before its target") {
 }
 
 TEST_CASE("size: an initial pseudostate is level with its target where there is room") {
-  // `X` has two successors and a second predecessor's successor below it, so
-  // Brandes-Kopf's balanced median leaves it between its neighbours and the
-  // arrow into it with a jog. The initial is alone in its rank, so nothing
-  // stops it moving to `X`'s height (11.10g).
+  // `X` has two successors and shares `Z` with `V`; the initial, alone in rank 0, moves
+  // level with `X`.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const start{ build_state(c, root, {}, StateKind::Initial, {}) };
@@ -802,10 +765,10 @@ TEST_CASE("size: an initial pseudostate is level with its target where there is 
   StateId const v{ build_state(c, root, "V", StateKind::Normal, {}) };
   StateId const y{ build_state(c, root, "Y", StateKind::Normal, {}) };
   StateId const z2{ build_state(c, root, "Z", StateKind::Normal, {}) };
-  build_trans(c, start, x, TransKind::External, {});
-  build_trans(c, x, y, TransKind::External, {});
-  build_trans(c, x, z2, TransKind::External, {});
-  build_trans(c, v, z2, TransKind::External, {});
+  build_trans(c, start, x, TransKind::Default, {});
+  build_trans(c, x, y, TransKind::Default, {});
+  build_trans(c, x, z2, TransKind::Default, {});
+  build_trans(c, v, z2, TransKind::Default, {});
   scav_profile const p{ unfolded() };
 
   SizedLayout z;
@@ -833,16 +796,15 @@ TEST_CASE("size: an initial pseudostate is level with its target where there is 
 }
 
 TEST_CASE("size: a final pseudostate sits rank_sep after its source, level with it") {
-  // The mirror of the initial: in the layer after a wide one it would sit past
-  // that whole width, however narrow the state it leaves.
+  // The wide `W` shares the source's layer.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const x{ build_state(c, root, "X", StateKind::Normal, {}) };
   StateId const wide{ build_state(c, root, "W", StateKind::Normal, {}) };
   StateId const done{ build_state(c, root, {}, StateKind::Final, {}) };
   StateId const y{ build_state(c, root, "Y", StateKind::Normal, {}) };
-  build_trans(c, x, done, TransKind::External, {});
-  build_trans(c, wide, y, TransKind::External, {});
+  build_trans(c, x, done, TransKind::Default, {});
+  build_trans(c, wide, y, TransKind::Default, {});
   scav_profile const p{ unfolded() };
   std::vector<scav_box_space> boxes(c.states.size(), scav_box_space{});
   boxes[wide.v].min_w = 2000;
@@ -869,14 +831,13 @@ TEST_CASE("size: a final pseudostate sits rank_sep after its source, level with 
                       diags));
   scav_rect const &from{ z.state[x.v] };
   scav_rect const &dot{ z.state[done.v] };
-  CHECK(z.state[wide.v].w > (2 * from.w));  // the layer really is wide
+  CHECK(z.state[wide.v].w > (2 * from.w));  // `W` is over twice `X`'s width
   CHECK(dot.x == from.x + from.w + p.rank_sep);
   CHECK(dot.y + (dot.h / 2) == from.y + (from.h / 2));
 }
 
 TEST_CASE("size: a fold never cuts between an initial pseudostate and its target") {
-  // `A` is wide enough that the run wants to wrap before it, which would pack
-  // the initial as a piece of its own; the cut moves on instead (11.10g).
+  // `S0`'s 3000 minimum width makes the 1:1 fold want a cut before it, at rank 1.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const start{ build_state(c, root, {}, StateKind::Initial, {}) };
@@ -885,13 +846,13 @@ TEST_CASE("size: a fold never cuts between an initial pseudostate and its target
   for (uint32_t i = 0; i < 6; ++i) {
     chain.push_back(build_state(c, root, "S" + std::to_string(i), StateKind::Normal, {}));
   }
-  build_trans(c, start, chain[0], TransKind::External, {});
+  build_trans(c, start, chain[0], TransKind::Default, {});
   std::vector<OrderNode> nodes{ state_node(start.v, 0, 0) };
   std::vector<OrderEdge> edges{ { .src = 0, .dst = 1, .segment = 0, .reversed = 0 } };
   for (uint32_t i = 0; i < chain.size(); ++i) {
     nodes.push_back(state_node(chain[i].v, i + 1, 0));
     if (i + 1 < chain.size()) {
-      build_trans(c, chain[i], chain[i + 1], TransKind::External, {});
+      build_trans(c, chain[i], chain[i + 1], TransKind::Default, {});
       edges.push_back({ .src = i + 1, .dst = i + 2, .segment = i + 1, .reversed = 0 });
     }
   }
@@ -921,7 +882,7 @@ TEST_CASE("size: a fold never cuts between an initial pseudostate and its target
       Fold::Always) };
   trace_sink_set(nullptr);
   REQUIRE(sized);
-  // The fixture does what it is for: the fold wanted to cut before `A`.
+  // The fold refused a cut at rank 1, before `S0`.
   bool refused{ false };
   for (TraceEvent const &e : t.events) {
     refused = refused || ((e.kind == TraceKind::FoldCut) && (e.fold.rank == 1) &&
@@ -930,7 +891,7 @@ TEST_CASE("size: a fold never cuts between an initial pseudostate and its target
   CHECK(refused);
   scav_rect const &dot{ z.state[start.v] };
   scav_rect const &a{ z.state[chain[0].v] };
-  // The run did fold somewhere: not every state is on one row.
+  // The run folds: some chain state's y differs from `S0`'s.
   bool folded{ false };
   for (StateId const st : chain) { folded = folded || (z.state[st.v].y != a.y); }
   CHECK(folded);
@@ -955,8 +916,7 @@ TEST_CASE("size: unconnected states are separate components and pack") {
       p,
       z,
       diags));
-  // No edge joins them, so they are two components and the packer places them
-  // side by side rather than stacking them in the one rank they share.
+  // Both in rank 0; the packer sets the two components side by side, `node_sep` apart.
   CHECK(z.state[a.v].x == 0);
   CHECK(z.state[b.v].x == z.state[a.v].w + p.node_sep);
   CHECK(z.state[b.v].y == 0);
@@ -970,8 +930,7 @@ TEST_CASE("size: a boundary node lands on its frame's leading or trailing edge")
 
   SizedLayout z;
   std::vector<Diagnostic> diags;
-  // One state with a route leaving it: the boundary is a sink, so it belongs
-  // at the frame's trailing edge whatever rank arithmetic put it in.
+  // A route leaving `A` makes the boundary a sink, placed on the frame's trailing edge.
   REQUIRE(size_layout(
       c,
       depths({ 0 }),
@@ -987,8 +946,7 @@ TEST_CASE("size: a boundary node lands on its frame's leading or trailing edge")
       diags));
   CHECK(z.node[1].x == z.sub[root.v].w);
 
-  // The same shape with the route arriving instead: a source, at the leading
-  // edge, and the state to its right.
+  // The route arriving instead makes it a source, on the leading edge, left of `A`.
   SizedLayout in;
   diags.clear();
   REQUIRE(size_layout(
@@ -1035,9 +993,9 @@ TEST_CASE("size: a layer of boundary nodes keeps a route's clearance, not a rank
       z,
       diags));
   CHECK(z.node[0].x == 0);
-  CHECK(z.state[a.v].x == route_clearance(p));
+  CHECK(z.state[a.v].x == box_clearance(p));
   CHECK(z.state[b.v].x == (z.state[a.v].x + z.state[a.v].w + p.rank_sep));
-  CHECK(z.sub[root.v].w == (z.state[b.v].x + z.state[b.v].w + route_clearance(p)));
+  CHECK(z.sub[root.v].w == (z.state[b.v].x + z.state[b.v].w + box_clearance(p)));
   CHECK(z.node[3].x == z.sub[root.v].w);
 }
 
@@ -1123,7 +1081,7 @@ TEST_CASE(
     CHECK(dot.y + (dot.h / 2) == at.y + (at.h / 2));
     CHECK(at.x - (dot.x + dot.w) == p.rank_sep);
     int32_t const column{ imin(at.x, z.state[w.v].x) };
-    CHECK(column == ((wide != 0) ? route_clearance(p) : (dot.w + p.rank_sep)));
+    CHECK(column == ((wide != 0) ? box_clearance(p) : (dot.w + p.rank_sep)));
   }
 }
 
@@ -1164,8 +1122,7 @@ TEST_CASE("size: a port on a cross border sits on the frame's edge over its neig
 }
 
 TEST_CASE("size: a folded rank run packs its pieces rather than stacking them") {
-  // Stacking gives every piece the width of the widest. One huge rank among small
-  // ones is where that shows: each small piece gets a row as wide as the huge one.
+  // Nine chained ranks on computed orders; rank 4 is far taller than the rest.
   scav_profile const p{ profile() };
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
@@ -1175,10 +1132,8 @@ TEST_CASE("size: a folded rank run packs its pieces rather than stacking them") 
     chain.push_back(build_state(c, root, {}, StateKind::Normal, {}));
   }
   for (uint32_t i = 1; i < chain.size(); ++i) {
-    build_trans(c, chain[i - 1], chain[i], TransKind::External, {});
+    build_trans(c, chain[i - 1], chain[i], TransKind::Default, {});
   }
-  // One rank far larger than the rest, which is the shape a composite state
-  // makes of its siblings.
   std::vector<scav_box_space> boxes(c.states.size(), scav_box_space{});
   boxes[chain[4].v] = { .min_w = 400, .h_before = 6000, .h_after = 0 };
   scav_spaces const sp{ .box_state = boxes.data(),
@@ -1195,8 +1150,7 @@ TEST_CASE("size: a folded rank run packs its pieces rather than stacking them") 
   REQUIRE(frame.h > 0);
   MESSAGE("folded frame: ", frame.w, " x ", frame.h);
 
-  // Stacking is monotonic, so a later rank can never sit higher than an earlier
-  // one. Packing is not, and here it puts the last short piece beside the first.
+  // A later rank's node above an earlier rank's marks a piece packed beside another.
   Span const all{ o.sub_nodes[root.v] };
   int32_t highest_so_far{ 0 };
   uint32_t previous_rank{ 0 };
@@ -1210,7 +1164,7 @@ TEST_CASE("size: a folded rank run packs its pieces rather than stacking them") 
   }
   CHECK(beside);
 
-  // And every node still lands inside the frame it was sized into.
+  // Every node lies inside the frame.
   Span const nodes{ o.sub_nodes[root.v] };
   for (uint32_t k = 0; k < nodes.len; ++k) {
     scav_point const at{ z.node[nodes.off + k] };
@@ -1223,8 +1177,8 @@ TEST_CASE("size: a folded rank run packs its pieces rather than stacking them") 
 }
 
 TEST_CASE("size: a rank past the domain is diagnosed rather than truncated") {
-  // Five maximal-height states in one rank, joined so they stay one component
-  // and cannot be packed apart: the column is taller than the domain.
+  // Five states with `SPACE_MAX` bands in rank 1, all joined to one source: one component
+  // whose column exceeds the domain.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const source{ build_state(c, root, "S", StateKind::Normal, {}) };
@@ -1257,8 +1211,7 @@ TEST_CASE("size: a rank past the domain is diagnosed rather than truncated") {
 }
 
 TEST_CASE("size: a pseudostate takes the padding ring only where it has contents") {
-  // A junction's kind minimum is narrower than two pads, so a ring the descent
-  // insets but the box formula never reserved gives the bands a negative width.
+  // A junction's kind minimum is narrower than two pads; every band stays inside its box.
   scav_profile const p{ profile() };
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
@@ -1289,8 +1242,7 @@ TEST_CASE("size: a pseudostate takes the padding ring only where it has contents
   };
 
   uint32_t const junction{ static_cast<uint32_t>(StateKind::Junction) };
-  // Nothing inside either, declared submachine or not, so both are the mark
-  // itself and the bands span the whole of it.
+  // `J` has no submachine, `K` an empty one: both are the bare mark, bands spanning it.
   CHECK(z.state[lone.v].w == p.kind_min_w[junction]);
   CHECK(z.state[empty.v].w == p.kind_min_w[junction]);
   CHECK(z.before[lone.v].w == z.state[lone.v].w);
@@ -1298,8 +1250,7 @@ TEST_CASE("size: a pseudostate takes the padding ring only where it has contents
   banded(lone);
   banded(empty);
 
-  // One with a child submachine to ring, and an ordinary box, which is a
-  // container even with nothing in it.
+  // `L` rings its child submachine; `N`, a Normal state, takes the ring while empty.
   CHECK(z.state[holding.v].w == z.sub[inner.v].w + (2 * p.pad));
   CHECK(z.before[holding.v].w == z.state[holding.v].w - (2 * p.pad));
   CHECK(z.state[ordinary.v].w == p.kind_min_w[0] + (2 * p.pad));
@@ -1309,10 +1260,8 @@ TEST_CASE("size: a pseudostate takes the padding ring only where it has contents
 }
 
 TEST_CASE("size: a boundary node sits on the frame's border, not on its piece's") {
-  // Nine ranks in a chain with one tall rank in the middle: the fold cuts three
-  // pieces and the packer puts the last beside the first, so the middle piece's
-  // own right edge is well inside the frame. A sink boundary sharing a rank
-  // with that piece is the node the difference shows on.
+  // Nine chained ranks, rank 4 far taller than the rest; a sink boundary shares rank 7
+  // with `chain[7]`.
   scav_profile const pf{ profile() };
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
@@ -1352,12 +1301,11 @@ TEST_CASE("size: a boundary node sits on the frame's border, not on its piece's"
                       z,
                       diags));
 
-  // The boundary's own rank ends mid-frame, which is where taking its x from
-  // its piece would have left it.
+  // `chain[7]` ends inside the frame; the boundary sits on the frame's trailing edge.
   scav_rect const mate{ z.state[chain[7].v] };
   REQUIRE((mate.x + mate.w) < z.sub[root.v].w);
   CHECK(z.node[boundary].x == z.sub[root.v].w);
-  // Only the x moves: the cross-axis assignment still owns the other.
+  // Its y, from the cross-axis assignment, lies inside the frame.
   CHECK(z.node[boundary].y >= 0);
   CHECK(z.node[boundary].y <= z.sub[root.v].h);
 }
@@ -1378,8 +1326,7 @@ TEST_CASE("size: a pseudostate with a band of its own is a container") {
   std::vector<Diagnostic> diags;
   REQUIRE(size_layout(c, g, order_submachines(c, g, s, p), s, p, z, diags));
 
-  // A band is text the mark has to hold, so the ring the box formula skips for
-  // a bare mark is reserved for this one after all.
+  // `K`, with a 24-unit after band, takes the padding ring around its kind minimum.
   uint32_t const junction{ static_cast<uint32_t>(StateKind::Junction) };
   CHECK(z.state[bare.v].w == p.kind_min_w[junction]);
   CHECK(z.state[trailing.v].w == p.kind_min_w[junction] + (2 * p.pad));
@@ -1408,8 +1355,7 @@ TEST_CASE("size: a tombstoned submachine is neither sized nor descended into") {
   REQUIRE(live.sub[gone.v].w > 0);
   CHECK(live.state[owner.v].w == live.sub[gone.v].w + (2 * p.pad));
 
-  // Tombstoned, the submachine is no longer contents: the mark is bare again
-  // and the frame keeps the zero rect it was assigned.
+  // Tombstoned, the frame keeps a zero rect and the mark is bare.
   c.submachines[gone.v].live = 0;
   SizedLayout dead;
   sized(dead);
@@ -1421,8 +1367,7 @@ TEST_CASE("size: a tombstoned submachine is neither sized nor descended into") {
 }
 
 TEST_CASE("size: a submachine with height and no width is still contents") {
-  // A profile that asks no width of a junction, so the mark inside is a line:
-  // the one extent it has is enough to make its frame contents.
+  // Junctions 0 wide: the inner frame is 0 wide, and its height alone gives `K` the ring.
   uint32_t const junction{ static_cast<uint32_t>(StateKind::Junction) };
   scav_profile p{ profile() };
   p.kind_min_w[junction] = 0;
@@ -1440,8 +1385,7 @@ TEST_CASE("size: a submachine with height and no width is still contents") {
 
   CHECK(z.sub[inner.v].w == 0);
   CHECK(z.sub[inner.v].h == p.kind_min_h[junction]);
-  // Contents either way round: the mark with nothing inside it stays bare, the
-  // one holding this frame takes the ring.
+  // `J` stays bare; `K`, holding the zero-width frame, takes the ring.
   CHECK(z.state[bare.v].w == 0);
   CHECK(z.state[owner.v].w == 2 * p.pad);
   CHECK(z.state[owner.v].h == p.kind_min_h[junction] + (2 * p.pad));
@@ -1465,19 +1409,16 @@ TEST_CASE("size: orders that name nodes but no rank size nothing") {
                       z,
                       diags));
 
-  // The two are one input: a span of nodes with no rank to lay them on is not
-  // a frame, and the frame keeps its zero rect rather than a diagnostic.
   CHECK(diags.empty());
   CHECK(z.sub[root.v].w == 0);
   CHECK(z.sub[root.v].h == 0);
-  // The box formula still answers for the state itself, which reads no orders.
+  // The box formula, which reads no orders, sizes the state itself.
   CHECK(z.state[a.v].w == p.kind_min_w[0] + (2 * p.pad));
 }
 
 TEST_CASE("size: a fold whose pieces will not pack is dropped for the flat run") {
-  // Two tall ranks and two wide ones, and no box packer to lay the pieces in a
-  // row: stacked they leave the domain, so the fold is dropped for the flat run
-  // rather than diagnosed against a frame that has a shape after all.
+  // Ranks 0 and 2 hold two `SPACE_MAX`-tall states each, ranks 1 and 3 one
+  // `SPACE_MAX`-wide state; `trybox` is 0, and the fold's stacked pieces leave the domain.
   scav_profile p{ profile() };
   p.trybox = 0;
   Chart c;
@@ -1521,8 +1462,8 @@ TEST_CASE("size: a fold whose pieces will not pack is dropped for the flat run")
                       diags));
   CHECK(diags.empty());
 
-  // Four ranks end to end, the flat run: each `rank_sep` past the last, plus two lanes
-  // where two tall states cannot both meet a short one straight.
+  // The flat run: four ranks end to end, each `rank_sep` past the last plus 0 or 2 lanes
+  // where two tall states turn into one short one.
   int32_t const tall_w{ p.kind_min_w[0] + (2 * p.pad) };
   int32_t const wide_w{ SPACE_MAX + (2 * p.pad) };
   int32_t const two{ 2 * label_line_height(p) };
@@ -1537,14 +1478,12 @@ TEST_CASE("size: a fold whose pieces will not pack is dropped for the flat run")
   CHECK(z.sub[root.v].w == (z.state[ids[5].v].x + wide_w));
   CHECK(z.sub[root.v].w <= COORD_MAX);
   CHECK(z.sub[root.v].h <= COORD_MAX);
-  // Two tall states one node_sep apart is the whole height, so the flat run is
-  // one rank deep and nothing wrapped under anything.
+  // The height is two tall states and one `node_sep`: one row.
   CHECK(z.sub[root.v].h == ((2 * (SPACE_MAX + (2 * p.pad))) + p.node_sep));
 }
 
 TEST_CASE("size: a row that leaves the domain does not displace the column that fits") {
-  // Two unconnected states, each half the domain wide and tall: the column fits and the
-  // packer's row does not, so the frame takes the column.
+  // Two unconnected states, each about half the domain wide and tall.
   scav_profile p{ profile() };
   p.pad = 130800;
   Chart c;
@@ -1565,11 +1504,10 @@ TEST_CASE("size: a row that leaves the domain does not displace the column that 
   CHECK(diags.empty());
   CHECK(z.sub[root.v].w == (p.kind_min_w[0] + (2 * p.pad)));
   CHECK(z.sub[root.v].h == ((2 * (p.kind_min_h[0] + (2 * p.pad))) + p.node_sep));
-  // The row it declined is the one that leaves the domain.
+  // A row of the two exceeds the domain.
   CHECK(((2 * (p.kind_min_w[0] + (2 * p.pad))) + p.node_sep) > COORD_MAX);
 
-  // The same extents with no box packer to offer a row at all, which is what
-  // makes them the column's.
+  // The same extents with no box packer give the same column.
   p.trybox = 0;
   SizedLayout column;
   diags.clear();
@@ -1586,8 +1524,7 @@ TEST_CASE("size: a row that leaves the domain does not displace the column that 
 
 namespace {
 
-// A frame of unconnected states of one shape: one component each, so the two
-// packers see n equal rects and offer a column n tall against a row n wide.
+// `n` unconnected states of one shape in rank 0: `n` equal components for the packers.
 struct EqualStates {
   std::vector<OrderNode> nodes;
   std::vector<scav_box_space> boxes;
@@ -1606,8 +1543,7 @@ EqualStates equal_states(Chart &c, SubmachineId root, uint32_t n, int32_t min_w)
   return out;
 }
 
-// No ring and no gap, so a rect's extents are the request; a desired aspect
-// this tall keeps the width target under two rects, so `pack_lr` stacks them.
+// Zero `pad` and `node_sep`: a rect is its request. At 1:1024 `pack_lr` stacks them.
 scav_profile stacking() {
   scav_profile p{ profile() };
   p.pad = 0;
@@ -1638,7 +1574,7 @@ TEST_CASE("size: a column that leaves the domain gives way to the row that fits"
                       diags));
   CHECK(diags.empty());
 
-  // Five states side by side at one y, which is the row and not the stack.
+  // The row: five states side by side at one y.
   CHECK(z.sub[root.v].w == (5 * p.kind_min_w[0]));
   CHECK(z.sub[root.v].h == SPACE_MAX);
   for (uint32_t i = 0; i < five.nodes.size(); ++i) {
@@ -1646,8 +1582,7 @@ TEST_CASE("size: a column that leaves the domain gives way to the row that fits"
     CHECK(z.state[five.nodes[i].subject].y == z.state[five.nodes[0].subject].y);
   }
 
-  // With no box packer to offer it, the column is all there is, and it is the
-  // one that leaves the domain.
+  // With no box packer, `pack_lr`'s column leaves the domain and the frame is diagnosed.
   p.trybox = 0;
   SizedLayout stacked;
   diags.clear();
@@ -1665,9 +1600,7 @@ TEST_CASE("size: a column that leaves the domain gives way to the row that fits"
 }
 
 TEST_CASE("size: a frame no packing fits is diagnosed, not saturated") {
-  // The same five, each as wide as it is tall: the row leaves the domain along
-  // x and the column along y, so the frame has no shape rather than a
-  // saturated one.
+  // Five `SPACE_MAX` squares: the row exceeds the domain in x and the column in y.
   scav_profile const p{ stacking() };
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
@@ -1695,8 +1628,7 @@ TEST_CASE("size: a frame no packing fits is diagnosed, not saturated") {
 
 namespace {
 
-// One state per rank, chained, so a frame is a single component whose rank run
-// is what the fold cuts into pieces.
+// `n` chained states, one per rank: one component whose run the fold cuts into pieces.
 struct RankRun {
   std::vector<OrderNode> nodes;
   std::vector<OrderEdge> edges;
@@ -1726,9 +1658,8 @@ RankRun rank_run(Chart &c,
 }  // namespace
 
 TEST_CASE("size: a row of fold pieces that leaves the domain keeps the column") {
-  // Five ranks end to end are wider than the domain, so the flat run has no
-  // shape and the fold is the only one on offer. Its pieces in a row are that
-  // same width again; stacked they fit, and the stack is what the frame keeps.
+  // The flat run, five `SPACE_MAX` ranks end to end, exceeds the domain; so does a row of
+  // the fold's pieces, and the frame keeps the stack.
   scav_profile p{ profile() };
   p.pad = 0;
   p.rank_sep = 0;
@@ -1757,8 +1688,7 @@ TEST_CASE("size: a row of fold pieces that leaves the domain keeps the column") 
   CHECK(z.sub[root.v].w == (3 * SPACE_MAX));
   CHECK(z.sub[root.v].h == (2 * p.kind_min_h[0]));
 
-  // The same shape with no box packer to offer the row at all, which is what
-  // makes it the column's.
+  // The same shape with no box packer gives the same stack.
   p.trybox = 0;
   SizedLayout column;
   diags.clear();
@@ -1774,11 +1704,8 @@ TEST_CASE("size: a row of fold pieces that leaves the domain keeps the column") 
 }
 
 TEST_CASE("size: a fold whose pieces pack back into a row is the flat run") {
-  // Five ranks of one tall state each. The fold cuts every rank into its own
-  // piece; stacked they are five times the domain's height, and in a row they
-  // are the flat run less the four rank gaps the cuts removed, with every edge
-  // a cut crosses dropped from the alignment. That is no fold, so the flat run
-  // is kept (11.10g).
+  // Five ranks of one `SPACE_MAX`-tall state: the fold's stack exceeds the domain and its
+  // row repacks the pieces into one line, so the flat run is kept.
   scav_profile p{ profile() };
   p.pad = 0;
   p.node_sep = 0;
@@ -1804,8 +1731,7 @@ TEST_CASE("size: a fold whose pieces pack back into a row is the flat run") {
   CHECK(z.sub[root.v].h == SPACE_MAX);
   CHECK((5 * SPACE_MAX) > COORD_MAX);
 
-  // With no box packer the stack is all the fold has, it leaves the domain,
-  // and the fold is dropped for the flat run the same way.
+  // With no box packer the fold's stack leaves the domain, so the flat run is kept.
   p.trybox = 0;
   SizedLayout flat;
   diags.clear();
@@ -1822,9 +1748,8 @@ TEST_CASE("size: a fold whose pieces pack back into a row is the flat run") {
 }
 
 TEST_CASE("size: a fold no packing of the pieces fits is dropped for the flat run") {
-  // A node gap wide enough that the pieces leave the domain either way: in a
-  // row it is charged four times between them, stacked it is charged four
-  // times under them. The flat run pays it neither way and is what is kept.
+  // `node_sep` at `SPACE_MAX`: the pieces exceed the domain in a row or a stack, four
+  // `node_sep` gaps either way. The flat run spaces ranks by `rank_sep`, 0.
   scav_profile const p{ [] {
     scav_profile q{ profile() };
     q.pad = 0;
@@ -1850,8 +1775,7 @@ TEST_CASE("size: a fold no packing of the pieces fits is dropped for the flat ru
                       z,
                       diags));
   CHECK(diags.empty());
-  // Five ranks end to end with no rank gap, which is neither packing of the
-  // pieces: the row would be four node gaps wider and leave the domain.
+  // The flat run: five ranks end to end with no gap between.
   CHECK(z.sub[root.v].w == (5 * p.kind_min_w[0]));
   CHECK(z.sub[root.v].h == SPACE_MAX);
   CHECK(((5 * p.kind_min_w[0]) + (4 * p.node_sep)) > COORD_MAX);
@@ -1859,8 +1783,8 @@ TEST_CASE("size: a fold no packing of the pieces fits is dropped for the flat ru
 
 namespace {
 
-// `subs` sibling submachines under one state, each a chain of `ranks` states of
-// one shape, so the state's own packing is over that many equal rects.
+// `subs` sibling submachines under one state, each a chain of `ranks` states of one
+// shape: the state packs `subs` equal rects.
 struct SiblingSubs {
   StateId owner{ INVALID };
   std::vector<scav_box_space> boxes;
@@ -1879,7 +1803,7 @@ SiblingSubs sibling_subs(Chart &c,
     StateId prev{ INVALID };
     for (uint32_t i = 0; i < ranks; ++i) {
       StateId const at{ build_state(c, m, "S", StateKind::Normal, {}) };
-      if (prev.v != INVALID) { build_trans(c, prev, at, TransKind::External, {}); }
+      if (prev.v != INVALID) { build_trans(c, prev, at, TransKind::Default, {}); }
       prev = at;
     }
   }
@@ -1894,8 +1818,8 @@ SiblingSubs sibling_subs(Chart &c,
 }  // namespace
 
 TEST_CASE("size: a sibling row that leaves the domain does not displace the column") {
-  // Two regions, each two ranks wide and one state tall, so side by side they
-  // are wider than the domain and stacked they are not.
+  // Two regions, each two `SPACE_MAX` ranks wide and one state tall: side by side they
+  // exceed the domain, stacked they fit.
   scav_profile p{ profile() };
   p.pad = 0;
   p.rank_sep = 64;
@@ -1919,7 +1843,7 @@ TEST_CASE("size: a sibling row that leaves the domain does not displace the colu
   CHECK(z.state[two.owner.v].w == region_w);
   CHECK(z.state[two.owner.v].h == ((2 * SPACE_MAX) + p.sub_sep));
 
-  // The same extents with no box packer to offer the row.
+  // The same extents with no box packer give the same column.
   p.trybox = 0;
   SizedLayout column;
   diags.clear();
@@ -1929,8 +1853,8 @@ TEST_CASE("size: a sibling row that leaves the domain does not displace the colu
 }
 
 TEST_CASE("size: a sibling column that leaves the domain gives way to the row") {
-  // Five regions of one tall state each: stacked they are five times the
-  // domain's height, side by side they are five narrow boxes.
+  // Five regions of one `SPACE_MAX`-tall state each: stacked they exceed the domain, side
+  // by side they are five narrow boxes.
   scav_profile p{ profile() };
   p.pad = 0;
   p.sub_sep = 0;
@@ -1950,8 +1874,7 @@ TEST_CASE("size: a sibling column that leaves the domain gives way to the row") 
   CHECK(z.state[five.owner.v].w == (5 * p.kind_min_w[0]));
   CHECK(z.state[five.owner.v].h == SPACE_MAX);
 
-  // With no box packer the stack is all there is, and the state that holds it
-  // cannot exist -- which is what makes the run above the row.
+  // With no box packer the stack leaves the domain and the owner state is diagnosed.
   p.trybox = 0;
   SizedLayout stacked;
   diags.clear();
@@ -1963,8 +1886,7 @@ TEST_CASE("size: a sibling column that leaves the domain gives way to the row") 
 }
 
 TEST_CASE("size: a state no sibling packing fits is charged the overflow") {
-  // The same five, each as wide as it is tall: the row leaves the domain along
-  // x and the column along y, so the composed box is charged to the state.
+  // Five `SPACE_MAX` squares: the row exceeds the domain in x and the column in y.
   scav_profile const p{ [] {
     scav_profile q{ profile() };
     q.pad = 0;
@@ -1993,8 +1915,7 @@ TEST_CASE("size: a state no sibling packing fits is charged the overflow") {
 }
 
 TEST_CASE("size: a box formula that leaves the domain is charged to the state") {
-  // A ring of the widest padding a profile may ask for, around a submachine
-  // already most of the domain wide: the state that holds it cannot exist.
+  // `pad` at `SPACE_MAX`: the inner frame fits the domain; its owner's ring exceeds it.
   scav_profile p{ profile() };
   p.pad = SPACE_MAX;
   Chart c;
@@ -2011,26 +1932,27 @@ TEST_CASE("size: a box formula that leaves the domain is charged to the state") 
   CHECK(diags[0].code == DiagCode::CoordinateOverflow);
   CHECK(diags[0].subject.kind == ElemKind::State);
   CHECK(diags[0].subject.ordinal == owner.v);
-  // The submachine underneath was inside the domain, so the state's own ring is
-  // what left it.
   CHECK(z.sub[inner.v].w <= COORD_MAX);
   CHECK((z.sub[inner.v].w + (2 * p.pad)) > COORD_MAX);
 }
 
 namespace scav {
 
-// The two halves of the owner-hole ratio `size.cpp` brackets with
-// SCAV_INTERNAL, declared here rather than in a header so the shipping build
-// keeps them internal.
+// Test-only declarations of `size.cpp`'s SCAV_INTERNAL owner-hole functions.
 FrameDar size_hole_ratio(int32_t w, int32_t h);
-std::vector<FrameDar> size_owner_holes(Chart const &c, SizedLayout const &z);
+void size_owner_holes(Chart const &c, SizedLayout const &z, std::vector<FrameDar> &hole);
 
 }  // namespace scav
 
 namespace {
 
-// A profile whose Choice states reserve a hole a hundred thousand units tall,
-// so an owner leaves its frame a shape nothing about the frame produced.
+std::vector<FrameDar> size_owner_holes(Chart const &c, SizedLayout const &z) {
+  std::vector<FrameDar> hole;
+  scav::size_owner_holes(c, z, hole);
+  return hole;
+}
+
+// Choice states at least 100000 units tall: an owner's hole is far taller than its frame.
 scav_profile tall_choice() {
   scav_profile p{ profile() };
   p.kind_min_h[static_cast<uint32_t>(StateKind::Choice)] = 100000;
@@ -2050,8 +1972,7 @@ Chart hole_chart(uint32_t kids, StateId &owner, SubmachineId &frame) {
   return c;
 }
 
-// How many distinct x and y origins the frame's children came out at, which is
-// the packing's shape as a reader sees it.
+// Counts the distinct x and y origins of the frame's children: its columns and rows.
 void packing_shape(Chart const &c,
                    SizedLayout const &z,
                    SubmachineId frame,
@@ -2075,27 +1996,24 @@ void packing_shape(Chart const &c,
 }  // namespace
 
 TEST_CASE("size: a hole's aspect is a ratio inside the profile's own bounds") {
-  // Both fields stay in [1, 1024], because that is where pack.cpp proved its
-  // products, and the longer axis is the one that takes the cap.
+  // Both fields stay in [1, 1024]; the longer axis takes 1024.
   CHECK(size_hole_ratio(1000, 1000).num == 1024);
   CHECK(size_hole_ratio(1000, 1000).den == 1024);
   CHECK(size_hole_ratio(2000, 1000).num == 1024);
   CHECK(size_hole_ratio(2000, 1000).den == 512);
   CHECK(size_hole_ratio(1000, 2000).num == 512);
   CHECK(size_hole_ratio(1000, 2000).den == 1024);
-  // 16:10 is the readable profile's own ratio, and a hole of that shape reads
-  // as the same number.
+  // A 16:10 hole gives 1024:640, the readable profile's ratio.
   CHECK(size_hole_ratio(1600, 1000).num == 1024);
   CHECK(size_hole_ratio(1600, 1000).den == 640);
 
-  // A hole a million times longer than it is wide floors at 1 rather than
-  // rounding down to no ratio at all, which no profile would validate.
+  // A hole a million times longer than wide floors its short field at 1.
   CHECK(size_hole_ratio(1000000, 1).num == 1024);
   CHECK(size_hole_ratio(1000000, 1).den == 1);
   CHECK(size_hole_ratio(1, 1000000).num == 1);
   CHECK(size_hole_ratio(1, 1000000).den == 1024);
 
-  // No extent on an axis is no aspect: the caller falls back to the profile's.
+  // A zero or negative extent gives `num` 0, and the profile's ratio applies.
   CHECK(size_hole_ratio(0, 500).num == 0);
   CHECK(size_hole_ratio(500, 0).num == 0);
   CHECK(size_hole_ratio(-1, 500).num == 0);
@@ -2114,23 +2032,22 @@ TEST_CASE("size: only a state with a live frame in it leaves a hole") {
 
   std::vector<FrameDar> const hole{ size_owner_holes(c, z) };
   REQUIRE(hole.size() == c.states.size());
-  // The owner reserves 100,000 units of height for a frame a fraction of that
-  // tall, so the hole it leaves is far taller than it is wide.
+  // The 100000-tall owner around a short frame leaves a hole far taller than wide.
   CHECK(hole[owner.v].num < hole[owner.v].den);
   CHECK(hole[owner.v].den == 1024);
-  // A leaf holds no frame, so nothing is packed into it.
+  // A leaf holds no frame: `num` 0.
   for (uint32_t i = 0; i < c.states.size(); ++i) {
     if (i != owner.v) { CHECK(hole[i].num == 0); }
   }
 
-  // A tombstoned frame is no hole either, the state having nothing left to pack.
+  // A tombstoned frame leaves no hole: `num` 0.
   c.submachines[frame.v].live = 0;
   CHECK(size_owner_holes(c, z)[owner.v].num == 0);
 }
 
 TEST_CASE("size: a frame handed its owner's hole packs to that shape") {
-  // The hole is tall and narrow and the profile's ratio is 16:10, so the same
-  // four components come out two by two at the one and in a column at the other.
+  // Four components pack two by two at the profile's 16:10 and in one column in the tall,
+  // narrow hole.
   StateId owner{ INVALID };
   SubmachineId frame{ INVALID };
   Chart c{ hole_chart(4, owner, frame) };
@@ -2157,8 +2074,7 @@ TEST_CASE("size: a frame handed its owner's hole packs to that shape") {
 }
 
 TEST_CASE("size: a root frame has no owner hole and keeps the profile's ratio") {
-  // Every packing in this chart is the root frame's own, so handing the ratios
-  // down cannot reach one and both passes agree rect for rect.
+  // The root frame has no owner, so `OwnerHole` and `Profile` give identical rects.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   for (uint32_t i = 0; i < 5; ++i) { build_state(c, root, "K", StateKind::Normal, {}); }
@@ -2178,8 +2094,7 @@ TEST_CASE("size: a root frame has no owner hole and keeps the profile's ratio") 
 }
 
 TEST_CASE("size: a first pass that leaves the domain ends the handed-down one") {
-  // The failure is the same failure and it is reported once: the second pass
-  // never runs, so nothing can diagnose the same state twice.
+  // An overflow in the first pass ends sizing with one diagnostic, on the owner.
   scav_profile p{ profile() };
   p.pad = SPACE_MAX;
   Chart c;
@@ -2205,11 +2120,8 @@ TEST_CASE("size: a first pass that leaves the domain ends the handed-down one") 
 }
 
 TEST_CASE("size: whitespace elimination grows a sibling submachine's own rect") {
-  // Three frames of 896 x 896, 896 x 640 and 896 x 640 packed at `sub_sep`.
-  // The placement seats the first two side by side and wraps the third, so the
-  // second grows in height to its subrow's 896 and the third in width to the
-  // block's 1984. This is the one packing whose rect is a box a reader sees, so
-  // it is the one the step is written back to.
+  // Frames of 896 x 896, 896 x 640 and 896 x 640 at `sub_sep`: the first two side by side,
+  // the third wrapped under them.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const owner{ build_state(c, root, "P", StateKind::Normal, {}) };
@@ -2252,20 +2164,20 @@ TEST_CASE("size: whitespace elimination grows a sibling submachine's own rect") 
   CHECK(z.sub[subs[1].v].h == 896);   // 640 as sized, then its subrow's height
   CHECK(z.sub[subs[2].v].w == 1984);  // 896 as sized, then its block's width
   CHECK(z.sub[subs[2].v].h == 640);
-  // Every gap is still `sub_sep`, which is what the apportionment preserves.
+  // Every gap stays `sub_sep`.
   CHECK(z.sub[subs[1].v].x == (z.sub[subs[0].v].x + 896 + p.sub_sep));
   CHECK(z.sub[subs[1].v].y == z.sub[subs[0].v].y);
   CHECK(z.sub[subs[2].v].x == z.sub[subs[0].v].x);
   CHECK(z.sub[subs[2].v].y == (z.sub[subs[0].v].y + 896 + p.sub_sep));
-  // Extent-neutral: the owner's box is the packing's own extents plus its ring.
+  // The owner's box is the packing's extents, 1984 x 1728, plus its ring.
   CHECK(z.state[owner.v].w == (1984 + (2 * p.pad)));
   CHECK(z.state[owner.v].h == (1728 + (2 * p.pad)));
 }
 
 namespace {
 
-// A corpus chart with a band on every state, a label box on every transition, and its
-// orders.
+// A corpus chart with a band on every state, a label box on every live transition, and
+// its orders.
 struct Sample {
   Chart c;
   std::vector<scav_box_space> box;
@@ -2313,7 +2225,7 @@ uint32_t largest_frame(Sample const &x) {
   return most;
 }
 
-// A sizing and its trace. Traced, every frame is laid out rather than read from the memo.
+// A sizing and its trace; a traced run lays out every frame, bypassing the memo.
 struct Traced {
   SizedLayout z;
   std::vector<char> trace;

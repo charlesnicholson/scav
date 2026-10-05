@@ -20,7 +20,23 @@ namespace scav { void layout_test_no_search(bool on); }  // namespace scav
 
 namespace scav::test {
 
-// Whether the corpus is brew, dock, estop and led: every tier but SCAV_TEST_TIER=full.
+// Every chart in test_data/charts/gauntlet, by file name; test_gauntlet.py checks it
+// against the directory.
+inline constexpr std::array<char const *, 50> GAUNTLET{
+  "above.scav",     "between.scav",   "bypass.scav",  "carried.scav", "chain.scav",
+  "corner.scav",    "crossing.scav",  "crowd.scav",   "detour.scav",  "divider.scav",
+  "enclosing.scav", "entered.scav",   "fanin.scav",   "flank.scav",   "folded.scav",
+  "fork.scav",      "headed.scav",    "header.scav",  "inloop.scav",  "inside.scav",
+  "inward.scav",    "kicked.scav",    "lane.scav",    "level.scav",   "long.scav",
+  "loop.scav",      "marks.scav",     "mixed.scav",   "mutual.scav",  "outside.scav",
+  "ported.scav",    "pulled.scav",    "rebound.scav", "reentry.scav", "regions.scav",
+  "resumed.scav",   "ring.scav",      "room.scav",    "rooms.scav",   "roundtrip.scav",
+  "seated.scav",    "separator.scav", "side.scav",    "stacked.scav", "stretch.scav",
+  "through.scav",   "tight.scav",     "transit.scav", "under.scav",   "unfolded.scav"
+};
+
+// Whether the corpus is brew, dock, estop, kiln and led: every tier but
+// SCAV_TEST_TIER=full.
 inline bool corpus_light() {
   char const *const tier{ std::getenv("SCAV_TEST_TIER") };
   return (tier == nullptr) || (std::string_view{ tier } != "full");
@@ -32,7 +48,7 @@ inline bool corpus_skipped(std::string_view chart) {
   bool const corpus{ chart.ends_with(".scav") &&
                      (chart.find('/') == std::string_view::npos) };
   return light && corpus && (chart != "brew.scav") && (chart != "dock.scav") &&
-         (chart != "estop.scav") && (chart != "led.scav");
+         (chart != "estop.scav") && (chart != "kiln.scav") && (chart != "led.scav");
 }
 
 // `golden` less every line naming a skipped chart as one of its words.
@@ -92,7 +108,7 @@ inline std::string corpus_pins_of(std::string_view chart, bool text) {
   return {};
 }
 
-// Whether a search-reaches-pins case searches `chart`; mill's search is `scav selftest`'s.
+// Whether a search-reaches-pins case searches `chart`.
 inline bool corpus_searched(std::string_view chart) {
   return !corpus_skipped(chart) && (chart != "mill.scav");
 }
@@ -118,13 +134,8 @@ inline std::string corpus_pins_line(std::string_view chart,
   for (RankPin const &r : pins.ranks) { flag("--rank", { r.state.v, r.rank }); }
   for (ChainCut const &k : pins.cuts) { flag("--cut", { k.trans.v, k.leg }); }
   for (ReversePin const &r : pins.reverses) { flag("--reverse", { r.trans.v, r.leg }); }
-  for (FacePin const &f : pins.faces) {
-    flag("--face", { f.trans.v, f.leg, f.end, f.face });
-  }
+  for (EndPin const &e : pins.ends) { flag("--end", { e.trans.v, e.leg, e.end, e.face }); }
   for (OrientPin const &o : pins.orients) { flag("--orient", { o.frame.v }); }
-  for (SidePin const &s : pins.sides) {
-    flag("--side", { s.trans.v, s.leg, s.end, s.side });
-  }
   for (FoldPin const &f : pins.folds) {
     if (f.layer != 0) {
       flag("--fold", { f.frame.v, f.mode, f.layer });
@@ -132,6 +143,7 @@ inline std::string corpus_pins_line(std::string_view chart,
       flag("--fold", { f.frame.v, f.mode });
     }
   }
+  for (LoopPin const &l : pins.loops) { flag("--loop", { l.state.v, l.face, l.end }); }
   out += '\n';
   return out;
 }
@@ -179,16 +191,15 @@ inline bool corpus_pins_read(std::string_view flags, uint32_t &row, SearchPins &
       pins.cuts.push_back({ .trans = TransId{ f[0] }, .leg = f[1] });
     } else if (name == "--reverse") {
       pins.reverses.push_back({ .trans = TransId{ f[0] }, .leg = f[1] });
-    } else if (name == "--face") {
-      pins.faces.push_back(
+    } else if (name == "--end") {
+      pins.ends.push_back(
           { .trans = TransId{ f[0] }, .leg = f[1], .end = f[2], .face = f[3] });
     } else if (name == "--orient") {
       pins.orients.push_back({ .frame = SubmachineId{ f[0] } });
-    } else if (name == "--side") {
-      pins.sides.push_back(
-          { .trans = TransId{ f[0] }, .leg = f[1], .end = f[2], .side = f[3] });
     } else if (name == "--fold") {
       pins.folds.push_back({ .frame = SubmachineId{ f[0] }, .mode = f[1], .layer = f[2] });
+    } else if (name == "--loop") {
+      pins.loops.push_back({ .state = StateId{ f[0] }, .face = f[1], .end = f[2] });
     } else {
       return false;
     }

@@ -1,8 +1,8 @@
 #ifndef SCAV_CORE_TESTS_TEST_SUPPORT_H_INCLUDED
 #define SCAV_CORE_TESTS_TEST_SUPPORT_H_INCLUDED
 
-// Shared by the core unit tests, header-only and test-only. Charts are inline
-// literals, so nothing here reaches a filesystem.
+// Helpers shared by the core unit tests, header-only and test-only. Charts are
+// inline literals.
 
 #include "core/core_internal.h"
 #include "scav/scav_core.h"
@@ -72,8 +72,7 @@ inline Lexed lex_text(std::string_view text) {
   return r;
 }
 
-// Canonical text for source. The parse is not asserted: some callers feed input
-// the parser rejects, to see the printer walk what survived.
+// Canonical text for `text`, printed whether or not the parse succeeds.
 inline std::string print(std::string_view text, uint32_t columns = DEFAULT_PRINT_COLUMNS) {
   Parsed const r{ parse(text) };
   std::string out;
@@ -82,8 +81,6 @@ inline std::string print(std::string_view text, uint32_t columns = DEFAULT_PRINT
   return out;
 }
 
-// Canonical text prints as itself -- not merely that a second pass agrees with
-// the first, which every input satisfies.
 inline bool is_canonical(std::string_view text, uint32_t columns = DEFAULT_PRINT_COLUMNS) {
   return std::string{ text } == print(text, columns);
 }
@@ -97,8 +94,6 @@ inline std::string_view src(ParsedDocument const &pd, Span span) {
   return { reinterpret_cast<char const *>(pd.src_bytes.data() + span.off), span.len };
 }
 
-// The first diagnostic's code, or Ok when there were none. Every error test
-// asserts the code rather than the message, because the message is prose.
 inline DiagCode first_code(std::vector<Diagnostic> const &diags) {
   return diags.empty() ? DiagCode::Ok : diags[0].code;
 }
@@ -139,7 +134,7 @@ inline IncludeStmt const &include_at(ParsedDocument const &pd, uint32_t stmt) {
   return pd.includes[pd.stmt_payload[stmt]];
 }
 
-// Model refs, spelled short so an assertion reads like its claim.
+// ElemRef shorthands for states, submachines, transitions and the chart.
 inline ElemRef ref(StateId id) { return { .kind = ElemKind::State, .ordinal = id.v }; }
 inline ElemRef ref(SubmachineId id) {
   return { .kind = ElemKind::Submachine, .ordinal = id.v };
@@ -155,7 +150,7 @@ inline std::string path(Chart const &c, StateId id) {
   return out;
 }
 
-// A path spelled back out, so an endpoint assertion reads like the source did.
+// An endpoint as source text: `*`, or segments joined by `/` with `:` qualifiers.
 inline std::string path_text(ParsedDocument const &pd, Endpoint const &e) {
   if (e.wildcard != 0) { return "*"; }
   std::string out;

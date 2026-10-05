@@ -1,0 +1,10 @@
+// A state with a wide description and three internal loops: side by side, the loops
+// fit under the description in less height than stacked.
+chart rooms "loops under a wide description" {
+  state Busy "a description wider than its three loops side by side",
+
+  trans * -> Busy,
+  trans internal Busy -> Busy "a",
+  trans internal Busy -> Busy "b",
+  trans internal Busy -> Busy "c",
+}

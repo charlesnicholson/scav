@@ -22,10 +22,10 @@ Chart nested_2k_chart() {
       }
       StateId const comp{ build_state(c, parent, {}, StateKind::Normal, {}) };
       for (uint32_t k = 1; k < level.size(); ++k) {
-        build_trans(c, level[k - 1], level[k], TransKind::External, {});
-        build_trans(c, level[k], comp, TransKind::External, {});
+        build_trans(c, level[k - 1], level[k], TransKind::Default, {});
+        build_trans(c, level[k], comp, TransKind::Default, {});
       }
-      if (last.v != INVALID) { build_trans(c, comp, last, TransKind::External, {}); }
+      if (last.v != INVALID) { build_trans(c, comp, last, TransKind::Default, {}); }
       last = comp;
       parent = build_submachine(c, comp, {}, {});
     }
@@ -42,8 +42,8 @@ Chart flat_2k_chart() {
     all.push_back(build_state(c, root, {}, StateKind::Normal, {}));
   }
   for (uint32_t i = 1; i < all.size(); ++i) {
-    build_trans(c, all[i - 1], all[i], TransKind::External, {});
-    if ((i % 16) == 0) { build_trans(c, all[i], all[i - 16], TransKind::External, {}); }
+    build_trans(c, all[i - 1], all[i], TransKind::Default, {});
+    if ((i % 16) == 0) { build_trans(c, all[i], all[i - 16], TransKind::Default, {}); }
   }
   return c;
 }
@@ -55,7 +55,7 @@ Chart sealed_chart() {
   StateId const outer{ build_state(c, root, "P", StateKind::Normal, {}) };
   SubmachineId const inner{ build_submachine(c, outer, {}, {}) };
   StateId const deep{ build_state(c, inner, "C", StateKind::Normal, {}) };
-  build_trans(c, bar, deep, TransKind::External, {});
+  build_trans(c, bar, deep, TransKind::Default, {});
   return c;
 }
 
@@ -64,11 +64,7 @@ scav_profile sealed_profile(scav_profile const &base) {
   p.pad = 16;
   p.rank_sep = 0;
   p.node_sep = 576;
-  // The move sweep off, because every caller is about the inflation retry and
-  // the sweep now routes this chart without one: a face move finds a way in
-  // that does not cross the bar, so nothing is sealed (11.10e). That is pinned
-  // in its own case; here the channel has to stay shut to test opening it.
-  p.portfolio_k = 0;
+  p.portfolio_k = 0;  // Level 1 off
   return p;
 }
 

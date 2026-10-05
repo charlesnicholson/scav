@@ -1,10 +1,6 @@
-// Concurrent regions, and a transition between two of them. The two regions are
-// siblings under a state, so the nearest enclosing submachine is one level
-// further out than that state, and there the state was an ordinary obstacle
-// walling the route out of the space between its own regions: it went the long
-// way round, through whatever else that frame held and back along the line it
-// arrived on. The channel is routed inside the state now (11.10g), and the
-// counts gauntlet_tests.cpp pins for it are zero bar one route at `compact`.
+// Concurrent regions, and a transition between two of them each way. Each crosses
+// the divider between the regions once, square to it, at one port on the divider,
+// and no route passes through a box or doubles back.
 chart regions "two regions and a crossing" {
   state Running {
     submachine motor {

@@ -30,8 +30,7 @@ std::vector<uint32_t> children_of(ParsedDocument const &pd, uint32_t stmt) {
   return out;
 }
 
-// A whole tree flattened depth-first, spelled as "kind:name", which is enough
-// to assert shape without asserting row numbers.
+// The tree flattened depth-first as `kind:name` strings.
 std::vector<std::string> shape(ParsedDocument const &pd) {
   std::vector<std::string> out;
   std::vector<uint32_t> stack{ syntax_root_statement(pd) };
@@ -123,8 +122,7 @@ TEST_CASE("parse: a document too large for a span is rejected at every entry") {
         parse_document(nullptr, SIZE_MAX, "big.scav", parse_default_options(), pd, diags));
     CHECK(first_code(diags) == DiagCode::DocumentTooLarge);
 
-    // parse_tokens takes the same check, because it is reachable without going
-    // through parse_document.
+    // `parse_tokens` makes the same size check.
     LexResult lexed;
     lexed.tokens.push_back({ .off = 0, .len = 0, .kind = TokKind::End });
     std::vector<Diagnostic> token_diags;
@@ -203,8 +201,7 @@ TEST_CASE("parse: every state kind the format spells") {
 }
 
 TEST_CASE("parse: initial and final are not spellable as kinds") {
-  // They are reachable only through `*` in an endpoint, so accepting
-  // the words here would be a second spelling of a state nobody can write.
+  // Initial and final states are written only as `*` in an endpoint.
   CHECK(first_code(parse("chart c { state A initial, }").diags) ==
         DiagCode::UnknownStateKind);
   CHECK(first_code(parse("chart c { state A final, }").diags) ==
@@ -268,7 +265,7 @@ chart c {
   CHECK(trans_at(r.pd, ts[0]).src.wildcard == 1);
   CHECK(path_text(r.pd, trans_at(r.pd, ts[0]).dst) == "Off");
   CHECK(str(r.pd, trans_at(r.pd, ts[1]).label) == "POWER_ON");
-  CHECK(trans_at(r.pd, ts[1]).kind == TransKind::External);  // the default
+  CHECK(trans_at(r.pd, ts[1]).kind == TransKind::Default);
   CHECK(trans_at(r.pd, ts[2]).kind == TransKind::Internal);
   CHECK(trans_at(r.pd, ts[3]).kind == TransKind::Local);
   CHECK(trans_at(r.pd, ts[4]).kind == TransKind::External);
@@ -402,8 +399,7 @@ chart c {
 }
 
 TEST_CASE("parse: a flag stays distinct from an explicit true") {
-  // Which spelling is canonical is the printer's rule. Folding here
-  // would decide it early and irreversibly.
+  // The parser keeps both spellings; the printer picks the canonical one.
   Parsed const r{ parse(R"(chart c { @a, @b = "true", })") };
   REQUIRE(r.ok);
   std::vector<uint32_t> const attrs{ stmts_of(r.pd, StmtKind::Attr) };
@@ -439,8 +435,7 @@ TEST_CASE("parse: a missing separator is its own diagnostic") {
 }
 
 TEST_CASE("parse: a block comment says so rather than blaming the statement") {
-  // The lexer skips the body and reports once, so the author is told what is
-  // actually wrong instead of that `/` cannot start a statement.
+  // The lexer skips the block comment's body and reports it once.
   Parsed const r{ parse("chart c {\n  /* not supported */\n  state A,\n}") };
   CHECK_FALSE(r.ok);
   CHECK(first_code(r.diags) == DiagCode::BlockCommentUnsupported);
@@ -583,7 +578,7 @@ TEST_CASE("parse: a statement span covers the whole construct, block included") 
 }
 
 TEST_CASE("parse: every diagnostic locates to a span inside the document") {
-  // A diagnostic nobody can point at is not a diagnostic.
+  // Every diagnostic span lies inside the document and maps to a line and column.
   for (std::string_view const text : { "chart c { state A state B }",
                                        "chart c { region R {}, }",
                                        "chart c { trans A B, }",
@@ -611,8 +606,7 @@ TEST_CASE("parse: every diagnostic locates to a span inside the document") {
 TEST_CASE("parse: strings land in the pool in the order they are met") {
   Parsed const r{ parse(R"(chart zeta { state Mid, state Alpha, state Omega, })") };
   REQUIRE(r.ok);
-  // Document name first, then the chart, then each state as the parser reaches
-  // it. Nothing sorts and nothing dedups, so the pool is the names concatenated.
+  // Pool: document name, chart name, then each state name in parse order.
   std::string const pool{ reinterpret_cast<char const *>(r.pd.strings.bytes.data()),
                           r.pd.strings.bytes.size() };
   CHECK(pool == "test.scavzetaMidAlphaOmega");
@@ -634,8 +628,7 @@ TEST_CASE("parse: a repeated name gets its own bytes and its own ref") {
 }
 
 TEST_CASE("parse: the pool is a function of the bytes") {
-  // Same input, same pool: the one property worth relying on. Reordering the
-  // source reorders the pool, so it is not a thing to hash across documents.
+  // Same bytes give the same pool; reordering the source reorders the pool.
   Parsed const a{ parse("chart c { state Alpha, state Beta, }", "d.scav") };
   Parsed const b{ parse("chart c { state Beta, state Alpha, }", "d.scav") };
   Parsed const again{ parse("chart c { state Alpha, state Beta, }", "d.scav") };
@@ -652,8 +645,7 @@ TEST_CASE("parse: an identifier is ASCII, so a non-ASCII name is a lexical error
 }
 
 TEST_CASE("parse: src_bytes holds the normalized document, not the raw one") {
-  // The name is ASCII because `ident` is; the decomposed sequence goes in the
-  // label, which is where the grammar allows one.
+  // The decomposed sequence sits in the label; identifiers are ASCII.
   Parsed const r{ parse(
       "\xef\xbb\xbf"
       "chart c {\r\n  state Cafe \"Caf\x65\xcc\x81\",\r\n}\r\n") };
@@ -702,8 +694,8 @@ TEST_CASE("parse: the blank belongs above a leading comment run, not below it") 
   REQUIRE(states.size() == 2);
   CHECK(r.pd.stmts[states[1]].blank_before == 1);
 
-  // And the other spelling: the gap under the comment is the comment's own,
-  // which `CommentPos::OwnLine` already records.
+  // A blank below the comment makes it `CommentPos::OwnLine`; the statement's
+  // `blank_before` stays 0.
   Parsed const under{ parse(
       "chart c {\n"
       "  state A,\n"
@@ -720,9 +712,7 @@ TEST_CASE("parse: the blank belongs above a leading comment run, not below it") 
 }
 
 TEST_CASE("parse: a trailing comment above does not hide the blank below it") {
-  // The gap is measured from the end of that comment, not from the token before
-  // it: the comment sits between the two, so counting from the comma finds no
-  // newlines at all and the blank disappears.
+  // The gap is measured from the end of the trailing comment.
   Parsed const r{ parse(
       "chart c {\n"
       "  state A, // trailing\n"
@@ -747,7 +737,7 @@ TEST_CASE("parse: a trailing comment above does not hide the blank below it") {
   REQUIRE(rows.size() == 2);
   CHECK(heading.pd.stmts[rows[1]].blank_before == 1);
 
-  // And without the blank, so the test above is not passing on the comment.
+  // Control: with no blank line, `blank_before` is 0.
   Parsed const tight{ parse(
       "chart c {\n"
       "  state A, // trailing\n"
@@ -798,8 +788,8 @@ chart c {
   CHECK(comments_of(r.pd, 0) == std::vector<std::string>{ "leading // about the chart" });
   CHECK(comments_of(r.pd, states[0]) ==
         std::vector<std::string>{ "leading // about Idle", "trailing // after Idle" });
-  // A blank line *after* is what detaches a comment from the statement below
-  // it; a blank line before only detaches it from the statement above.
+  // A comment followed by a blank line is own-line and still attaches to the next
+  // statement.
   CHECK(
       comments_of(r.pd, states[1]) ==
       std::vector<std::string>{ "own-line // floating, attached to nothing in particular",
@@ -817,8 +807,7 @@ chart c {
   REQUIRE(r.ok);
   uint32_t const on{ stmts_of(r.pd, StmtKind::State)[0] };
   REQUIRE(comments_of(r.pd, on).size() == 1);
-  // Whether it sits before the statement or inside its block is derivable from
-  // the offsets, so CommentPos does not need a fourth value.
+  // A comment inside the block starts past the statement's start offset.
   CHECK(r.pd.comments[r.pd.stmts[on].comments.off].src.off > r.pd.stmts[on].src.off);
 }
 
@@ -864,7 +853,7 @@ chart c {
   CHECK(total == 9);
   CHECK(r.pd.comments.size() == 9);
 
-  // And every span is contiguous and in range, which is what makes it a span.
+  // Every statement's comment span lies within `r.pd.comments`.
   for (Statement const &s : r.pd.stmts) {
     CHECK(static_cast<size_t>(s.comments.off) + s.comments.len <= r.pd.comments.size());
   }
@@ -895,8 +884,7 @@ TEST_CASE("parse: nesting to the depth-16 design target") {
 }
 
 TEST_CASE("parse: a hostile depth-10,000 document is rejected, not crashed") {
-  // The reason the descent is a heap vector. A call-recursive parser's answer
-  // here is a stack overflow, which is a crash and not a diagnostic.
+  // The parser's descent stack is a heap vector.
   Parsed const r{ parse(synth_deep_document(10000)) };
   CHECK_FALSE(r.ok);
   CHECK(first_code(r.diags) == DiagCode::DepthLimitExceeded);
@@ -930,8 +918,6 @@ TEST_CASE("parse: an unclosed block runs out of tokens rather than looping") {
 }
 
 TEST_CASE("parse: a lexical error still reports the syntax error behind it") {
-  // One run should not make an author fix stray bytes before it will tell them
-  // about the missing comma.
   Parsed const r{ parse("chart c { state A ? state B }") };
   CHECK_FALSE(r.ok);
   CHECK(has_code(r.diags, DiagCode::UnexpectedCharacter));

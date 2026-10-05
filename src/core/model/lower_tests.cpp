@@ -55,7 +55,6 @@ std::string_view src_text(Chart const &c, Span span) {
   return { reinterpret_cast<char const *>(c.src_bytes.data() + span.off), span.len };
 }
 
-// The statement's source text, so provenance assertions read like the chart.
 std::string_view stmt_text(Chart const &c, StmtId stmt) {
   return src_text(c, c.stmts[stmt.v].src);
 }
@@ -353,8 +352,8 @@ TEST_CASE("lower: refuses a non-empty chart and a chartless parse") {
 }
 
 TEST_CASE("lower: any of the three child kinds earns a state its implicit submachine") {
-  // A state block gets one as soon as it holds a state, a transition or an
-  // include, and the answer comes from whichever of the three is met first.
+  // A state block holding a state, transition or include gets an implicit
+  // submachine; each subcase puts a different kind first.
   SUBCASE("a transition leads the block") {
     Lowered const r{ lower("chart c { state A, state On { trans A -> A, }, }") };
     REQUIRE(r.parsed);
@@ -439,7 +438,7 @@ TEST_CASE("lower: a parentless row is left out of the rebuilt spans, not written
   Span const kids{ c.submachines[root.v].children };
   REQUIRE(kids.len == 1);
   CHECK(c.state_ids[kids.off] == b);
-  // Validation is where the missing link is reported, one finding on the row.
+  // Validation reports the missing parent once, on the row.
   std::vector<Diagnostic> diags;
   CHECK_FALSE(validate_chart(c, diags));
   REQUIRE(diags.size() == 1);
@@ -468,9 +467,8 @@ TEST_CASE("lower: a pending transition naming an unsupplied document is skipped"
 }
 
 TEST_CASE("lower: a chart statement inside a block is refused where it stands") {
-  // The grammar admits one chart and only as the root, so this shape is a
-  // producer bug rather than authored text. The document is built by hand
-  // because no source text reaches the arm that reports it.
+  // A hand-built document with a nested chart statement, a shape the parser never
+  // emits.
   constexpr std::string_view SOURCE{ "chart c { state A { chart nested {} } }" };
   ParsedDocument pd;
   for (char const ch : SOURCE) { pd.src_bytes.push_back(static_cast<scav_byte>(ch)); }
@@ -525,8 +523,7 @@ TEST_CASE("lower: a chart statement inside a block is refused where it stands") 
   CHECK(diags[0].code == DiagCode::MisplacedStatement);
   CHECK(diags[0].doc == DocId{ 0 });
   CHECK(src_text(c, diags[0].src) == "chart nested {}");
-  // The state was created; only the statement inside it was refused, and the
-  // block it opened earned no submachine.
+  // State A is created without a submachine; only the nested chart is refused.
   REQUIRE(c.states.size() == 1);
   CHECK(chart_string(c, c.states[0].name) == "A");
   CHECK(c.states[0].submachines.len == 0);

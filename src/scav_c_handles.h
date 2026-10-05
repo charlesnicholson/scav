@@ -1,9 +1,8 @@
 #ifndef SCAV_C_HANDLES_H_INCLUDED
 #define SCAV_C_HANDLES_H_INCLUDED
 
-// The handles more than one library's C surface operates on, which is why they
-// live at the src root rather than in either. A handle only one library touches
-// belongs to that library: see src/draw/handles.h. Nothing installs them.
+// Handles that more than one library's C surface uses; not installed. A handle
+// only one library uses lives in that library, as in src/draw/handles.h.
 
 #include "scav/scav_core.h"
 #include "scav/scav_core_c.h"
@@ -11,8 +10,7 @@
 #include <cstdint>
 #include <vector>
 
-// Complete here and opaque everywhere else, so no C++ member can reach a
-// caller's translation unit.
+// Complete here; the public C headers declare it opaque.
 struct scav_load {
   scav::Loader loader;
   std::vector<scav::Diagnostic> diags;  // the loader's, plus finish's

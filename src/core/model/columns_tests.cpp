@@ -63,7 +63,7 @@ TEST_CASE("column: entity appends grow every matching column in lockstep") {
   write_u32(c, per_state, a.v, 0xAAAA);
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   build_submachine(c, a, "inner", {});
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   CHECK(column_count(c, per_state) == chart_entity_count(c, ElemKind::State));
   CHECK(column_count(c, per_sub) == chart_entity_count(c, ElemKind::Submachine));
@@ -137,7 +137,6 @@ TEST_CASE("column: registration rejects what would corrupt the contract") {
   Chart c;
   build_chart(c, "c", {});
   REQUIRE(column_register(c, "ok", ElemKind::State, ValueKind::U32, 4, 4, 0).v != INVALID);
-  // A column is an identity: re-registration is a bug, not an upsert.
   CHECK(column_register(c, "ok", ElemKind::State, ValueKind::U32, 4, 4, 0).v == INVALID);
   CHECK(column_register(c, "", ElemKind::State, ValueKind::U32, 4, 4, 0).v == INVALID);
   CHECK(column_register(c, "x", ElemKind::None, ValueKind::U32, 4, 4, 0).v == INVALID);

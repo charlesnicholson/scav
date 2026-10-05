@@ -1,11 +1,6 @@
 #!/usr/bin/env python3
-"""One page of every corpus chart drawn three ways, for blind review.
-
-`baseline.py` renders the SVGs and reports what it could not run; this turns
-that directory into a single self-contained page a reviewer can open, print, or
-send. The SVGs are inlined as data URIs so the file carries no dependencies,
-and every panel states the extent it came out at, because "which of these is
-better" is partly "which of these fits on anything".
+"""One self-contained HTML page of every corpus chart drawn three ways, SVGs inlined
+as data URIs, each panel labelled with its extent.
 
   tools/poster.py                      out/baseline -> out/baseline/poster.html
   tools/poster.py --in DIR --out F
@@ -22,17 +17,14 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CORPUS = REPO_ROOT / "test_data/charts"
 
-# scav, then the two incumbents. Categorical slots 1-3 of the validated
-# palette, which clears the all-pairs floors in light mode; aqua sits under 3:1
-# on this surface, so every mark that uses it carries a visible label.
+# scav, then the two incumbents, in palette slots 1-3; aqua marks carry a label.
 ENGINES = (
     ("scav", "scav", "#2a78d6"),
     ("plantuml", "PlantUML", "#eb6834"),
     ("elkjs", "elkjs", "#1baf7a"),
 )
 
-# A cell that rendered but lost something. `baseline.py` prints these; they are
-# repeated here so the page cannot credit an engine with a chart it mangled.
+# Cells that rendered with losses, as `baseline.py` reports them.
 DEGRADED = {
     ("bottler.scav", "plantuml"): "reference into a non-first region: "
                                   "Weighing -> Dispensing anchored to its composite",
@@ -266,7 +258,7 @@ def main() -> int:
 <body>
 <h1>Statechart layout shootout</h1>
 <p class="sub">Every chart in the transcribed corpus, drawn by scav and by the two
-incumbents it exists to replace. Same model, same eleven files, three engines.
+incumbents it exists to replace. Same model, same {len(charts)} files, three engines.
 scav is at <code>{commit}</code>: layered ranks per submachine, Brandes &amp;
 K&ouml;pf coordinates, and orthogonal routes from an A* over a per-frame
 visibility graph.</p>

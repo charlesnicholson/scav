@@ -1,8 +1,8 @@
 #ifndef SCAV_APPS_CLI_CLI_H_INCLUDED
 #define SCAV_APPS_CLI_CLI_H_INCLUDED
 
-// What the verbs share, and nothing a library could own: the exit codes, the
-// two output streams, and one entry point apiece.
+// Declarations the CLI verbs share: exit codes, output, the load prologue, layout
+// flags, and the verbs' entry points.
 
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
@@ -34,15 +34,12 @@ struct Loaded {
   int code;
 };
 
-// The prologue three verbs share. Core does the loading, the validation and the
-// rendering; the two decisions here are which stream and which exit code.
+// Loads `path`, validates when `validate` is set, writes diagnostics to stderr,
+// and sets `out.code`.
 void load_and_report(char const *path, bool validate, Loaded &out);
 
-// What `render` and `dump --layout` hand layout besides the chart: a row of
-// 11.10's table, or `INVALID` for the search; the pins to start from; and
-// whether to search from them at all. A run's own row and pins with
-// `--no-search` lay that drawing out again exactly, so an edited copy of them
-// is a counterfactual scored on the shipped objective (11.10g).
+// Layout inputs from `render` and `dump --layout`: a portfolio row or `INVALID`
+// for the search, the starting pins, and whether to search from them.
 struct LayoutArgs {
   char const *profile{ "readable" };
   uint32_t row{ INVALID };
@@ -60,21 +57,21 @@ enum class ArgRead : uint32_t { NotOurs, Taken, Malformed };
 //   --rank S:R           state S held at rank R of its frame
 //   --cut T:L            leg L of transition T left unchained
 //   --reverse T:L        that leg turned round before cycles break
-//   --face T:L:E:F       end E (0 departs, 1 arrives) leaves by face F: 0 left,
-//                        1 right, 2 top, 3 bottom
+//   --end T:L:E:F        end E (0 departs, 1 arrives) on face F (0 left, 1 right,
+//                        2 top, 3 bottom) of its box, or of its port's state
 //   --orient F           submachine F's ranks run down the page
-//   --side T:L:E:S       end E's port crosses its state's border on side S, as a face
 //   --fold F:M[:L]       submachine F's run folds as the scale measure picks (M 0),
 //                        always (1), or never (2); a nonzero L is the one rank
 //                        the fold cuts before
+//   --loop S:F:E         state S's loop room on face F of its free interior (as
+//                        --end), at end E (0 top or left, 1 bottom or right)
 //   --no-search          lay out the row and pins given, and move nothing
 //   --no-text            lay out with no space requests, the scale the layout
 //                        goldens are stated at
 ArgRead read_layout_arg(int argc, char **argv, int &i, LayoutArgs &out);
 
-// The flags above that lay out a run's drawing again: its profile where it is
-// not the default and its scale where it is not real text, from `args`; its
-// row and every pin, from the run.
+// Appends the flags that reproduce a run: the non-default profile and `--no-text`
+// from `args`, then `row` and every pin.
 void append_layout_args(std::string &out,
                         LayoutArgs const &args,
                         uint32_t row,
@@ -85,7 +82,7 @@ int run_dump(char const *path,
              bool as_json,
              bool with_layout,
              bool trace,
-             bool trace_search,
+             TraceScope scope,
              LayoutArgs const &args);
 int run_render(char const *path,
                char const *out_path,

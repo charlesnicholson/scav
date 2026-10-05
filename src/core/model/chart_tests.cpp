@@ -52,7 +52,7 @@ TEST_CASE("chart: liveness is the row's flag; the chart entity has none") {
   Chart c;
   SubmachineId const root{ build_chart(c, "c", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
-  TransId const t{ build_trans(c, a, a, TransKind::External, {}) };
+  TransId const t{ build_trans(c, a, a, TransKind::Default, {}) };
   CHECK(chart_live(c, ref(a)));
   CHECK(chart_live(c, ref(t)));
   CHECK(chart_live(c, ref(root)));
@@ -171,8 +171,7 @@ TEST_CASE("path: unnamed pseudostates spell as $kind with a stable ordinal") {
   CHECK(path(c, c1) == "$choice1");
   CHECK(path(c, f0) == "$final");
 
-  // Ordinals count rows, not live rows: tombstoning one $choice must not
-  // rename the other, or an address would dangle on delete.
+  // Ordinals count tombstoned rows too, so tombstoning $choice keeps $choice1.
   c.states[c0.v].live = 0;
   CHECK(path(c, c1) == "$choice1");
 }
@@ -207,8 +206,7 @@ TEST_CASE("chart: footprint counts what the arrays hold") {
 }
 
 TEST_CASE("chart: a kind this build does not know counts and validates as nothing") {
-  // ElemKind crosses the C ABI, so a newer producer can hand back a value no
-  // arm names. Every query answers "no rows" rather than indexing one.
+  // An ElemKind outside the enum counts zero rows and is invalid, dead and attr-less.
   Chart c;
   SubmachineId const root{ build_chart(c, "c", {}) };
   build_state(c, root, "A", StateKind::Normal, {});
@@ -230,7 +228,7 @@ TEST_CASE("chart: attrs of a ref that names no row is the empty span") {
   CHECK(chart_attrs_of(c, ElemRef{ ElemKind::State, 9 }) == Span{});
   CHECK(chart_attrs_of(c, ElemRef{ ElemKind::Point, 0 }) == Span{});
   CHECK(chart_attrs_of(c, ElemRef{ ElemKind::None, INVALID }) == Span{});
-  // A tombstoned row still has its span; liveness is chart_live's question.
+  // chart_attrs_of still returns a tombstoned row's span.
   c.states[a.v].live = 0;
   CHECK(chart_attrs_of(c, ref(a)).len == 1);
 }

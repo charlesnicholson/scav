@@ -16,7 +16,7 @@ class HashMap {
   // False when the key is already present; the stored value is untouched.
   bool insert(K const &key, V value) { return map.emplace(key, std::move(value)).second; }
 
-  // Null when absent, so presence and access are one probe.
+  // Null when absent.
   [[nodiscard]] V *find(K const &key) {
     auto const it{ map.find(key) };
     return (it == map.end()) ? nullptr : &it->second;

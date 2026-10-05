@@ -11,8 +11,8 @@
 
 namespace scav {
 
-// Four independent lanes over two words at a time, so their multiplies overlap; then
-// the lanes and the tail fold into one.
+// Mixes eight-word blocks into four lanes, two words per lane, then folds the lanes and
+// the tail into one hash.
 uint64_t memo_hash(std::vector<uint32_t> const &key) {
   constexpr uint64_t K{ UINT64_C(0x9E37'79B9'7F4A'7C15) };
   auto const mix = [](uint64_t h, uint64_t w) {
@@ -36,15 +36,14 @@ uint64_t memo_hash(std::vector<uint32_t> const &key) {
 
 namespace {
 
-// Every memo alive, and how many layouts are open. Never destroyed: a pool
-// thread's memos outlive static destruction and deregister as they go.
 struct Registry {
   Mutex lock;
   std::vector<Memo *> memos;
-  uint32_t open{ 0 };
+  uint32_t open{ 0 };  // live `MemoRun`s
   uint32_t serial{ 0 };
 };
 
+// Never destroyed; memos on pool threads deregister after static destruction.
 Registry &registry() {
   static Registry *const INSTANCE{ new Registry };
   return *INSTANCE;
@@ -115,8 +114,7 @@ MemoRun::~MemoRun() {
   for (Memo *const m : r.memos) { m->release(); }
 }
 
-// The slot holding `key`, or the empty one it would go in; the table is never
-// more than half full, so the probe ends.
+// The slot holding `key`, or the empty slot it goes in; the table is at most half full.
 Memo::Slot &Memo::slot_of(uint64_t hash, std::vector<uint32_t> const &key) {
   size_t const mask{ slots.size() - 1 };
   for (size_t at = static_cast<size_t>(hash) & mask;; at = (at + 1) & mask) {
@@ -131,7 +129,7 @@ Memo::Slot &Memo::slot_of(uint64_t hash, std::vector<uint32_t> const &key) {
   }
 }
 
-// Doubles the slots and re-seats every entry by its stored hash.
+// Doubles the slots (at least 1024) and reinserts every entry by its stored hash.
 void Memo::grow() {
   std::vector<Slot> old;
   old.swap(slots);

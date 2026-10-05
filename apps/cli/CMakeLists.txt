@@ -1,5 +1,4 @@
-# The scav executable, a repo tool. One file per verb: they share loading and
-# nothing else.
+# The scav executable. main.cpp dispatches the verbs; cli.cpp holds their shared code.
 
 # Embedded gzipped for selftest: the golden's first column names the charts, and
 # every chart under test_data/charts is added so each network's includes resolve.
@@ -86,7 +85,6 @@ std::string corpus_golden() {
 
 }  // namespace cli
 " @ONLY NEWLINE_STYLE LF)
-# Generated code is not ours to lint.
 set_source_files_properties("${scav_corpus_table}" PROPERTIES SKIP_LINTING ON)
 
 add_executable(scav
@@ -102,15 +100,13 @@ add_executable(scav
   "${PROJECT_SOURCE_DIR}/src/scav_inflate.cpp"
 )
 scav_settings(scav)
-# The generated table sits in the build tree and includes this directory's own
-# header, so both ends of that pair have to be reachable.
+# Source dir for selftest_corpus.h; binary dir for the generated scav_embed_*.h.
 target_include_directories(scav PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}"
   "${CMAKE_CURRENT_BINARY_DIR}"
 )
-# Two edges reach all four archives: svg links draw PUBLIC and both leaves link
-# core PUBLIC. Naming an archive that also arrives transitively repeats it on the
-# link line.
+# scavsvg links scavdraw PUBLIC, and scavlayout and scavdraw link scavcore PUBLIC,
+# so these two reach all four archives.
 target_link_libraries(scav PRIVATE scavlayout scavsvg)
 scav_optimize_for_size(scav)
 scav_dead_code_strip(scav)

@@ -57,7 +57,7 @@ void visit(void *ctx, uint32_t shard) {
   static_cast<std::vector<uint32_t> *>(ctx)->push_back(shard);
 }
 
-// Where a body with no captures has to write.
+// Output of the capture-free shard body.
 std::vector<uint32_t> stateless_hits;
 
 uint32_t count_of(std::vector<uint32_t> const &hits, uint32_t want) {
@@ -66,7 +66,7 @@ uint32_t count_of(std::vector<uint32_t> const &hits, uint32_t want) {
   return n;
 }
 
-// The shard index as four bytes, so a per-shard value has something to hash.
+// xxhash32 of the shard index as four little-endian bytes.
 uint32_t shard_value(uint32_t shard) {
   std::array<scav_byte, 4> const key{ static_cast<scav_byte>(shard & 0xFFU),
                                       static_cast<scav_byte>((shard >> 8U) & 0xFFU),
@@ -75,8 +75,7 @@ uint32_t shard_value(uint32_t shard) {
   return xxhash32(key.data(), key.size(), 0U);
 }
 
-// List append merged in index order: the shape §6 mandates for a reduction, so
-// the digest moves if any shard's part lands in the wrong place.
+// xxhash32 of the parts as little-endian words in index order.
 uint32_t merge_in_index_order(std::vector<uint32_t> const &parts) {
   std::vector<scav_byte> bytes;
   bytes.reserve(parts.size() * 4U);
@@ -176,8 +175,7 @@ TEST_CASE("thread: asking for more threads than shards still runs every shard") 
   HookGuard const guard;
   for (uint32_t shards : { 3U, 8U, 16U }) {
     CAPTURE(shards);
-    // A limit of shards-2 leaves out a worker the call could have used, and
-    // the shards it would have taken go to the threads that remain.
+    // Limits the pool to shards - 2 active workers; every shard still runs once.
     thread_test_spawn_limit(shards - 2U);
     std::vector<uint32_t> const hits{ run_hits(shards, 64U) };
     CHECK(count_of(hits, 1U) == shards);
@@ -228,8 +226,7 @@ TEST_CASE("thread: a worker that cannot be spawned runs on the caller") {
   HookGuard const guard;
   uint32_t const shards{ 40 };
 
-  // One worker allowed besides the caller, so the shards the rest would have
-  // taken come back to those two.
+  // One active worker besides the caller; the two run every shard.
   thread_test_spawn_limit(1U);
   CHECK(count_of(run_hits(shards, 8U), 1U) == shards);
 
@@ -248,8 +245,8 @@ TEST_CASE("thread: a spawn limit caps the threads that claim shards") {
     CAPTURE(threads);
     thread_test_spawn_limit(threads - 1U);
     uint32_t const want{ std::min(threads, thread_concurrency()) };
-    // Every shard waits until `want` threads have arrived, so each one the cap
-    // admits arrives and any it should have kept out has time to.
+    // Each shard waits up to 10 s for `want` threads to arrive, so a thread past the
+    // cap has time to join and be counted.
     Mutex m;
     std::set<std::thread::id> seen;
     std::atomic<uint32_t> arrived{ 0 };
@@ -442,7 +439,7 @@ TEST_CASE("thread: a mutex lets one holder in at a time") {
   CHECK(total == uint64_t{ 16 } * HOLDS);
 }
 
-// Host threads rather than pool workers, so the null backend's lock is contended too.
+// Two host threads contend the lock, so the null backend's lock is tested too.
 TEST_CASE("thread: a mutex lets one host thread in at a time") {
   Mutex m;
   std::atomic<uint32_t> inside{ 0 };

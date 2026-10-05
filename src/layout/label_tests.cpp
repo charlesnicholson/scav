@@ -4,6 +4,7 @@
 #include "layout/label.h"
 #include "layout/tests/pod_eq.h"
 
+#include "layout/decompose.h"
 #include "layout/geom.h"
 #include "layout/size.h"
 #include "scav/scav_core.h"
@@ -21,6 +22,7 @@ namespace scav {
 
 // The placement with its search selectable, internal to `label.cpp`.
 uint32_t place_labels_by(Chart const &c,
+                         SplitGraph const &g,
                          SizedLayout const &z,
                          scav_spaces const &s,
                          std::vector<scav_span> const &route,
@@ -29,11 +31,31 @@ uint32_t place_labels_by(Chart const &c,
                          LabelSearch search,
                          std::vector<scav_rect> &out);
 
-uint64_t label_test_kept();  // boxes the calling thread has kept from a base
-
 }  // namespace scav
 
 namespace {
+
+// Both placements over `c`'s own split.
+uint32_t place_labels(scav::Chart const &c,
+                      scav::SizedLayout const &z,
+                      scav_spaces const &s,
+                      std::vector<scav_span> const &route,
+                      std::vector<scav_point> const &points,
+                      scav_profile const &p,
+                      std::vector<scav_rect> &out) {
+  return scav::place_labels(c, scav::decompose(c), z, s, route, points, p, out);
+}
+
+uint32_t place_labels_by(scav::Chart const &c,
+                         scav::SizedLayout const &z,
+                         scav_spaces const &s,
+                         std::vector<scav_span> const &route,
+                         std::vector<scav_point> const &points,
+                         scav_profile const &p,
+                         scav::LabelSearch search,
+                         std::vector<scav_rect> &out) {
+  return scav::place_labels_by(c, scav::decompose(c), z, s, route, points, p, search, out);
+}
 
 // A profile scaled to these tests' geometry: `font_size_grid` 20 gives a leader of 10.
 scav_profile tiny() {
@@ -74,8 +96,8 @@ scav_spaces boxes_of(std::vector<scav_path_box> const &boxes) {
   return { .path_box = boxes.data(), .n_path_box = static_cast<uint32_t>(boxes.size()) };
 }
 
-// One box on one hand-written route, with stranger states carving the strips:
-// every strip, slide and tie-break case below is this call with other rects.
+// Places one box on one hand-written route among `strangers` and returns its rect;
+// `fell` gets the fallback count.
 scav_rect on_route(std::vector<scav_point> const &poly,
                    std::vector<scav_rect> const &strangers,
                    scav_rect chart,
@@ -88,7 +110,7 @@ scav_rect on_route(std::vector<scav_point> const &poly,
   for (uint32_t i = 0; i < strangers.size(); ++i) {
     build_state(c, root, "X" + std::to_string(i), StateKind::Normal, {});
   }
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c, chart) };
   // The endpoints keep zero rects, which no candidate can overlap; only the
@@ -101,13 +123,10 @@ scav_rect on_route(std::vector<scav_point> const &poly,
   return placed[0];
 }
 
-// The leader `tiny()` gives: half an em of the 20-unit em above (11.9.4).
-constexpr int32_t LEADER{ 10 };
+constexpr int32_t LEADER{ 10 };  // the leader `tiny()` gives: half its 20-unit em
 
-// The gap from a placed box to the nearest leg of one polyline, and which leg
-// that is. Together they are what "beside its own line" means without naming a
-// coordinate: the strip grid's exact rects were an artefact of five fixed
-// offsets, and the anchor has no such grid to read off.
+// Chebyshev gap from `at` to the nearest leg of `poly`, -1 when it has none;
+// `nearest_leg` returns that leg's index, INVALID when it has none.
 Wide own_gap(scav_rect const &at, std::vector<scav_point> const &poly) {
   Wide nearest{ -1 };
   for (uint32_t k = 0; (k + 1) < poly.size(); ++k) {
@@ -130,18 +149,13 @@ uint32_t nearest_leg(scav_rect const &at, std::vector<scav_point> const &poly) {
   return which;
 }
 
-// 11.9.4's invariant: one of the box's eight points is exactly `LEADER` from a
-// point on its own polyline, so the box's nearest edge is at most that far. A
-// bound rather than an equality, because a corner attachment is held by a
-// corner and not by the edge facing the leg.
+// True when `poly` has a leg and the box lies within `LEADER` of it.
 bool anchored(scav_rect const &at, std::vector<scav_point> const &poly) {
   Wide const away{ own_gap(at, poly) };
   return (away >= 0) && (away <= Wide{ LEADER });
 }
 
-// No leg of its own route may cross it, the ridden one included: an
-// axis-aligned leader off a corner can still put the box across the line it is
-// anchored to, which is the slice the anchor exists to stop (11.9.4).
+// True when no leg of `poly` overlaps `at`, including the leg it is anchored to.
 bool uncut(scav_rect const &at, std::vector<scav_point> const &poly) {
   for (uint32_t k = 0; (k + 1) < poly.size(); ++k) {
     if (overlaps(at, span_rect(poly[k], poly[k + 1]))) { return false; }
@@ -149,14 +163,13 @@ bool uncut(scav_rect const &at, std::vector<scav_point> const &poly) {
   return true;
 }
 
-// A subject's polyline read back out of the `Lines` a test built, so a
-// property can be asserted without naming the points twice.
+// The polyline of route `subject` in `l`.
 std::vector<scav_point> poly_of(Lines const &l, uint32_t subject) {
   scav_span const r{ l.route[subject] };
   return { l.points.begin() + r.off, l.points.begin() + r.off + r.len };
 }
 
-// The two together, which is what every placement below owes.
+// Anchored to `poly` and uncut by it.
 bool placed_well(scav_rect const &at, std::vector<scav_point> const &poly) {
   return anchored(at, poly) && uncut(at, poly);
 }
@@ -171,7 +184,7 @@ TEST_CASE("label: a box sits beside its route's longest horizontal leg") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c, { .x = 0, .y = 0, .w = 600, .h = 400 }) };
   z.state[a.v] = { .x = 0, .y = 100, .w = 100, .h = 100 };
@@ -181,10 +194,8 @@ TEST_CASE("label: a box sits beside its route's longest horizontal leg") {
 
   std::vector<scav_rect> placed;
   CHECK(place_labels(c, z, boxes_of(boxes), l.route, l.points, tiny(), placed) == 0);
-  // Beside the leg, which is the whole of the claim: anchored to it, not cut
-  // by it, and on the low side, which wins the tie with the high one. The rect
-  // itself was an artefact of the strip grid's five fixed offsets (11.9.4).
   CHECK(placed_well(placed[0], poly_of(l, 0)));
+  // Above the leg (smaller y): that side wins the tie with the side below.
   CHECK((placed[0].y + placed[0].h) <= 150);
 }
 
@@ -206,7 +217,7 @@ void crossing(Crossing &out, uint32_t strangers) {
   for (uint32_t i = 0; i < strangers; ++i) {
     build_state(out.c, root, "S" + std::to_string(i), StateKind::Normal, {});
   }
-  build_trans(out.c, out.l, out.t, TransKind::External, {});
+  build_trans(out.c, out.l, out.t, TransKind::Default, {});
 }
 
 constexpr std::array SEARCHES{ LabelSearch::Exhaustive,
@@ -288,7 +299,7 @@ TEST_CASE("label: a box slides along its leg to clear a state it is not under") 
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const other{ build_state(c, root, "X", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c, { .x = 0, .y = 0, .w = 600, .h = 400 }) };
   z.state[a.v] = { .x = 0, .y = 100, .w = 100, .h = 100 };
@@ -300,9 +311,8 @@ TEST_CASE("label: a box slides along its leg to clear a state it is not under") 
   std::vector<scav_rect> placed;
   CHECK(place_labels(c, z, boxes_of(boxes), l.route, l.points, tiny(), placed) == 0);
   CHECK(!overlaps(placed[0], z.state[other.v]));
-  CHECK(placed_well(placed[0], poly_of(l, 0)));  // still against the leg
-  // Slid along it rather than pushed off it: the box clears the stranger by
-  // moving in x, so it stays within the leader in y.
+  CHECK(placed_well(placed[0], poly_of(l, 0)));
+  // The box clears the stranger by sliding in x and stays within the leader in y.
   CHECK(own_gap(placed[0], poly_of(l, 0)) <= Wide{ LEADER });
 }
 
@@ -313,7 +323,7 @@ TEST_CASE("label: the composite a transition runs in holds the box, its band doe
   SubmachineId const inner{ build_submachine(c, outer, "main", {}) };
   StateId const a{ build_state(c, inner, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, inner, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c, { .x = 0, .y = 0, .w = 600, .h = 300 }) };
   z.state[outer.v] = { .x = 0, .y = 0, .w = 600, .h = 300 };
@@ -327,10 +337,8 @@ TEST_CASE("label: the composite a transition runs in holds the box, its band doe
   CHECK(place_labels(c, z, boxes_of(boxes), l.route, l.points, tiny(), placed) == 0);
   CHECK(placed_well(placed[0], poly_of(l, 0)));
 
-  // The band grew over everything within the leader of the only leg there is,
-  // so no candidate is clear -- and the box keeps its anchor and takes the
-  // collision rather than the centred placement, which would ride its own leg
-  // (11.9.4). Nothing fell back: a placement that is anchored is a placement.
+  // The band covers every candidate: the colliding tier keeps the box anchored over it,
+  // and the fallback count is 0.
   z.before[outer.v] = { .x = 10, .y = 0, .w = 580, .h = 300 };
   CHECK(place_labels(c, z, boxes_of(boxes), l.route, l.points, tiny(), placed) == 0);
   CHECK(placed_well(placed[0], poly_of(l, 0)));
@@ -342,8 +350,8 @@ TEST_CASE("label: a box takes the side clear of another transition's route") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, b, a, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, b, a, TransKind::Default, {});
 
   SizedLayout z{ blank(c, { .x = 0, .y = 0, .w = 600, .h = 400 }) };
   z.state[a.v] = { .x = 0, .y = 100, .w = 100, .h = 100 };
@@ -354,10 +362,8 @@ TEST_CASE("label: a box takes the side clear of another transition's route") {
 
   std::vector<scav_rect> placed;
   CHECK(place_labels(c, z, boxes_of(boxes), l.route, l.points, tiny(), placed) == 0);
-  // The low side would be struck through by the other route, so the high one.
   CHECK(placed_well(placed[0], poly_of(l, 0)));
-  // The side clear of the stranger, which here is the low one.
-  CHECK(placed[0].y >= 150);
+  CHECK(placed[0].y >= 150);  // below, away from the other route at y=140
 }
 
 TEST_CASE("label: another route's leg counts wherever along that route it lies") {
@@ -367,8 +373,8 @@ TEST_CASE("label: another route's leg counts wherever along that route it lies")
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, b, a, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, b, a, TransKind::Default, {});
 
   SizedLayout z{ blank(c, { .x = 0, .y = 0, .w = 1200, .h = 800 }) };
   z.state[a.v] = { .x = 0, .y = 100, .w = 100, .h = 100 };
@@ -399,24 +405,22 @@ TEST_CASE("label: a box crosses to the far side of its own leg to keep its dista
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, b, a, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, b, a, TransKind::Default, {});
 
   SizedLayout z{ blank(c, { .x = 0, .y = 0, .w = 600, .h = 400 }) };
   z.state[a.v] = { .x = 0, .y = 100, .w = 100, .h = 100 };
   z.state[b.v] = { .x = 400, .y = 100, .w = 100, .h = 100 };
-  // Clear of the low side by half a line, so that side stays feasible and only
-  // the distance to the stranger tells the two apart.
+  // The other route at y=120 clears the box above the leg by 10: a shortfall of 10 there,
+  // 0 below.
   Lines const l{ lines_of({ { { .x = 100, .y = 150 }, { .x = 400, .y = 150 } },
                             { { .x = 400, .y = 120 }, { .x = 100, .y = 120 } } }) };
   std::vector<scav_path_box> const boxes{ { .subject = 0, .w = 60, .h = 20, .order = 0 } };
 
   std::vector<scav_rect> placed;
   CHECK(place_labels(c, z, boxes_of(boxes), l.route, l.points, tiny(), placed) == 0);
-  // Both sides are equally far from the centred placement and the low one wins
-  // that tie, so the far side is the shortfall's doing and nothing else.
   CHECK(placed_well(placed[0], poly_of(l, 0)));
-  // Below its own leg, which is the side away from the other transition's.
+  // The sides tie on distance and above wins that tie; the shortfall puts the box below.
   CHECK(placed[0].y >= 150);
 }
 
@@ -425,7 +429,7 @@ TEST_CASE("label: a transition's second box goes past its first") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c, { .x = 0, .y = 0, .w = 1000, .h = 300 }) };
   z.state[a.v] = { .x = 0, .y = 80, .w = 40, .h = 40 };
@@ -446,7 +450,7 @@ TEST_CASE("label: a second box goes past the first along a right-to-left leg") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c, { .x = 0, .y = 0, .w = 1000, .h = 300 }) };
   z.state[a.v] = { .x = 960, .y = 80, .w = 40, .h = 40 };
@@ -458,15 +462,8 @@ TEST_CASE("label: a second box goes past the first along a right-to-left leg") {
   std::vector<scav_rect> placed;
   CHECK(place_labels(c, z, boxes_of(boxes), l.route, l.points, tiny(), placed) == 0);
   CHECK(placed_well(placed[0], poly_of(l, 0)));
-  // Further along a leg running leftwards is the smaller x, the mirror of what
-  // the left-to-right case above asks for.
   CHECK(placed_well(placed[1], poly_of(l, 0)));
-  // **`x` is no longer the measure of "further along".** The ordering rule is
-  // on the anchor, and two anchors at different points along the leg can land
-  // a box at one `x` through different attachment points -- the second here
-  // moves along and attaches by a side rather than the bottom. The rect does
-  // not expose the anchor, so what is checkable is that the two are distinct
-  // and clear of each other (11.9.4, owed: the anchor as an output).
+  // Two slides along the leg can put boxes at one `x` through different attachment points.
   CHECK_FALSE((placed[0] == placed[1]));
   CHECK(!overlaps(placed[0], placed[1]));
 }
@@ -476,7 +473,7 @@ TEST_CASE("label: a second box goes past the first along a bottom-to-top leg") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c, { .x = 0, .y = 0, .w = 300, .h = 1000 }) };
   z.state[a.v] = { .x = 80, .y = 960, .w = 40, .h = 40 };
@@ -489,8 +486,7 @@ TEST_CASE("label: a second box goes past the first along a bottom-to-top leg") {
   CHECK(place_labels(c, z, boxes_of(boxes), l.route, l.points, tiny(), placed) == 0);
   CHECK(placed_well(placed[0], poly_of(l, 0)));
   CHECK(placed_well(placed[1], poly_of(l, 0)));
-  // As above: the anchor moved along the upright leg, and `y` is not what says
-  // so once the attachment point is free to differ (11.9.4).
+  // As above, in `y`: two slides along the upright leg can put boxes at one `y`.
   CHECK_FALSE((placed[0] == placed[1]));
   CHECK(!overlaps(placed[0], placed[1]));
 }
@@ -500,7 +496,7 @@ TEST_CASE("label: a request with no route at all takes the centred fallback") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c, { .x = 0, .y = 0, .w = 600, .h = 400 }) };
   Lines const l{ lines_of({ {} }) };
@@ -516,7 +512,7 @@ TEST_CASE("label: a diagonal leg offers no strip") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c, { .x = 0, .y = 0, .w = 600, .h = 400 }) };
   z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 100 };
@@ -533,12 +529,11 @@ TEST_CASE(
     "label: a candidate flush with the chart's edge is inside it, one unit out is not") {
   std::vector<scav_point> const leg{ { .x = 100, .y = 150 }, { .x = 400, .y = 150 } };
   uint32_t fell{ 0 };
-  // The low side's first strip runs 130..150, so a chart starting at 130 holds it.
+  // The box above the leg spans y 130..150, inside a chart starting at y=130.
   CHECK((on_route(leg, {}, { .x = 0, .y = 130, .w = 600, .h = 270 }, LABEL, fell) ==
          scav_rect{ .x = 220, .y = 130, .w = 60, .h = 20 }));
   CHECK(fell == 0);
-  // One unit of chart taken away and the high side is no longer inside it, so
-  // the box goes to the low one; both are anchored either way.
+  // With the chart starting at y=131 the box above falls outside it, so it goes below.
   scav_rect const tight{
     on_route(leg, {}, { .x = 0, .y = 131, .w = 600, .h = 269 }, LABEL, fell)
   };
@@ -551,8 +546,8 @@ TEST_CASE(
     "label: a stranger's rect blocks a candidate it overlaps and not one it touches") {
   std::vector<scav_point> const leg{ { .x = 100, .y = 150 }, { .x = 400, .y = 150 } };
   uint32_t fell{ 0 };
-  // Touching is free, so a rect whose bottom edge is the box's top edge leaves
-  // the high side usable; one unit lower overlaps and drives the box across.
+  // A rect ending at y=130 touches the box above the leg and leaves it usable; one unit
+  // lower it overlaps and the box goes below.
   scav_rect const flush{ .x = 200, .y = 130 - 100, .w = 100, .h = 100 };
   scav_rect const touched{ on_route(leg, { flush }, CHART, LABEL, fell) };
   CHECK(placed_well(touched, leg));
@@ -575,7 +570,7 @@ TEST_CASE(
   SubmachineId const inner{ build_submachine(c, outer, "main", {}) };
   StateId const a{ build_state(c, inner, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, inner, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c, { .x = 0, .y = 0, .w = 600, .h = 300 }) };
   z.state[outer.v] = { .x = 0, .y = 0, .w = 600, .h = 300 };
@@ -588,8 +583,7 @@ TEST_CASE(
   CHECK(place_labels(c, z, boxes_of(boxes), l.route, l.points, tiny(), placed) == 0);
   CHECK(placed_well(placed[0], poly_of(l, 0)));
 
-  // The band an ancestor reserved is an obstacle even though the ancestor's own
-  // rect is not: the box clears the band and stays anchored.
+  // An `after` band over the leg: the box clears it and stays anchored.
   z.after[outer.v] = { .x = 10, .y = 100, .w = 580, .h = 40 };
   CHECK(place_labels(c, z, boxes_of(boxes), l.route, l.points, tiny(), placed) == 0);
   CHECK(placed_well(placed[0], poly_of(l, 0)));
@@ -601,8 +595,8 @@ TEST_CASE("label: a box already placed is an obstacle to the next transition's")
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c, CHART) };
   // Two transitions laid on one line: every candidate carries the same shortfall,
@@ -620,37 +614,29 @@ TEST_CASE("label: a box already placed is an obstacle to the next transition's")
 }
 
 TEST_CASE("label: a candidate over a leg of its own route it does not ride is refused") {
-  // The elbow's own upright leg sits under the nearest candidate of the leg the
-  // box rides, and under the nearest candidate of the upright leg itself.
+  // The elbow's own upright leg sits under the nearest candidate of the horizontal leg,
+  // and under the nearest candidate of the upright leg itself.
   std::vector<scav_point> const elbow{ { .x = 350, .y = 150 },
                                        { .x = 400, .y = 150 },
                                        { .x = 400, .y = 0 } };
   uint32_t fell{ 0 };
-  // The upright leg is refused like any other obstacle, and `uncut` is the
-  // whole of that claim now: no leg of its own route may cross it, the ridden
-  // one included (11.9.4).
   scav_rect const at{ on_route(elbow, {}, CHART, LABEL, fell) };
   CHECK(placed_well(at, elbow));
   CHECK(fell == 0);
 }
 
 TEST_CASE("label: the leader is the only offset, and blocking it is the fallback") {
-  // What replaced "five strips and no sixth": the anchor has one distance, not
-  // a grid of them (11.9.4). A wall over one side leaves the other, and a wall
-  // over everything within the leader leaves nothing.
   std::vector<scav_point> const leg{ { .x = 100, .y = 150 }, { .x = 400, .y = 150 } };
   uint32_t fell{ 0 };
 
+  // A wall over the side above the leg leaves the side below.
   scav_rect const high{ .x = 0, .y = 150 - 100, .w = 600, .h = 100 };
   scav_rect const low{ on_route(leg, { high }, CHART, LABEL, fell) };
   CHECK(placed_well(low, leg));
   CHECK(low.y >= 150);
   CHECK(fell == 0);
 
-  // Both sides for the leader's whole reach: no attachment point can be held at
-  // that distance and stay clear, so what is left is a collision -- taken with
-  // the anchor kept, because a box over an obstacle still reads as its own
-  // transition's and a box on its own line does not (11.9.4).
+  // A wall over both sides: the box keeps its anchor and overlaps the wall.
   scav_rect const all{ .x = 0, .y = 150 - 100, .w = 600, .h = 200 };
   scav_rect const stuck{ on_route(leg, { all }, CHART, LABEL, fell) };
   CHECK(fell == 0);
@@ -660,13 +646,11 @@ TEST_CASE("label: the leader is the only offset, and blocking it is the fallback
 }
 
 TEST_CASE("label: the anchor slides to either end of its leg") {
-  // What replaced "low end, high end, and exact centre": the slide steps half a
-  // box height and clamps to both ends, and the centre is no longer a slot the
-  // enumeration adds -- a step that fine reaches it or near enough (11.9.4).
+  // Slides run from end to end of the leg in steps of half the box height.
   std::vector<scav_point> const leg{ { .x = 100, .y = 150 }, { .x = 400, .y = 150 } };
   uint32_t fell{ 0 };
 
-  // Everything but the leg's low end walled off, both sides.
+  // A wall over both sides from x=130 on leaves only the leg's left end.
   scav_rect const past_low{ .x = 130, .y = 50, .w = 470, .h = 200 };
   scav_rect const at_low{ on_route(leg, { past_low }, CHART, LABEL, fell) };
   CHECK(placed_well(at_low, leg));
@@ -674,7 +658,7 @@ TEST_CASE("label: the anchor slides to either end of its leg") {
   CHECK(at_low.x < 130);
   CHECK(fell == 0);
 
-  // And everything but its high end.
+  // A wall over both sides up to x=370 leaves only its right end.
   scav_rect const before_high{ .x = 0, .y = 50, .w = 370, .h = 200 };
   scav_rect const at_high{ on_route(leg, { before_high }, CHART, LABEL, fell) };
   CHECK(placed_well(at_high, leg));
@@ -684,8 +668,8 @@ TEST_CASE("label: the anchor slides to either end of its leg") {
 }
 
 TEST_CASE("label: a leg no whole number of steps long still reaches its far end") {
-  // 295 long against a 10-unit step, so the last whole step falls short of the
-  // end and the clamp is what reaches it.
+  // 295 long with a 10-unit step: the last whole step lands at x=390, the clamped
+  // slide at 395.
   std::vector<scav_point> const leg{ { .x = 100, .y = 150 }, { .x = 395, .y = 150 } };
   uint32_t fell{ 0 };
   scav_rect const before_high{ .x = 0, .y = 50, .w = 365, .h = 200 };
@@ -697,18 +681,26 @@ TEST_CASE("label: a leg no whole number of steps long still reaches its far end"
 }
 
 TEST_CASE("label: an earlier leg of the route outranks a later one") {
-  // `seg` is the key's first component after the shortfall and the distance,
-  // and it is the one component the anchor left unchanged: `side` and `strip`
-  // became `attach` and `lead`, whose precedence is `better`'s lexicographic
-  // construction rather than a shape anybody can draw (11.9.4).
-  std::vector<scav_point> const elbow{ { .x = 100, .y = 150 },
-                                       { .x = 400, .y = 150 },
-                                       { .x = 400, .y = 350 } };
+  // A wall over the top leg leaves the two uprights, mirror images about the anchor at
+  // x=250: their best candidates tie on shortfall and distance, and the earlier leg wins.
+  std::vector<scav_point> const cup{ { .x = 100, .y = 350 },
+                                     { .x = 100, .y = 150 },
+                                     { .x = 400, .y = 150 },
+                                     { .x = 400, .y = 350 } };
+  std::vector<scav_point> const back{ cup.rbegin(), cup.rend() };
+  scav_rect const wall{ .x = 20, .y = 110, .w = 460, .h = 80 };
   uint32_t fell{ 0 };
-  scav_rect const at{ on_route(elbow, {}, CHART, LABEL, fell) };
-  CHECK(placed_well(at, elbow));
+  scav_rect const left{ on_route(cup, { wall }, CHART, LABEL, fell) };
   CHECK(fell == 0);
-  CHECK(nearest_leg(at, elbow) == 0);
+  scav_rect const right{ on_route(back, { wall }, CHART, LABEL, fell) };
+  CHECK(fell == 0);
+  CHECK(placed_well(left, cup));
+  CHECK(placed_well(right, back));
+  CHECK(!overlaps(left, wall));
+  CHECK(nearest_leg(left, cup) == 0);
+  CHECK(nearest_leg(right, back) == 0);
+  CHECK(right.x == (500 - (left.x + left.w)));  // mirrored about x=250
+  CHECK(right.y == left.y);
 }
 
 TEST_CASE("label: the anchor distance outranks the leg a candidate rides") {
@@ -721,24 +713,11 @@ TEST_CASE("label: the anchor distance outranks the leg a candidate rides") {
   scav_rect const at{ on_route(bend, {}, CHART, LABEL, fell) };
   CHECK(placed_well(at, bend));
   CHECK(fell == 0);
-  // The horizontal leg, which is the one the anchor is nearest, not the
-  // upright leg that comes first in the route.
-  CHECK(nearest_leg(at, bend) == 1);
+  CHECK(nearest_leg(at, bend) == 1);  // the horizontal leg
 }
 
-// `side` and `strip` are gone with the strip grid, and with them the three
-// cases that drew a shape for each component's precedence. What survives is
-// stated where it is observable: the leg's precedence has its own case above,
-// and `attach` and `lead` are ordered by `better`'s lexicographic construction
-// in label.cpp, which no geometry distinguishes from any other total order
-// (11.9.4).
-
 TEST_CASE("label: two runs over one input place the box identically") {
-  // What "candidates alike go to the lower one" is about, stated where it is
-  // observable: the key is a total order over integers, so a tie has exactly
-  // one winner and the same input cannot come out twice (6). A wall taking the
-  // centre slide alone leaves the two either side of it tied on everything but
-  // the slide, which is the case that would wobble if the order were partial.
+  // A wall at x 235..255 over both sides of the leg, beside the anchor at x=250.
   std::vector<scav_point> const leg{ { .x = 100, .y = 150 }, { .x = 400, .y = 150 } };
   scav_rect const wall{ .x = 235, .y = 90, .w = 20, .h = 120 };
   scav_path_box const tall{ .subject = 0, .w = 20, .h = 60, .order = 0 };
@@ -760,12 +739,12 @@ TEST_CASE("label: the shortfall is measured across the axis the leg does not run
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const p{ build_state(c, root, "P", StateKind::Normal, {}) };
   StateId const q{ build_state(c, root, "Q", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, p, q, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, p, q, TransKind::Default, {});
 
   SizedLayout z{ blank(c, { .x = 0, .y = 0, .w = 600, .h = 500 }) };
-  // Two upright legs five units apart on x: the near side clears the stranger by
-  // less than one line of its own text, so the box goes round to the far side.
+  // Upright legs at x=250 and x=185, 65 apart: a box left of x=250 clears x=185 by 5,
+  // under its 20-unit height, so the box goes right.
   Lines const l{ lines_of({ { { .x = 250, .y = 100 }, { .x = 250, .y = 400 } },
                             { { .x = 185, .y = 100 }, { .x = 185, .y = 400 } } }) };
   std::vector<scav_path_box> const boxes{ { .subject = 0, .w = 60, .h = 20, .order = 0 } };
@@ -783,12 +762,11 @@ TEST_CASE("label: a candidate past the first strip is scored against the strange
   StateId const p{ build_state(c, root, "P", StateKind::Normal, {}) };
   StateId const q{ build_state(c, root, "Q", StateKind::Normal, {}) };
   StateId const wall{ build_state(c, root, "W", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, p, q, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, p, q, TransKind::Default, {});
 
   SizedLayout z{ blank(c, CHART) };
-  // The high side within the leader and nothing else: with one distance rather
-  // than five offsets, a wall over both sides leaves no candidate at all.
+  // A wall at y 130..150 blocks every candidate above the leg.
   z.state[wall.v] = { .x = 0, .y = 130, .w = 600, .h = 20 };
   Lines const l{ lines_of({ { { .x = 100, .y = 150 }, { .x = 400, .y = 150 } },
                             { { .x = 100, .y = 95 }, { .x = 400, .y = 95 } } }) };
@@ -796,9 +774,6 @@ TEST_CASE("label: a candidate past the first strip is scored against the strange
 
   std::vector<scav_rect> placed;
   CHECK(place_labels(c, z, boxes_of(boxes), l.route, l.points, tiny(), placed) == 0);
-  // The high side is walled off, so the box goes below -- and it is scored
-  // against the stranger there, which is what the per-leg prefilter has to
-  // preserve now that there are no per-strip bands (11.9.4).
   CHECK(placed_well(placed[0], poly_of(l, 0)));
   CHECK(placed[0].y >= 150);
   CHECK(!overlaps(placed[0], z.state[wall.v]));
@@ -810,13 +785,13 @@ TEST_CASE(
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout const z{ blank(c, CHART) };
-  // A stranger laid along the leg gives every candidate the same shortfall, so
-  // the crossing stranger decides by blocking rather than by distance.
+  // Route 1 on the leg gives every candidate the same shortfall; route 2 at x=250
+  // blocks the candidates it crosses.
   Lines const l{ lines_of({ { { .x = 100, .y = 150 }, { .x = 400, .y = 150 } },
                             { { .x = 100, .y = 150 }, { .x = 400, .y = 150 } },
                             { { .x = 250, .y = 120 }, { .x = 250, .y = 180 } } }) };
@@ -835,12 +810,12 @@ TEST_CASE("label: the shortfall outranks the anchor distance") {
   StateId const p{ build_state(c, root, "P", StateKind::Normal, {}) };
   StateId const q{ build_state(c, root, "Q", StateKind::Normal, {}) };
   StateId const nick{ build_state(c, root, "N", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, p, q, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, p, q, TransKind::Default, {});
 
   SizedLayout z{ blank(c, CHART) };
-  // The nick takes the high side's nearest slide, so the shortfall's own side is
-  // the further one and only the key order decides between them.
+  // The nick blocks the nearest candidates below the leg: below is further with no
+  // shortfall, above is nearer with a shortfall from the route at y=125.
   z.state[nick.v] = { .x = 272, .y = 150, .w = 4, .h = 20 };
   Lines const l{ lines_of({ { { .x = 100, .y = 150 }, { .x = 400, .y = 150 } },
                             { { .x = 100, .y = 125 }, { .x = 400, .y = 125 } } }) };
@@ -859,8 +834,8 @@ TEST_CASE("label: a box clear of everything stays where the distance put it") {
   StateId const p{ build_state(c, root, "P", StateKind::Normal, {}) };
   StateId const q{ build_state(c, root, "Q", StateKind::Normal, {}) };
   StateId const far{ build_state(c, root, "F", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, p, q, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, p, q, TransKind::Default, {});
 
   SizedLayout z{ blank(c, CHART) };
   Lines const l{ lines_of({ { { .x = 100, .y = 150 }, { .x = 400, .y = 150 } },
@@ -872,8 +847,7 @@ TEST_CASE("label: a box clear of everything stays where the distance put it") {
   scav_rect const alone{ .x = 220, .y = 130, .w = 60, .h = 20 };
   CHECK((placed[0] == alone));
 
-  // Another route and another box's worth of state, both out of reach: neither
-  // the shortfall nor the sweep has anything to say, so nothing moves.
+  // A state at y 300..400 and the route at y=350 both lie out of the box's reach.
   z.state[far.v] = { .x = 0, .y = 300, .w = 600, .h = 100 };
   CHECK(place_labels(c, z, boxes_of(boxes), l.route, l.points, tiny(), placed) == 0);
   CHECK((placed[0] == alone));
@@ -884,7 +858,7 @@ TEST_CASE("label: a subject past the route table takes the centred fallback") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c, CHART) };
   Lines const l{ lines_of({ { { .x = 100, .y = 150 }, { .x = 400, .y = 150 } } }) };
@@ -892,8 +866,8 @@ TEST_CASE("label: a subject past the route table takes the centred fallback") {
 
   std::vector<scav_rect> placed;
   CHECK(place_labels(c, z, boxes_of(boxes), l.route, l.points, tiny(), placed) == 1);
-  // No route and no transition to read endpoints off: the anchor is the origin
-  // and the chart rect slides the box back inside.
+  // No route and no transition: the anchor is the origin and the box is clamped into
+  // the chart.
   CHECK((placed[0] == scav_rect{ .x = 0, .y = 0, .w = 60, .h = 20 }));
 }
 
@@ -902,11 +876,10 @@ TEST_CASE("label: a subject with a route but no transition rides the route anywa
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout const z{ blank(c, CHART) };
-  // A route table longer than the transition table: there is no pair of
-  // endpoints to excuse a state with, and the strips are matched all the same.
+  // A route table longer than the transition table: route 1 has no transition.
   Lines const l{ lines_of({ { { .x = 100, .y = 350 }, { .x = 400, .y = 350 } },
                             { { .x = 100, .y = 150 }, { .x = 400, .y = 150 } } }) };
   std::vector<scav_path_box> const boxes{ { .subject = 1, .w = 60, .h = 20, .order = 0 } };
@@ -921,7 +894,7 @@ TEST_CASE("label: a second box may ride a leg after the one the first took") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout const z{ blank(c, CHART) };
   Lines const l{ lines_of(
@@ -932,8 +905,7 @@ TEST_CASE("label: a second box may ride a leg after the one the first took") {
   std::vector<scav_rect> placed;
   CHECK(place_labels(c, z, boxes_of(boxes), l.route, l.points, tiny(), placed) == 0);
   CHECK((placed[0] == scav_rect{ .x = 220, .y = 130, .w = 60, .h = 20 }));
-  // The upright leg is enumerated for the second box too, and loses on distance
-  // rather than on being out of bounds.
+  // The second box's candidates on the upright leg lose to leg 0's on distance.
   CHECK(placed_well(placed[1], poly_of(l, 0)));
   CHECK(nearest_leg(placed[1], poly_of(l, 0)) >= nearest_leg(placed[0], poly_of(l, 0)));
 }
@@ -951,13 +923,12 @@ TEST_CASE("label: a request of no boxes at all places nothing") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout const z{ blank(c, CHART) };
   Lines const l{ lines_of({ { { .x = 100, .y = 150 }, { .x = 400, .y = 150 } } }) };
   std::vector<scav_path_box> const boxes{ { .subject = 0, .w = 60, .h = 20, .order = 0 } };
-  // A live pointer with a count of zero, which is what an empty table looks like
-  // when the caller keeps its storage.
+  // An empty table: a live pointer with a count of zero.
   scav_spaces const none{ .path_box = boxes.data(), .n_path_box = 0 };
 
   std::vector<scav_rect> placed{ scav_rect{ .x = 1, .y = 2, .w = 3, .h = 4 } };
@@ -971,11 +942,11 @@ TEST_CASE("label: a tombstoned state is not an obstacle") {
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const gone{ build_state(c, root, "G", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c, CHART) };
-  // The high side within the leader: live it drives the box below, tombstoned
-  // it is not there and the box takes the side it prefers.
+  // A state over the side above the leg: live, it sends the box below; tombstoned, the
+  // box goes above.
   z.state[gone.v] = { .x = 0, .y = 130, .w = 600, .h = 20 };
   Lines const l{ lines_of({ { { .x = 100, .y = 150 }, { .x = 400, .y = 150 } } }) };
   std::vector<scav_path_box> const boxes{ { .subject = 0, .w = 60, .h = 20, .order = 0 } };
@@ -988,7 +959,6 @@ TEST_CASE("label: a tombstoned state is not an obstacle") {
   c.states[gone.v].live = 0;
   CHECK(place_labels(c, z, boxes_of(boxes), l.route, l.points, tiny(), placed) == 0);
   CHECK(placed_well(placed[0], poly_of(l, 0)));
-  // Live, the same rect is refused; tombstoned it was never an obstacle.
   CHECK_FALSE((placed[0] == with_tomb));
 }
 
@@ -999,8 +969,8 @@ TEST_CASE("label: the placement does not depend on the path box row order") {
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const p{ build_state(c, root, "P", StateKind::Normal, {}) };
   StateId const q{ build_state(c, root, "Q", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, p, q, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, p, q, TransKind::Default, {});
 
   SizedLayout const z{ blank(c, CHART) };
   Lines const l{ lines_of({ { { .x = 100, .y = 150 }, { .x = 400, .y = 150 } },
@@ -1027,13 +997,9 @@ TEST_CASE("label: a transition's second box never goes back to an earlier leg") 
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
-  // No walls: the rule under test is the chaining itself, and the anchor gives
-  // every leg candidates, so the old construction's job -- starving the first
-  // leg so the first box had to take the second -- is not what says the rule
-  // holds. What says it is that the second box's leg is never the earlier one
-  // (11.9.4).
+  // No walls: both legs of the elbow offer candidates.
   SizedLayout z{ blank(c, CHART) };
   Lines const l{ lines_of(
       { { { .x = 100, .y = 150 }, { .x = 400, .y = 150 }, { .x = 400, .y = 300 } } }) };
@@ -1049,8 +1015,7 @@ TEST_CASE("label: a transition's second box never goes back to an earlier leg") 
 }
 
 TEST_CASE("label: two thousand boxes place, and quickly") {
-  // A flat grid, which is the worst shape for the obstacle sweep: every state
-  // is a stranger to every route, so none of them is carved out.
+  // A flat 50 x 40 grid: every state is an obstacle to every route's boxes.
   constexpr uint32_t COLS{ 50 };
   constexpr uint32_t ROWS{ 40 };
   constexpr uint32_t CELLS{ COLS * ROWS };
@@ -1065,7 +1030,7 @@ TEST_CASE("label: two thousand boxes place, and quickly") {
     all.push_back(build_state(c, root, "S" + std::to_string(i), StateKind::Normal, {}));
   }
   for (uint32_t i = 1; i < all.size(); ++i) {
-    build_trans(c, all[i - 1], all[i], TransKind::External, {});
+    build_trans(c, all[i - 1], all[i], TransKind::Default, {});
     boxes.push_back({ .subject = i - 1, .w = 60, .h = 20, .order = 0 });
   }
   REQUIRE(c.states.size() == CELLS);
@@ -1081,8 +1046,8 @@ TEST_CASE("label: two thousand boxes place, and quickly") {
                           .w = 200,
                           .h = 100 };
   }
-  // An elbow out of one box's right edge into the next box's left edge, which
-  // is one horizontal leg, one vertical, one horizontal.
+  // An elbow from one state's right edge to the next state's left edge: horizontal,
+  // vertical, horizontal.
   for (uint32_t i = 1; i < all.size(); ++i) {
     scav_rect const from{ z.state[all[i - 1].v] };
     scav_rect const to{ z.state[all[i].v] };
@@ -1104,8 +1069,8 @@ TEST_CASE("label: two thousand boxes place, and quickly") {
   MESSAGE("place_labels over ", boxes.size(), " boxes: ", us, " us, ", fell, " fell back");
   CHECK(placed.size() == boxes.size());
 #if SCAV_PERF_ASSERT_FLOOR == 1
-  // A floor, not a time: the sweep is linear in obstacles per box and this is
-  // what catches it becoming linear in candidates too.
+  // A 200 ms bound that trips if the sweep grows linear in candidates as well as
+  // obstacles.
   CHECK(us < 200000);
 #endif
 }
@@ -1118,8 +1083,8 @@ uint32_t next(uint64_t &state) {
   return static_cast<uint32_t>(state >> 33U);
 }
 
-// A seeded hand-laid scene: banded composites of one or two regions, plain states, mixed
-// routes and up to three boxes a transition. `crowd` 2 refuses most candidates.
+// A seeded scene: banded composites of one or two regions, plain states, mixed routes
+// and up to three boxes a transition. Higher `crowd` packs more routes into less chart.
 struct Scene {
   Chart c;
   SizedLayout z;
@@ -1173,7 +1138,7 @@ Scene scene_of(uint64_t seed, uint32_t crowd) {
     build_trans(c,
                 all[pick(static_cast<uint32_t>(all.size()))],
                 all[pick(static_cast<uint32_t>(all.size()))],
-                TransKind::External,
+                TransKind::Default,
                 {});
   }
 
@@ -1246,7 +1211,7 @@ Scene scene_of(uint64_t seed, uint32_t crowd) {
     }
     polys.push_back(poly);
   }
-  // A route past the transition table, which a box may still ride.
+  // A route past the transition table, which boxes may still take as their subject.
   if (pick(4) == 0) {
     polys.push_back({ { .x = 100, .y = ch / 2 }, { .x = cw - 100, .y = ch / 2 } });
   }
@@ -1383,7 +1348,7 @@ TEST_CASE("label: the searches agree on boxes of no width and of no height") {
     StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
     StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
     StateId const x{ build_state(c, root, "X", StateKind::Normal, {}) };
-    build_trans(c, a, b, TransKind::External, {});
+    build_trans(c, a, b, TransKind::Default, {});
     SizedLayout z{ blank(c, CHART) };
     z.state[x.v] = wall;
     Lines const l{ lines_of({ leg }) };
@@ -1425,7 +1390,7 @@ TEST_CASE(
       StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
       StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
       StateId const x{ build_state(c, root, "X", StateKind::Normal, {}) };
-      build_trans(c, a, b, TransKind::External, {});
+      build_trans(c, a, b, TransKind::Default, {});
       SizedLayout z{ blank(c, CHART) };
       z.state[x.v] = strangers[0];
       Lines const l{ lines_of({ leg }) };
@@ -1458,8 +1423,8 @@ TEST_CASE(
 
 TEST_CASE("label memo: a remembered box is the box its inputs place" *
           doctest::test_suite("full")) {
-  // Each variant changes one input the key must cover, after the memo placed the base; the
-  // last two change nothing a box sees except by moving with it.
+  // Each variant changes one input the memo key covers; all but the last two, a
+  // translation and a widening, move some box in some scene.
   constexpr uint32_t VARIANTS{ 11 };
   std::array<uint32_t, VARIANTS> moved{};
   for (uint32_t crowd = 0; crowd < CROWDS; ++crowd) {
@@ -1484,7 +1449,7 @@ TEST_CASE("label memo: a remembered box is the box its inputs place" *
           variants[4].z.state[st].y -= 17;
         }
       }
-      // The bands of every composite.
+      // Every composite's `before` band.
       for (scav_rect &band : variants[5].z.before) {
         band.y += 19;
         band.h += 7;
@@ -1496,7 +1461,7 @@ TEST_CASE("label memo: a remembered box is the box its inputs place" *
         }
       }
       variants[6].z.chart = grow(base.z.chart, -60);
-      // Other transitions' legs only: the routes no box rides.
+      // Only the routes no box has as its subject.
       std::vector<uint8_t> ridden(base.l.route.size(), 0);
       for (scav_path_box const &b : base.boxes) {
         if (b.subject < ridden.size()) { ridden[b.subject] = 1; }
@@ -1515,7 +1480,7 @@ TEST_CASE("label memo: a remembered box is the box its inputs place" *
         if (b.order == 0) { b.w += 51; }
       }
       variants[9] = translated(base, 1234, -567);
-      // A composite reaching much further than any box can see.
+      // Every composite widened by 3000, past any box's reach.
       for (uint32_t st = 0; st < base.c.states.size(); ++st) {
         if (base.c.states[st].submachines.len != 0) { variants[10].z.state[st].w += 3000; }
       }
@@ -1535,100 +1500,4 @@ TEST_CASE("label memo: a remembered box is the box its inputs place" *
     CAPTURE(k);
     CHECK(moved[k] > 0);
   }
-}
-
-namespace {
-
-// `sc` with up to two routes translated or extended by a leg.
-Scene with_routes_moved(Scene const &sc, uint64_t seed) {
-  uint64_t state{ seed };
-  auto const pick = [&state](uint32_t n) { return next(state) % n; };
-  std::vector<std::vector<scav_point>> polys;
-  polys.reserve(sc.l.route.size());
-  for (scav_span const &r : sc.l.route) {
-    polys.emplace_back(sc.l.points.begin() + r.off, sc.l.points.begin() + r.off + r.len);
-  }
-  uint32_t const moves{ pick(3) };
-  for (uint32_t m = 0; (m < moves) && !polys.empty(); ++m) {
-    std::vector<scav_point> &poly{ polys[pick(static_cast<uint32_t>(polys.size()))] };
-    if (poly.empty()) { continue; }
-    if (pick(2) == 0) {
-      auto const dx{ static_cast<int32_t>(pick(600)) - 300 };
-      auto const dy{ static_cast<int32_t>(pick(600)) - 300 };
-      for (scav_point &pt : poly) {
-        pt.x += dx;
-        pt.y += dy;
-      }
-    } else {
-      scav_point const last{ poly.back() };
-      poly.push_back({ .x = last.x, .y = last.y + 200 + static_cast<int32_t>(pick(400)) });
-    }
-  }
-  Scene out{ sc };
-  out.l = lines_of(polys);
-  return out;
-}
-
-struct Settled {
-  std::vector<scav_rect> at;
-  std::vector<LabelSettle> how;
-  uint32_t fell{ 0 };
-};
-
-Settled settled_over(Scene const &sc, LabelBase const *was) {
-  Settled out;
-  out.fell = place_labels(sc.c,
-                          sc.z,
-                          boxes_of(sc.boxes),
-                          sc.l.route,
-                          sc.l.points,
-                          sc.p,
-                          out.at,
-                          out.how,
-                          was);
-  return out;
-}
-
-}  // namespace
-
-TEST_CASE("label: a placement kept from a base is the placement made afresh" *
-          doctest::test_suite("full")) {
-  // Both kinds of box occur: ones that stay where they were and ones a moved route sends
-  // elsewhere.
-  uint32_t stayed{ 0 };
-  uint32_t went{ 0 };
-  uint64_t const kept_before{ label_test_kept() };
-  for (uint32_t crowd = 0; crowd < CROWDS; ++crowd) {
-    for (uint32_t seed = 1; seed <= SEEDS; ++seed) {
-      CAPTURE(crowd);
-      CAPTURE(seed);
-      Scene const sc{ scene_of((uint64_t{ crowd } << 32U) | seed, crowd) };
-      Settled const before{ settled_over(sc, nullptr) };
-      LabelBase const base{ .route = &sc.l.route,
-                            .points = &sc.l.points,
-                            .placed = &before.at,
-                            .settled = &before.how };
-      Scene const after{ with_routes_moved(sc, (uint64_t{ seed } << 8U) | crowd) };
-      Settled const fresh{ settled_over(after, nullptr) };
-      Settled const kept{ settled_over(after, &base) };
-      CHECK(kept.fell == fresh.fell);
-      CHECK(same_rows(kept.at, fresh.at));
-      REQUIRE(kept.how.size() == fresh.how.size());
-      bool same_how{ true };
-      for (uint32_t i = 0; i < fresh.how.size(); ++i) {
-        same_how = same_how && (kept.how[i].found == fresh.how[i].found) &&
-                   (kept.how[i].seg == fresh.how[i].seg) &&
-                   (kept.how[i].mid == fresh.how[i].mid);
-      }
-      CHECK(same_how);
-      for (uint32_t i = 0; i < fresh.at.size(); ++i) {
-        bool const moved{ (fresh.at[i].x != before.at[i].x) ||
-                          (fresh.at[i].y != before.at[i].y) };
-        ++(moved ? went : stayed);
-      }
-    }
-  }
-  CHECK(stayed > 0);
-  CHECK(went > 0);
-  CHECK(label_test_kept() > kept_before);
 }

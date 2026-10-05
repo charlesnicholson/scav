@@ -9,8 +9,8 @@ NOTES = [
     "decomposition: frames are submachines (subs). A transition whose ends lie in different frames is split into one segment per frame it passes through; `ports` are where its route crosses a composite border (side 0 left, 1 right, 2 top, 3 bottom; depth = nesting depth of the border crossed) and `boundary_nodes` are the node each inner segment starts or ends at on its frame's edge (node_placed with bend_of_seg).",
     "ordering: ranks are rank_assigned (longest path) overridden by rank_pinned (the --rank pins), then, where a frame has pins, each initial re-seated one rank before the state it touches and empty ranks squeezed, as order.cpp does after the pins. In-rank order is NOT emitted by the trace: it is recovered here from the sizing pass's node_placed cross coordinate (y in a frame running across, x in a frame turned down), which is the order sizing kept. `reversed` lists cycle-breaking flips and --reverse pins. `chained` (edge_chained, bend nodes for multi-rank segments) is empty when no segment spans more than one rank. gap_charged is the width a segment's label (or its lanes) asked of the rank boundary after rank `boundary`.",
     "sizing: node_placed `at` is (rank-axis start, cross-axis centre) in chart coordinates -- (x, centre y) across, (centre x, y) down. Each pass ends at its run of node_placed; a second pass is the re-size after the facing pass flipped something (toolchanger has two, brew one). Final rects are the sized rects: routing and labels do not move boxes.",
-    "routing: net_planned src/dst are the node centres a net runs between before seating; `seats` are 11.5's passes moving each end (attach to the border, reface, align, spread, separate, nudge); In the attach pass a seat's `from` is the point the end aims at (the code sets `was = toward`), not a previous seat. lanes are corridor lanes from nudging. `routes` are the final polylines (stopping one arrowhead length, 96, short of the target border).",
-    "labels: `box` is the placed label box (the dump's `placed`); `text` is the SVG text drawn in it. Internal transitions are drawn as text inside their state's after-compartment and have no placed box. `leader` is the dump's `label leader` value."]
+    "routing: net_planned src/dst are the node centres a net runs between before seating; `seats` are 11.5's passes moving each end (attach to the border, reface, align, spread, separate, nudge, loop); In the attach pass a seat's `from` is the point the end aims at (the code sets `was = toward`), not a previous seat. lanes are corridor lanes from nudging. `routes` are the final polylines; `arrow` is the least straight run before the target border, which the arrowhead takes (the dump's `path_clear` destination end).",
+    "labels: `box` is the placed label box (the dump's `placed`); `text` is the SVG text drawn in it. An internal self-transition's route is a loop inside its state, in the state's loop room, and its box sits beside the loop's far leg. `leader` is the dump's `profile` `label_leader`."]
 SIZING_KINDS = {"fold_pinned", "fold_cut", "boundary_carried", "piece_packed", "pseudostate_seated",
                 "column_centred", "port_attached", "node_placed", "spacing_inflated", "port_turned"}
 
@@ -95,7 +95,8 @@ def stages(scav: X.Scav, name: str) -> dict:
         passes.append(cur)
     sizing = {"passes": passes,
               "rects": {str(s["id"]): {"path": s["path"], "rect": s["rect"], "before": s["before"],
-                                       "after": s["after"]} for s in geo["states"]},
+                                       "after": s["after"], "lead": s["lead"], "trail": s["trail"]}
+                        for s in geo["states"]},
               "subs": {str(s["id"]): s["rect"] for s in geo["subs"]},
               "box": geo["box"]}
 
@@ -118,7 +119,8 @@ def stages(scav: X.Scav, name: str) -> dict:
             n = frame_nets[e["frame"]][e["net"]]
             n["lanes"].append({"lane": e["lane"], "at": e["at"]})
     routing = {"nets": nets, "routes": {str(t["id"]): t["points"] for t in geo["trans"]},
-               "degraded": [e for e in ev if e["kind"] == "route_degraded"]}
+               "degraded": [e for e in ev if e["kind"] == "route_degraded"],
+               "arrow": max(t["clear"][1] for t in geo["trans"])}
 
     labels = {"leader": geo["label_leader"],
               "placed": [{"trans": t["id"], "label": t["label"], "box": t["label_box"],

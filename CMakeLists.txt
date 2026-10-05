@@ -1,5 +1,5 @@
-# scav -- statechart authoring, layout, rendering. Nothing here assumes envy: any
-# conforming C++20 toolchain configures this tree.
+# scav -- statechart authoring, layout, rendering. Configures with any conforming
+# C++20 toolchain; envy is optional.
 
 cmake_minimum_required(VERSION 3.28)
 
@@ -16,24 +16,20 @@ include(CMakeDependentOption)
 
 # Options
 
-# Puts SCAV_TESTING on the *shipping* libraries too. All layout arithmetic is
-# integer, so this must produce byte-identical output to release.
+# The libraries' output must stay byte-identical to a build without it.
 option(SCAV_TESTING "Define SCAV_TESTING for the shipping libraries too" OFF)
 
-# Measured at 20% off a full load at the 2k-state target. Off by default: a
-# toolchain without it is still supported, and the optimized presets set it.
 option(SCAV_LTO "Link-time optimization" OFF)
 
 option(SCAV_WARNINGS_AS_ERRORS "Treat compiler and linker warnings as errors" ON)
 option(SCAV_CLANG_TIDY "Run clang-tidy as part of compilation" OFF)
 option(SCAV_COVERAGE "Instrument for branch coverage" OFF)
 
-# One enum, not booleans: ASan and TSan cannot coexist.
+# One sanitizer per build.
 set(SCAV_SANITIZER "NONE" CACHE STRING "Sanitizer: NONE|ASAN|UBSAN|TSAN|MSAN")
 set_property(CACHE SCAV_SANITIZER PROPERTY STRINGS NONE ASAN UBSAN TSAN MSAN)
 
-# MSan reports false positives against any uninstrumented standard library, so it
-# needs a libc++ of its own.
+# Required when SCAV_SANITIZER is MSAN.
 set(SCAV_MSAN_LIBCXX_DIR "" CACHE PATH "Prefix of a libc++ built with MSan")
 
 # Set by the build driver from what envy provisioned; a consumer without envy
@@ -57,12 +53,11 @@ else()
 endif()
 option(SCAV_BUILD_TESTS "Build the unit tests" ${scav_tests_default})
 
-# Tests are build steps, so a green build cannot hide a red test. Off keeps the
-# executables and drops them from ALL, leaving `--target run.<name>`.
+# On: tests run as build steps. Off builds the test executables without running
+# them; `--target run.<name>` runs one.
 option(SCAV_RUN_TESTS "Run the tests as part of the build" ON)
 
-# Off: a shared runner stalling reports a regression that is not there. The
-# counted bounds always assert; this adds the wall-clock ones.
+# Adds the wall-clock timing floors; the counted bounds always assert.
 option(SCAV_PERF_FLOORS "Assert the performance timing floors" OFF)
 
 # Language baseline
@@ -70,8 +65,7 @@ option(SCAV_PERF_FLOORS "Assert the performance timing floors" OFF)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-# Modules are unavailable, so scanning for them buys nothing and makes
-# clang-scan-deps a build prerequisite.
+# The tree uses no C++20 modules.
 set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -99,8 +93,8 @@ scav_coverage_init()
 scav_testing_init()
 
 if(SCAV_CLANG_TIDY)
-  # envy's copy, whose version envy.lua pins. It sits behind SCAV_LINT, so
-  # without that the query fails and PATH answers instead.
+  # Prefers envy's clang-tidy, pinned in envy.lua and provisioned under SCAV_LINT;
+  # falls back to clang-tidy on PATH.
   if(WIN32)
     set(scav_envy "${PROJECT_SOURCE_DIR}/bin/envy.bat")
   else()
@@ -116,8 +110,8 @@ if(SCAV_CLANG_TIDY)
     find_program(SCAV_CLANG_TIDY_EXE NAMES clang-tidy REQUIRED)
   endif()
   set(CMAKE_CXX_CLANG_TIDY "${SCAV_CLANG_TIDY_EXE}" "--warnings-as-errors=*")
-  # An upstream clang-tidy has no default macOS sysroot, so every diagnostic
-  # arrives as a missing standard header instead of the finding it looked for.
+  # Passes the macOS SDK to clang-tidy as -isysroot, from CMAKE_OSX_SYSROOT or
+  # xcrun; warns when neither has one.
   if(APPLE)
     # Empty under Command Line Tools, where the compiler finds the SDK implicitly.
     set(scav_sysroot "${CMAKE_OSX_SYSROOT}")
@@ -142,7 +136,7 @@ endif()
 
 add_subdirectory(src)
 
-# The applications: consumers of the libraries, never privileged layers.
+# The applications, which consume the libraries.
 add_subdirectory(apps)
 
 scav_check_layering()
@@ -152,11 +146,10 @@ if(SCAV_BUILD_TESTS)
   scav_timing_tests()
 endif()
 
-# The coverage gate's list of what was supposed to be tested. Written here because
-# every library has declared itself by now.
+# Writes the coverage gate's list of production sources, after every library
+# has registered its own.
 get_property(scav_production_sources GLOBAL PROPERTY SCAV_PRODUCTION_SOURCES)
-# A generated source has no author and nothing a test could exercise, so it is
-# not something the gate can ask about.
+# Drops generated sources under the build tree.
 list(FILTER scav_production_sources EXCLUDE REGEX "^${PROJECT_BINARY_DIR}/")
 list(JOIN scav_production_sources "\n" scav_production_sources_text)
 file(WRITE "${PROJECT_BINARY_DIR}/scav_sources.txt" "${scav_production_sources_text}\n")

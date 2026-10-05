@@ -26,8 +26,8 @@ uint32_t thread_test_participants();
 namespace {
 
 #ifdef SCAV_TESTING
-// Atomic because a parked worker reads them while a test changes them between
-// calls; relaxed, since none orders anything but itself.
+// Test hooks, set by tests and read by parked workers. Relaxed: none orders
+// other memory.
 std::atomic<uint32_t> test_spawn_limit{ 0 };
 std::atomic<uint64_t> test_delay_seed{ 0 };
 std::atomic<uint32_t> test_epoch{ 1 };
@@ -65,9 +65,8 @@ struct Job {
   uint32_t done{ 0 };  // under `mu`
 };
 
-// One pool for the process, started on the first call that has work for it.
-// Every thread, worker or caller, takes the next unclaimed shard of an open
-// job, so a slow shard holds up only the thread running it.
+// One pool per process, started by the first call with work for it. Every
+// thread, worker or caller, takes the next unclaimed shard of an open job.
 struct Pool {
   pthread_mutex_t mu;
   pthread_cond_t cv;        // a job was pushed, or a job's last shard finished
@@ -81,8 +80,7 @@ pthread_once_t g_once = PTHREAD_ONCE_INIT;
 // The depth of the job whose shard this thread is running, 0 outside one.
 thread_local uint32_t t_depth{ 0 };
 
-// The deepest open job at `floor` or deeper, the oldest of equals, so work a
-// job has started finishes before a shallower job starts more of its own.
+// The deepest open job at depth >= `floor`, oldest among equals; null when none.
 Job *pick(Pool &p, uint32_t floor) {
   Job *best{ nullptr };
   for (Job *const j : p.open) {
@@ -144,10 +142,8 @@ void *worker_main(void *arg) {
   }
 }
 
-// Never destroyed: a worker parks in `pthread_cond_wait` for the life of the
-// process, and a static destructor would tear the condition out from under it.
-// A worker that will not start leaves the pool smaller, and a pool of none
-// runs everything on the caller, so a spawn failure degrades and never fails.
+// Starts `thread_concurrency() - 1` detached workers; the pool is never destroyed.
+// Failed spawns shrink the pool; with no workers the caller runs every shard.
 void start_pool() {
   Pool *const p{ new Pool };
   pthread_mutex_init(&p->mu, nullptr);
@@ -198,10 +194,8 @@ void parallel_for(uint32_t shards, uint32_t threads, ShardFn fn, void *ctx) {
     return;
   }
 
-  // The caller works its own job first, and then any job as deep as its own,
-  // which is the work its job is waiting on or work no larger than it. A job
-  // shallower than its own could be a whole search the caller would have to
-  // finish before it noticed its own job was done.
+  // The caller runs its own job's shards first, then shards of open jobs at least
+  // as deep as its own.
   Job j{ .fn = fn, .ctx = ctx, .shards = shards, .depth = t_depth + 1U };
   pthread_mutex_lock(&p.mu);
   p.open.push_back(&j);
