@@ -2526,8 +2526,9 @@ LoopRow loop_row(scav_profile const &p, scav_extent label, bool vertical) {
   return { .label_w = label.w,
            .label_h = label.h,
            .lane = lane,
-           .cross = saturate(Wide{ lane } +
-                             (Wide{ 2 } * route_clearance(p))),  // a clearance off each edge
+           .cross =
+               saturate(Wide{ lane } +
+                        (Wide{ 2 } * route_clearance(p))),  // a clearance off each edge
            .along = ((deep > 0) ? (deep + loop_gap(p)) : 0) + loop_reach(p) };
 }
 
