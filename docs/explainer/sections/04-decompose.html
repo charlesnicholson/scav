@@ -19,7 +19,7 @@
     <li>List each end's ancestors, innermost first, and strip the part they share.</li>
     <li>If the source encloses the destination, an internal or local transition starts on the source's inner face; an external one leaves the source and re-enters it.</li>
     <li><b>Exit</b> the source's chain, innermost first; the source itself is exited only by an external transition.</li>
-    <li>If the chains diverge into two submachines of one state, cross the separator between those regions instead of the state's border; that middle segment is routed in the source region's frame.</li>
+    <li>If the chains diverge into two submachines of one state, cross the divider between those regions instead of the state's border: one port, ending the source region's segment and starting the target region's.</li>
     <li><b>Enter</b> the destination's chain, outermost first. If the destination encloses the source, end on its inner face.</li>
     <li>Emit one port per crossing and one segment per consecutive pair of ends, each in the frame it lies in.</li>
   </ol>

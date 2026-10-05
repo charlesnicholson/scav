@@ -115,7 +115,7 @@ typedef struct {
 /* One row of the portslot geometry column. */
 typedef struct {
   int32_t x, y;            /* the port */
-  uint32_t side;           /* of its boundary rect: 0 left, 1 right, 2 top, 3 bottom */
+  uint32_t side;           /* face crossed: 0 left, 1 right, 2 top, 3 bottom */
   uint32_t boundary_depth; /* state borders enclosing that boundary */
 } scav_port_slot;
 

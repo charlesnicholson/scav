@@ -1106,9 +1106,10 @@ void route_transitions(Routes &out,
                             : ((along >= (lo + inset)) &&
                                (along <= ((lo + len) - inset))) };
       if (!level) { return false; }
+      int32_t const low_face{ gap.vertical ? r.x : r.y };
       at = end;
       (gap.vertical ? at.x : at.y) =
-          low ? (gap.vertical ? (r.x + r.w) : (r.y + r.h)) : (gap.vertical ? r.x : r.y);
+          low ? (low_face + (gap.vertical ? r.w : r.h)) : low_face;
     } else if ((gap.vertical ? at.y : at.x) != along) {
       return false;
     }

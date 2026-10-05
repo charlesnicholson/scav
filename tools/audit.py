@@ -236,9 +236,14 @@ def audit(svg, every, chart, doc, verbose):
     starts = []
     tips = []
 
-    # A route end on a state border, or an inner loop's end on its exit boundary.
+    # Each region divider as the zero-thickness box its line spans.
+    dividers = [span((int(a), int(b)), (int(c), int(d)))
+                for a, b, c, d in DIVIDER.findall(svg)]
+
+    # A route end on a state border or a region divider, or an inner loop's end on its
+    # exit boundary.
     def attached(pt, trans):
-        if any(on_border(pt, box) for box in every):
+        if any(on_border(pt, box) for box in every + dividers):
             return True
         state = inner_loop(doc, trans)
         pts = route.get(trans, [])

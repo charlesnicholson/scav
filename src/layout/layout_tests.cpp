@@ -1803,7 +1803,7 @@ TEST_CASE("layout: only a kept inflation attempt ends the retry loop") {
 }
 
 TEST_CASE("layout: a route between two regions of one state stays inside that state") {
-  // The channel between `On`'s two regions routes inside `On`.
+  // Both routes between `On`'s two regions stay inside `On`.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const on{ build_state(c, root, "On", StateKind::Normal, {}) };
