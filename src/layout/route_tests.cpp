@@ -253,6 +253,52 @@ TEST_CASE("route: a crossing puts its slot on the crossed border") {
   CHECK((r.points[1] == scav_point{ .x = slot.x, .y = slot.y }));
 }
 
+TEST_CASE("route: a slot off its route moves to where the route crosses its border") {
+  // `S` inside `C` goes to `D` outside, its slot recorded on `C`'s right face at y 80.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const comp{ build_state(c, root, "C", StateKind::Normal, {}) };
+  SubmachineId const inner{ build_submachine(c, comp, {}, {}) };
+  StateId const s{ build_state(c, inner, "S", StateKind::Normal, {}) };
+  StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
+  build_trans(c, s, d, TransKind::Default, {});
+  SplitGraph const g{ decompose(c) };
+  REQUIRE(g.trans_segments[0].len == 2);
+  SizedLayout z{ blank(c, empty_orders(c, g)) };
+  z.state[comp.v] = { .x = 0, .y = 0, .w = 200, .h = 200 };
+  z.sub[inner.v] = { .x = 10, .y = 10, .w = 180, .h = 180 };
+  auto const reseated = [&](std::vector<scav_point> const &line) {
+    Routes r;
+    r.points = line;
+    r.route = { { .off = 0, .len = static_cast<uint32_t>(line.size()) } };
+    r.slots = { { .x = 200, .y = 80, .side = 1, .boundary_depth = 0 } };
+    r.port = { { .off = 0, .len = 1 } };
+    reseat_slots(g, z, r);
+    return r.slots[0];
+  };
+
+  scav_port_slot const kept{ reseated({ { .x = 120, .y = 80 }, { .x = 400, .y = 80 } }) };
+  CHECK(kept.x == 200);
+  CHECK(kept.y == 80);
+  CHECK(kept.side == 1);
+
+  // Moved down the face with its segment.
+  scav_port_slot const slid{ reseated(
+      { { .x = 120, .y = 120 }, { .x = 400, .y = 120 } }) };
+  CHECK(slid.x == 200);
+  CHECK(slid.y == 120);
+  CHECK(slid.side == 1);
+
+  // Out through the bottom instead: the slot takes that face.
+  scav_port_slot const turned{ reseated({ { .x = 70, .y = 100 },
+                                          { .x = 70, .y = 250 },
+                                          { .x = 450, .y = 250 },
+                                          { .x = 450, .y = 40 } }) };
+  CHECK(turned.x == 70);
+  CHECK(turned.y == 200);
+  CHECK(turned.side == 3);
+}
+
 TEST_CASE("route: an exit slot slides level with the entry slot across it") {
   // A's exit node is level with S and B's entry node with T: at their nodes the two slots
   // need a jog between them.

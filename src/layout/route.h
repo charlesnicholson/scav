@@ -56,6 +56,10 @@ struct RouteCache {
   std::vector<uint8_t> faceable;
 };
 
+// Moves each slot off its route, a separator's far one aside, to where the route next
+// meets the slot's face inside its span, else any face of the slot's box.
+void reseat_slots(SplitGraph const &g, SizedLayout const &z, Routes &out);
+
 // One net per segment, routed in its frame, laid end to end; the result is the same at
 // every `threads`. With `labels` false, `placed` is empty.
 Routes route_transitions(Chart const &c,

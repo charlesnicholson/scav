@@ -235,6 +235,80 @@ void slide_slots(Chart const &c,
   }
 }
 
+// `reseat_slots` for transition `t`.
+void reseat_trans_slots(SplitGraph const &g,
+                        SizedLayout const &z,
+                        uint32_t t,
+                        Routes &out) {
+  if ((t >= out.route.size()) || (t >= g.trans_segments.size())) { return; }
+  scav_span const ports{ out.port[t] };
+  scav_span const route{ out.route[t] };
+  Span const segs{ g.trans_segments[t] };
+  if ((ports.len == 0) || (route.len < 2) || (ports.len >= segs.len)) { return; }
+  uint32_t from{ 0 };  // the route segment the slot before lies on
+  for (uint32_t k = 0; k < ports.len; ++k) {
+    if (g.segments[segs.off + k].separator != 0) { continue; }
+    scav_port_slot &slot{ out.slots[ports.off + k] };
+    uint32_t const port{ g.segments[segs.off + k].dst_port };
+    if (port >= g.ports.size()) { continue; }
+    SplitPort const &pt{ g.ports[port] };
+    scav_rect const &box{ (pt.state.v != INVALID) ? z.state[pt.state.v]
+                                                  : z.sub[pt.sub.v] };
+    // Where segment `i` meets `face` inside its span, nearest the slot along it.
+    auto const meet = [&](uint32_t face, uint32_t i, scav_point &at) {
+      scav_point const a{ out.points[route.off + i] };
+      scav_point const b{ out.points[route.off + i + 1] };
+      bool const upright{ face < 2 };  // the face runs down the page
+      int32_t line{ box.y + box.h };
+      switch (face) {
+        case 0: line = box.x; break;
+        case 1: line = box.x + box.w; break;
+        case 2: line = box.y; break;
+        default: break;
+      }
+      int32_t const lo{ upright ? box.y : box.x };
+      int32_t const hi{ lo + (upright ? box.h : box.w) };
+      int32_t const a_across{ upright ? a.x : a.y };
+      int32_t const b_across{ upright ? b.x : b.y };
+      int32_t const a_along{ upright ? a.y : a.x };
+      int32_t const b_along{ upright ? b.y : b.x };
+      if ((imin(a_across, b_across) > line) || (imax(a_across, b_across) < line) ||
+          ((a_across != b_across) && (a_along != b_along))) {
+        return false;
+      }
+      int32_t const was{ upright ? slot.y : slot.x };
+      int32_t const along{ (a_across == b_across) ? imin(imax(was, imin(a_along, b_along)),
+                                                         imax(a_along, b_along))
+                                                  : a_along };
+      if ((along < lo) || (along > hi)) { return false; }
+      at = upright ? scav_point{ .x = line, .y = along }
+                   : scav_point{ .x = along, .y = line };
+      return true;
+    };
+    bool placed{ false };
+    for (uint32_t i = from; !placed && ((i + 1) < route.len); ++i) {
+      scav_point const a{ out.points[route.off + i] };
+      scav_point const b{ out.points[route.off + i + 1] };
+      placed = (slot.x >= imin(a.x, b.x)) && (slot.x <= imax(a.x, b.x)) &&
+               (slot.y >= imin(a.y, b.y)) && (slot.y <= imax(a.y, b.y));
+      if (placed) { from = i; }
+    }
+    for (uint32_t pass = 0; !placed && (pass < 2); ++pass) {
+      for (uint32_t i = from; !placed && ((i + 1) < route.len); ++i) {
+        for (uint32_t face = 0; !placed && (face < 4); ++face) {
+          scav_point at{};
+          if (((pass == 0) != (face == slot.side)) || !meet(face, i, at)) { continue; }
+          slot.x = at.x;
+          slot.y = at.y;
+          slot.side = face;
+          from = i;
+          placed = true;
+        }
+      }
+    }
+  }
+}
+
 // True when `b` and `frame` are `a`'s input and frame with every coordinate moved by one
 // delta, written to `dx`/`dy`; compares every input the router and the nudger read.
 bool same_but_shifted(RouteFrameCache const &a,
@@ -1050,10 +1124,15 @@ void route_transitions(Routes &out,
                 out.points,
                 s.path_clear,  // an end leg keeps at least its clear
                 (s.path_clear != nullptr) ? s.n_path_clear : 0);
+    reseat_slots(g, z, out);
   }
 
   if (labels) { label_routes(out, c, g, z, s, p); }
   vec_push_back(stack, std::move(cs));
+}
+
+void reseat_slots(SplitGraph const &g, SizedLayout const &z, Routes &out) {
+  for (uint32_t t = 0; t < out.port.size(); ++t) { reseat_trans_slots(g, z, t, out); }
 }
 
 void label_routes(Routes &out,
