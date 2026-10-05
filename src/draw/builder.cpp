@@ -151,11 +151,10 @@ bool measure_chart(Chart const &c, Metrics const &m, scav_profile const &p, Spac
           composite || (c.submachines[c.submachine_ids[subs.off + k].v].live != 0U);
     }
     Header const header{ header_of(title.h, about.h, pad) };
-    // Bit 0 where the drawn rule lies on the band's inner edge.
-    bool const ruled{ !inscribed && ((c.states[i].label.len != 0U) || composite) &&
-                      (header.rule == header.h) };
+    // A composite with no description ends its band at the rule, which then marks bit 0.
+    bool const ruled{ !inscribed && composite && (c.states[i].label.len == 0U) };
     scav_box_space const box{ .min_w = grow * (imax(title.w, about.w) + (2 * pad)),
-                              .h_before = grow * header.h,
+                              .h_before = grow * (ruled ? header.rule : header.h),
                               .h_after = 0,
                               .ruled = ruled ? 1U : 0U };
     if (!fits(box.min_w) || !fits(box.h_before)) { return false; }
@@ -335,8 +334,10 @@ void emit_state(DrawList &d,
   std::vector<std::string_view> notes;
   if (!about.empty()) { notes = text_lines(about); }
   int32_t const note_lines{ static_cast<int32_t>(notes.size()) };
-  // The band is one pad plus every line at the height measure_chart gave it.
-  int32_t const each{ (before.h - ring) / (name_lines + note_lines) };
+  // The band is one pad plus every line, or half a pad and the name where it ends at the
+  // rule.
+  int32_t const each{ (before.h - ((note_lines == 0) ? (ring / 2) : ring)) /
+                      (name_lines + note_lines) };
   if (each <= 0) { return; }
   Header const header{ header_of(name_lines * each, note_lines * each, ring) };
   int32_t const rule{ before.y + header.rule };

@@ -227,10 +227,11 @@ TEST_CASE("builder: the measurement pass reserves a name and nothing else") {
                         p.line_height_k_num,
                         p.line_height_k_den,
                         title) == MeasureStatus::Ok);
-  // The whole policy: the title plus a pad each side, the title's height plus
-  // one pad above the submachine area, and nothing after it.
+  // The whole policy: the title plus a pad each side, the title's height plus half a pad
+  // down to the rule that ends the band, and nothing after it.
   CHECK(s.box_state[0].min_w == (title.w + (2 * p.pad)));
-  CHECK(s.box_state[0].h_before == (title.h + p.pad));
+  CHECK(s.box_state[0].h_before == (title.h + (p.pad / 2)));
+  CHECK(s.box_state[0].ruled == 1U);
   CHECK(s.box_state[0].h_after == 0);
 
   // One path box, for the one labelled transition.
@@ -452,8 +453,8 @@ TEST_CASE("builder: a composite with no description still takes a header rule") 
   CHECK(a.x == box.x);
   CHECK(z.x == (box.x + box.w));
   CHECK(a.y == (before.y + measured("Running", p).h + (p.pad / 2)));
-  CHECK(a.y < (before.y + before.h));
-  CHECK(a.y < region.y);
+  CHECK(a.y == (before.y + before.h));  // the band's inner edge
+  CHECK(a.y <= region.y);
   REQUIRE(state_prims(b.list, 0, SCAV_PRIM_TEXT).size() == 1);
 }
 
