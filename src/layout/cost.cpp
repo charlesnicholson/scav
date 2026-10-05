@@ -14,6 +14,7 @@
 #include "scav_stable_sort.h"
 #include "scav_vec.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstring>
