@@ -40,6 +40,11 @@ int32_t cost_through_boxes(Chart const &c,
 int64_t cost_crossings(std::vector<Piece> const &pieces, std::vector<uint32_t> &per_trans);
 Wide cost_corridor(Routes const &r, std::vector<Piece> const &pieces);
 Wide cost_crowding(std::vector<Piece> const &pieces, int32_t em);
+int32_t cost_path_turns(scav_rect const &s,
+                        uint32_t s_face,
+                        std::vector<scav_point> const &via,
+                        scav_rect const &t,
+                        uint32_t t_face);
 
 }  // namespace scav
 
@@ -3230,4 +3235,103 @@ TEST_CASE("cost: a context built once scores every candidate as one built for it
       CHECK(ctx.grid.frame[m].bucket == again.grid.frame[m].bucket);
     }
   }
+}
+
+TEST_CASE("cost bound: boxes sharing a row or a column take no turn, others one") {
+  scav_rect const a{ .x = 0, .y = 0, .w = 100, .h = 40 };
+  CHECK(cost_path_turns(a, 4, {}, { .x = 300, .y = 20, .w = 100, .h = 40 }, 4) == 0);
+  CHECK(cost_path_turns(a, 4, {}, { .x = 50, .y = 200, .w = 100, .h = 40 }, 4) == 0);
+  CHECK(cost_path_turns(a, 4, {}, { .x = 300, .y = 200, .w = 100, .h = 40 }, 4) == 1);
+  // Touching corners share a point.
+  CHECK(cost_path_turns(a, 4, {}, { .x = 100, .y = 40, .w = 100, .h = 40 }, 4) == 0);
+}
+
+TEST_CASE("cost bound: a named face turned from the far box costs two turns") {
+  scav_rect const a{ .x = 0, .y = 0, .w = 100, .h = 400 };
+  scav_rect const right{ .x = 300, .y = 0, .w = 100, .h = 400 };
+  CHECK(cost_path_turns(a, 1, {}, right, 4) == 0);  // right face, toward it
+  CHECK(cost_path_turns(a, 0, {}, right, 4) == 2);  // left face, out and back
+  CHECK(cost_path_turns(a, 2, {}, right, 4) == 2);  // top face, up, across, down
+  CHECK(cost_path_turns(a, 4, {}, right, 0) == 0);  // into its left face
+  CHECK(cost_path_turns(a, 4, {}, right, 1) == 2);  // into its right face, round it
+  CHECK(cost_path_turns(a, 0, {}, right, 1) == 4);  // both faces turned away
+  // A box beyond the named face takes no extra turn.
+  CHECK(cost_path_turns(right, 0, {}, a, 4) == 0);
+}
+
+TEST_CASE("cost bound: a waypoint off the line between two boxes costs its turns") {
+  scav_rect const a{ .x = 0, .y = 0, .w = 100, .h = 40 };
+  scav_rect const b{ .x = 300, .y = 0, .w = 100, .h = 40 };
+  CHECK(cost_path_turns(a, 4, { { .x = 200, .y = 20 } }, b, 4) == 0);
+  CHECK(cost_path_turns(a, 4, { { .x = 200, .y = 300 } }, b, 4) == 2);
+  CHECK(cost_path_turns(a, 4, { { .x = 200, .y = 300 }, { .x = 250, .y = 300 } }, b, 4) ==
+        2);
+  CHECK(cost_path_turns(a, 4, { { .x = 200, .y = 300 }, { .x = 250, .y = 20 } }, b, 4) ==
+        2);
+  CHECK(cost_path_turns(a, 4, { { .x = 200, .y = 300 }, { .x = 250, .y = 600 } }, b, 4) ==
+        3);
+}
+
+namespace {
+
+// `c` sized by hand: every per-state vector sized, loops empty.
+SizedLayout sized(Chart const &c) {
+  SizedLayout z{ blank(c) };
+  z.lead.assign(c.states.size(), scav_rect{});
+  z.trail.assign(c.states.size(), scav_rect{});
+  z.loop.assign(c.states.size(), scav_rect{});
+  z.loop_place.assign(c.states.size(), 0);
+  return z;
+}
+
+}  // namespace
+
+TEST_CASE("cost bound: area, length and bends of two boxes, and a named face") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::Default, {});
+  SplitGraph const g{ decompose(c) };
+  SizedLayout z{ sized(c) };
+  z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 400 };
+  z.state[b.v] = { .x = 300, .y = 600, .w = 100, .h = 400 };
+  z.chart = { .x = 0, .y = 0, .w = 400, .h = 1000 };
+  SubmachineOrders const o;
+  scav_profile const p{ profile() };
+  int32_t const clear{ route_clearance(p) };
+
+  CostTerms const t{ cost_bound(c, g, o, z, {}, p, clear, true) };
+  CHECK(t.area == 400LL * 1000);
+  CHECK(t.length == 200 + 200);
+  CHECK(t.bends == 1);
+  CHECK(cost_of(t, p).t0_violations == 0);
+
+  // A router that is not rectilinear: the larger axis gap, and no bends.
+  CostTerms const any{ cost_bound(c, g, o, z, {}, p, clear, false) };
+  CHECK(any.length == 200);
+  CHECK(any.bends == 0);
+
+  // Leaving A by its left face, away from B, turns twice.
+  std::vector<uint32_t> const left{ (0U << 3U) | (0U << 2U) | 0U };
+  CHECK(cost_bound(c, g, o, z, left, p, clear, true).bends == 2);
+  // A face too short to seat on is declined, and so takes no constraint.
+  z.state[a.v].h = 2 * clear;
+  CHECK(cost_bound(c, g, o, z, left, p, clear, true).bends == 1);
+}
+
+TEST_CASE("cost bound: an inner loop takes two bends, a self-transition none") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  build_trans(c, a, a, TransKind::Internal, {});
+  build_trans(c, a, a, TransKind::External, {});
+  SplitGraph const g{ decompose(c) };
+  SizedLayout z{ sized(c) };
+  z.state[a.v] = { .x = 0, .y = 0, .w = 400, .h = 400 };
+  z.chart = z.state[a.v];
+  scav_profile const p{ profile() };
+  CostTerms const t{ cost_bound(c, g, {}, z, {}, p, route_clearance(p), true) };
+  CHECK(t.bends == 2);
+  CHECK(t.length == 0);
 }

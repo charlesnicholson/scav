@@ -610,6 +610,10 @@ void CandidateMemo::answer(ScoreRecord const &r, bool labelled, Recalled &out) {
   }
   out.labelled = labelled || (r.t0[0] == TAG_UNSET);
   out.found = read(r, out.labelled ? 1U : 0U, out.score);
+  if (r.bound_hi >= 0) {
+    out.route_bound = static_cast<int64_t>(
+        (uint64_t{ static_cast<uint32_t>(r.bound_hi) } << 32U) | r.bound_lo);
+  }
 }
 
 CandidateMemo::Recalled CandidateMemo::find_score(uint32_t drawn,
@@ -635,9 +639,12 @@ CandidateMemo::Recalled CandidateMemo::find_score(uint32_t drawn,
     index = sh.keys.insert(key.data(), len, hash);
     if (index == INVALID) { return out; }
     out.entry = number(sh.base, index, shard);
-    vec_push_back(
-        sh.records,
-        { .t0 = { TAG_UNSET, TAG_UNSET }, .t2_hi = { 0, 0 }, .t2_lo = { 0, 0 } });
+    vec_push_back(sh.records,
+                  { .t0 = { TAG_UNSET, TAG_UNSET },
+                    .t2_hi = { 0, 0 },
+                    .t2_lo = { 0, 0 },
+                    .bound_hi = -1,
+                    .bound_lo = 0 });
   }
   charge(KeyIndex::ENTRY_BYTES + sizeof(ScoreRecord) +
          (uint64_t{ len } * sizeof(uint32_t)));
@@ -722,8 +729,12 @@ void CandidateMemo::set_score(uint32_t e, bool labelled, MemoScore const &s) {
       (scored && ((s.cost.t0_violations < 0) || (s.cost.t1_hints != 0)))) {
     return;
   }
-  int32_t t0{ s.viable ? (s.inflated ? TAG_INFLATED : TAG_DEGRADED) : TAG_NOT_VIABLE };
-  if (scored) { t0 = s.cost.t0_violations; }
+  int32_t t0{ TAG_NOT_VIABLE };
+  if (scored) {
+    t0 = s.cost.t0_violations;
+  } else if (s.viable) {
+    t0 = s.inflated ? TAG_INFLATED : TAG_DEGRADED;
+  }
   auto const t2{ static_cast<uint64_t>(scored ? s.cost.t2 : 0) };
   uint32_t const k{ labelled ? 1U : 0U };
   ScoreShard &sh{ scores[e & (SHARDS - 1)] };
@@ -734,6 +745,17 @@ void CandidateMemo::set_score(uint32_t e, bool labelled, MemoScore const &s) {
   r.t0[k] = t0;
   r.t2_hi[k] = static_cast<uint32_t>(t2 >> 32U);
   r.t2_lo[k] = static_cast<uint32_t>(t2);
+}
+
+void CandidateMemo::set_route_bound(uint32_t e, int64_t t2) {
+  if ((e == INVALID) || (t2 < 0)) { return; }
+  ScoreShard &sh{ scores[e & (SHARDS - 1)] };
+  ScopedLock const held{ sh.lock };
+  uint32_t const index{ index_of(e, sh.base, sh.records.size()) };
+  if (index == INVALID) { return; }
+  auto const bits{ static_cast<uint64_t>(t2) };
+  sh.records[index].bound_hi = static_cast<int32_t>(bits >> 32U);
+  sh.records[index].bound_lo = static_cast<uint32_t>(bits);
 }
 
 void CandidateMemo::set_retried(uint32_t e) {

@@ -23,6 +23,11 @@ constexpr std::array<Router const *, 2> ROUTERS{ { &ORTHOGONAL, &STRAIGHT } };
 
 }  // namespace
 
+bool face_seats(scav_rect const &r, uint32_t face, int32_t clear, int32_t arc) {
+  int32_t const len{ (face < 2) ? r.h : r.w };
+  return len > (2 * imin(imax(clear, arc), len / 2));
+}
+
 uint32_t face_of(scav_point at, scav_rect const &r) {
   if (at.x == r.x) { return 0; }
   if (at.x == (r.x + r.w)) { return 1; }

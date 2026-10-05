@@ -59,6 +59,10 @@ uint64_t layout_test_candidate_memo_deduped();
 uint64_t layout_test_candidate_memo_drawn();
 uint64_t layout_test_candidate_memo_faced();
 uint64_t layout_test_candidate_memo_mismatches();
+void layout_test_route_bound(bool on, bool verify);
+uint64_t layout_test_route_bound_pruned();
+uint64_t layout_test_route_bound_checked();
+uint64_t layout_test_route_bound_mismatches();
 std::vector<Cost> const &layout_test_schedule_first();
 std::vector<Cost> const &layout_test_schedule_second();
 std::vector<Cost> const &layout_test_schedule_kept();
@@ -932,6 +936,15 @@ uint64_t test_candidate_memo_deduped{ 0 };
 uint64_t test_candidate_memo_drawn{ 0 };
 uint64_t test_candidate_memo_faced{ 0 };
 uint64_t test_candidate_memo_mismatches{ 0 };
+
+// Test switches: leave unrouted a move whose route bound reaches the incumbent; check each
+// bound against its move routed. The counters tally pruned moves, checks and failures.
+bool test_route_bound{ true };
+bool test_route_bound_verify{ false };
+Mutex test_route_bound_lock;
+uint64_t test_route_bound_pruned{ 0 };
+uint64_t test_route_bound_checked{ 0 };
+uint64_t test_route_bound_mismatches{ 0 };
 #endif
 
 // True when every path box fits `chart`; a placed box then lies inside it.
@@ -1005,6 +1018,8 @@ struct MemoAccess {
   CandidateMemo::Blocks const *ordered{ nullptr };
   CandidateMemo::Blocks const *laid{ nullptr };
   CandidateMemo::Blocks const *drawing{ nullptr };
+  Cost incumbent{};     // the round's incumbent
+  bool prune{ false };  // a move whose route bound reaches `incumbent` is not routed
 };
 
 // How one scored move met the memo.
@@ -1014,6 +1029,7 @@ struct MemoUse {
   bool drawn{ false };        // the answer came by its drawing
   bool labelled{ false };     // the answer is the labelled score
   bool faced{ false };        // the facing memo answered its facing pass
+  bool pruned{ false };       // its route bound reached the incumbent
 };
 
 MemoScore memo_score(Scored const &s) {
@@ -1036,6 +1052,51 @@ MoveScratch &move_scratch() {
   thread_local MoveScratch s;
   return s;
 }
+
+// `cost_bound` of laid ordering `o` sized as `z` under the move's faces, routed by
+// `router`.
+CostTerms route_bound(Chart const &c,
+                      SplitGraph const &g,
+                      SubmachineOrders const &o,
+                      SizedLayout const &z,
+                      std::vector<uint32_t> const &faces,
+                      scav_profile const &objective,
+                      Row const &row,
+                      Router const &router) {
+  return cost_bound(c,
+                    g,
+                    o,
+                    z,
+                    faces,
+                    objective,
+                    route_clearance(row.knobs),
+                    router.rectilinear());
+}
+
+#ifdef SCAV_TESTING
+// Tallies a check of `bound` against `cand` routed: each term at or above it, and the sum
+// where `cand` has Tier 0 zero, no degraded net and no inflation.
+void check_route_bound(Chart const &c,
+                       SplitGraph const &g,
+                       CostContext const &scoring,
+                       scav_spaces const &s,
+                       scav_profile const &objective,
+                       Candidate const &cand,
+                       CostTerms const &bound) {
+  bool holds{ true };
+  if (cand.viable && (cand.inflations == 0) && (cand.routes.degraded() == 0)) {
+    CostTerms const t{ cost_terms(scoring, c, g, cand.sized, cand.routes, s, objective) };
+    Cost const cost{ cost_of(t, objective) };
+    holds = (cost.t0_violations != 0) ||
+            ((t.area >= bound.area) && (t.whitespace >= bound.whitespace) &&
+             (t.adjacency >= bound.adjacency) && (t.length >= bound.length) &&
+             (t.bends >= bound.bends) && (cost.t2 >= cost_of(bound, objective).t2));
+  }
+  ScopedLock const held{ test_route_bound_lock };
+  ++test_route_bound_checked;
+  test_route_bound_mismatches += holds ? 0U : 1U;
+}
+#endif
 
 // `score_move` through `memo.table`: a laid ordering or drawing seen under the same faces
 // takes its stored score, and a phase-1 ordering seen its facing pass's turns.
@@ -1062,13 +1123,41 @@ Scored score_memoized(Chart const &c,
   cand.retried = false;
   Scored out;
   table.box_faces(&pins, sc.faces);
+  int64_t stored_bound{ -1 };  // the entry's route bound Tier 2, -1 while unset
   // Takes `got`'s entry and the score it answers with, if any; true when one does.
   auto const take = [&](CandidateMemo::Recalled const &got) {
     use.entry = got.entry;
     use.deduped = got.found;
     use.labelled = got.labelled;
+    stored_bound = got.route_bound;
     if (got.found) { out = scored_from(got.score); }
     return got.found;
+  };
+  // Scores the move as its route bound where Tier 2 `t2` reaches the incumbent; true then.
+  auto const prune_at = [&](int64_t t2) {
+    Cost const bound{ .t0_violations = 0, .t1_hints = 0, .t2 = t2 };
+    if (!memo.prune || (t2 < 0) || cost_less(bound, memo.incumbent)) { return false; }
+    out = Scored{};
+    out.cost = bound;
+    out.viable = true;
+    use.pruned = true;
+    return true;
+  };
+  CostTerms bound{};  // the move's route bound where `bounded`
+  bool bounded{ false };
+  // Prunes by the stored route bound, else by that of `o` sized as `z`, which it stores.
+  auto const pruned_by = [&](SubmachineOrders const &o, SizedLayout const &z) {
+    if (prune_at(stored_bound)) { return true; }
+    bool compute{ memo.prune && (stored_bound < 0) };
+#ifdef SCAV_TESTING
+    compute = compute || test_route_bound_verify;
+#endif
+    if (!compute) { return false; }
+    bound = route_bound(c, g, o, z, sc.faces, objective, row, router);
+    bounded = true;
+    int64_t const t2{ cost_of(bound, objective).t2 };
+    table.set_route_bound(use.entry, t2);
+    return prune_at(t2);
   };
   // Looks up drawing `drawn` under the move's faces; true when a stored score answers.
   auto const recall_drawn = [&](uint32_t drawn) {
@@ -1086,7 +1175,7 @@ Scored score_memoized(Chart const &c,
       cand = Candidate{};
       return out;
     }
-    if (recall_drawn(memo.drawn)) { return out; }
+    if (recall_drawn(memo.drawn) || pruned_by(from->laid, from->sized)) { return out; }
     cand.sized = from->sized;
     cand.laid = pins;
     turn_pins(cand.laid, from->flips);
@@ -1136,7 +1225,7 @@ Scored score_memoized(Chart const &c,
       key = linked.key;
       return take(table.recall(linked.entry, labels));
     };
-    if (recall_laid()) { return out; }
+    if (recall_laid() || prune_at(stored_bound)) { return out; }
     // A turned ordering that does not size leaves the phase-1 ordering laid.
     std::vector<Diagnostic> spilled;
     bool ok{ sized || size_layout(c,
@@ -1151,7 +1240,7 @@ Scored score_memoized(Chart const &c,
                                   row.fold) };
     if (!ok && (laid != &sc.moved)) {
       laid = &sc.moved;
-      if (recall_laid()) { return out; }
+      if (recall_laid() || prune_at(stored_bound)) { return out; }
       ok = size_layout(c,
                        g,
                        *laid,
@@ -1171,10 +1260,17 @@ Scored score_memoized(Chart const &c,
     bool const drawn{ recall_drawn(
         table.drawing(*laid, cand.sized, memo.profile, memo.drawing)) };
     table.link(key, use.entry);
-    if (drawn) { return out; }
+    if (drawn || pruned_by(*laid, cand.sized)) { return out; }
   }
   lay_routes(cand, c, g, *laid, s, row, router, 1, &pins, { .reuse = reuse }, labels);
   out = scored_of(c, g, scoring, s, objective, cand, labels);
+#ifdef SCAV_TESTING
+  if (test_route_bound_verify && bounded) {
+    check_route_bound(c, g, scoring, s, objective, cand, bound);
+  }
+#else
+  (void)bounded;
+#endif
   if (cand.retried) {
     table.set_retried(use.entry);
     use.entry = INVALID;
@@ -1254,7 +1350,35 @@ Scored score_move(Chart const &c,
       test_candidate_memo_drawn += use.drawn ? 1U : 0U;
       test_candidate_memo_faced += use.faced ? 1U : 0U;
     }
-    if (test_candidate_memo_verify && (use.deduped || use.faced)) {
+    if (use.pruned) {
+      ScopedLock const held{ test_route_bound_lock };
+      ++test_route_bound_pruned;
+    }
+    if (test_route_bound_verify && use.pruned) {
+      // A pruned move laid out whole scores at or above its bound.
+      SubmachineOrders const moved{ order_submachines(c, g, s, objective, 1, pins) };
+      std::vector<Diagnostic> spilled;
+      Candidate fresh;
+      search_candidate(fresh,
+                       c,
+                       g,
+                       moved,
+                       s,
+                       row,
+                       router,
+                       1,
+                       spilled,
+                       &pins,
+                       { .reuse = reuse },
+                       false);
+      Scored const want{ scored_of(c, g, scoring, s, objective, fresh, false) };
+      bool const holds{ !want.viable || want.inflated || want.degraded ||
+                        !cost_less(want.cost, out.cost) };
+      ScopedLock const held{ test_route_bound_lock };
+      ++test_route_bound_checked;
+      test_route_bound_mismatches += holds ? 0U : 1U;
+    }
+    if (test_candidate_memo_verify && !use.pruned && (use.deduped || use.faced)) {
       SubmachineOrders const moved{ order_submachines(c, g, s, objective, 1, pins) };
       std::vector<Diagnostic> spilled;
       Candidate fresh;
@@ -1645,6 +1769,10 @@ Improved run_search(Chart const &c,
     access.table = memo;
     access.row = memo->row_word(row);
     access.profile = memo->profile_word(row.knobs);
+    access.prune = true;
+#ifdef SCAV_TESTING
+    access.prune = test_route_bound;
+#endif
   }
   // The incumbent's encodings, which each candidate's frames are numbered against.
   CandidateMemo::Blocks ordered_blocks;
@@ -2014,6 +2142,7 @@ Improved run_search(Chart const &c,
       continue;
     }
 
+    access.incumbent = out.cost;
     // Each candidate runs its phases on one thread; `fresh` scores it without the memo.
     auto const score =
         [&](uint32_t i, bool labels, MemoUse &use, Routed *routed, bool fresh = false) {
@@ -2150,6 +2279,7 @@ Improved run_search(Chart const &c,
       auto const kind{ static_cast<uint32_t>(round[i].kind) };
       ++counted.offered[kind];
       counted.deduped[kind] += uses[i].deduped ? 1U : 0U;
+      counted.pruned[kind] += uses[i].pruned ? 1U : 0U;
       counted.drawn += uses[i].drawn ? 1U : 0U;
       counted.faced += uses[i].faced ? 1U : 0U;
     }
@@ -3362,6 +3492,25 @@ uint64_t layout_test_candidate_memo_faced() {
 uint64_t layout_test_candidate_memo_mismatches() {
   ScopedLock const held{ test_candidate_memo_lock };
   return test_candidate_memo_mismatches;
+}
+void layout_test_route_bound(bool on, bool verify) {
+  test_route_bound = on;
+  test_route_bound_verify = verify;
+  test_route_bound_pruned = 0;
+  test_route_bound_checked = 0;
+  test_route_bound_mismatches = 0;
+}
+uint64_t layout_test_route_bound_pruned() {
+  ScopedLock const held{ test_route_bound_lock };
+  return test_route_bound_pruned;
+}
+uint64_t layout_test_route_bound_checked() {
+  ScopedLock const held{ test_route_bound_lock };
+  return test_route_bound_checked;
+}
+uint64_t layout_test_route_bound_mismatches() {
+  ScopedLock const held{ test_route_bound_lock };
+  return test_route_bound_mismatches;
 }
 void layout_test_search_memo_verify(bool on) { test_search_memo_verify = on; }
 void layout_test_no_search(bool on) { test_no_search = on; }

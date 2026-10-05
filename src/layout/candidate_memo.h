@@ -103,6 +103,7 @@ class CandidateMemo {
     bool found{ false };
     bool labelled{ false };  // the labelled score answered
     MemoScore score;
+    int64_t route_bound{ -1 };  // the entry's `cost_bound` Tier 2, -1 while unset
   };
 
   // Finds or makes drawing `drawn`'s score entry under `faces`: a bound request reads the
@@ -130,6 +131,9 @@ class CandidateMemo {
   bool score(uint32_t e, bool labelled, MemoScore &out);
   void set_score(uint32_t e, bool labelled, MemoScore const &s);
 
+  // Stores the Tier 2 of entry `e`'s `cost_bound`, whose Tier 0 is zero.
+  void set_route_bound(uint32_t e, int64_t t2);
+
   // Marks entry `e` retried: it then never answers and takes no score.
   void set_retried(uint32_t e);
 
@@ -137,15 +141,16 @@ class CandidateMemo {
   [[nodiscard]] uint64_t peak_bytes() const;
 
  private:
-  // An entry's unlabelled then labelled score: `t0` the Tier-0 count or a negative tag for
-  // unset, not viable, inflated, degraded or retried; `t2_hi`, `t2_lo` the Tier-2 sum's
-  // words.
+  // An entry's unlabelled then labelled score, `t0` a Tier-0 count or a negative tag, and
+  // its route bound's Tier 2, `bound_hi` negative while unset.
   struct ScoreRecord {
     std::array<int32_t, 2> t0;
     std::array<uint32_t, 2> t2_hi;
     std::array<uint32_t, 2> t2_lo;
+    int32_t bound_hi;
+    uint32_t bound_lo;
   };
-  static_assert(sizeof(ScoreRecord) == 24);
+  static_assert(sizeof(ScoreRecord) == 32);
 
   // Writes `r`'s score `k` (0 unlabelled, 1 labelled) to `out`; false while it is unset.
   static bool read(ScoreRecord const &r, uint32_t k, MemoScore &out);

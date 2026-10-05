@@ -87,6 +87,17 @@ CostTerms cost_terms(Chart const &c,
                      scav_spaces const &s,
                      scav_profile const &p);
 
+// Per term, the least a routing of `z` with no degraded net and Tier 0 zero scores;
+// `faces` as `CandidateMemo::box_faces` writes them, `clear` the router's seat inset.
+CostTerms cost_bound(Chart const &c,
+                     SplitGraph const &g,
+                     SubmachineOrders const &o,
+                     SizedLayout const &z,
+                     std::vector<uint32_t> const &faces,
+                     scav_profile const &p,
+                     int32_t clear,
+                     bool rectilinear);
+
 // The same scoring read from the geometry columns; `placed` is the run's placed-box
 // out-param.
 CostTerms cost_columns(Chart const &c,

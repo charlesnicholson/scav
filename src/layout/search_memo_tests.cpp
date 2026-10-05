@@ -52,6 +52,10 @@ uint64_t layout_test_candidate_memo_deduped();
 uint64_t layout_test_candidate_memo_drawn();
 uint64_t layout_test_candidate_memo_faced();
 uint64_t layout_test_candidate_memo_mismatches();
+void layout_test_route_bound(bool on, bool verify);
+uint64_t layout_test_route_bound_pruned();
+uint64_t layout_test_route_bound_checked();
+uint64_t layout_test_route_bound_mismatches();
 std::vector<Cost> const &layout_test_schedule_first();
 std::vector<Cost> const &layout_test_schedule_second();
 std::vector<Cost> const &layout_test_schedule_kept();
@@ -107,8 +111,9 @@ struct Laid {
   bool ok{ false };
 };
 
-// With `labelled`, a path box for every routed transition, so a layout places labels.
-Laid lay_out(char const *name, bool labelled = false) {
+// With `labelled`, a path box for every routed transition, so a layout places labels;
+// with `culled`, the culled search.
+Laid lay_out(char const *name, bool labelled = false, bool culled = false) {
   std::string path{ SCAV_TEST_DATA_DIR "/charts/" };
   path += name;
   Loader loader;
@@ -129,7 +134,9 @@ Laid lay_out(char const *name, bool labelled = false) {
                        .n_path_box = static_cast<uint32_t>(boxes.size()),
                        .path_box_stride = sizeof(scav_path_box) };
   std::vector<scav_placed> placed;
-  scav_layout_opts const opts{ .profile = readable(), .router = 0, .threads = 0 };
+  scav_profile p{ readable() };
+  p.search_cull = culled ? 1 : 0;
+  scav_layout_opts const opts{ .profile = p, .router = 0, .threads = 0 };
   Laid out;
   out.ok = layout_run(c, s, opts, placed, diags);
   out.structural = layout_structural_hash(c);
@@ -663,8 +670,8 @@ TEST_CASE("search: two rows that draw every candidate alike lay each out once") 
     SearchStats const one{ counted(name, 1) };
     SearchStats const two{ counted(name, 2) };
     CHECK(total(two.offered) > total(one.offered));
-    CHECK((total(two.offered) - total(two.deduped)) ==
-          (total(one.offered) - total(one.deduped)));
+    CHECK((total(two.offered) - total(two.deduped) - total(two.pruned)) ==
+          (total(one.offered) - total(one.deduped) - total(one.pruned)));
     CHECK(two.drawn > one.drawn);
   }
   CHECK(layout_test_candidate_memo_mismatches() == 0);
@@ -711,4 +718,63 @@ TEST_CASE(
   CHECK(on.recalled == off.recalled);
   CHECK(on.memo_bytes > 0);
   CHECK(off.memo_bytes == 0);
+}
+
+namespace {
+
+// Re-enables pruning by route bound and disables its check on scope exit.
+struct RouteBoundGuard {
+  RouteBoundGuard() = default;
+  RouteBoundGuard(RouteBoundGuard const &) = delete;
+  RouteBoundGuard &operator=(RouteBoundGuard const &) = delete;
+  ~RouteBoundGuard() { layout_test_route_bound(true, false); }
+};
+
+// Lays out each chart of `charts` at both scales and both searches with pruning checked,
+// and again with pruning off; the two drawings match and every check holds.
+template <size_t N>
+void check_route_bound(std::array<char const *, N> const &charts) {
+  RouteBoundGuard const guard;
+  uint64_t pruned{ 0 };
+  uint64_t checked{ 0 };
+  for (bool const culled : { false, true }) {
+    for (bool const labelled : { false, true }) {
+      for (char const *name : charts) {
+        if (scav::test::corpus_skipped(name)) { continue; }
+        CAPTURE(culled);
+        CAPTURE(labelled);
+        CAPTURE(name);
+        layout_test_route_bound(true, true);
+        Laid const with{ lay_out(name, labelled, culled) };
+        pruned += layout_test_route_bound_pruned();
+        checked += layout_test_route_bound_checked();
+        CHECK(layout_test_route_bound_mismatches() == 0);
+        layout_test_route_bound(false, false);
+        Laid const without{ lay_out(name, labelled, culled) };
+        CHECK(layout_test_route_bound_pruned() == 0);
+        REQUIRE(with.ok);
+        REQUIRE(without.ok);
+        CHECK(with.structural == without.structural);
+        CHECK(with.coordinate == without.coordinate);
+      }
+    }
+  }
+  CHECK(pruned > 0);
+  CHECK(checked > pruned);
+}
+
+}  // namespace
+
+TEST_CASE("search: a move pruned by its route bound scores at least that bound") {
+  check_route_bound(std::array<char const *, 3>{ "estop.scav", "led.scav", "dock.scav" });
+}
+
+TEST_CASE("search: on the corpus, every route bound lies at or below its move's score" *
+          doctest::test_suite("full")) {
+  check_route_bound(std::array<char const *, 6>{ "axis.scav",
+                                                 "brew.scav",
+                                                 "kiln.scav",
+                                                 "ota.scav",
+                                                 "tcp.scav",
+                                                 "vac.scav" });
 }

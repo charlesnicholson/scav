@@ -48,7 +48,7 @@ def record_of(out: str) -> dict:
         "bends": cost["tier2"]["bends"],
         "crossings": cost["tier2"]["crossings"],
         "offered": sum(m["offered"] for m in moves),
-        "scored": sum(m["offered"] - m["deduped"] for m in moves),
+        "scored": sum(m["offered"] - m["deduped"] - m["pruned"] for m in moves),
         "skipped": sum(m.get("skipped", 0) for m in moves),
         "searches": stats["search"]["searches"],
         "cpu_ms": stats["cpu_ms"],

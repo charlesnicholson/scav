@@ -42,6 +42,13 @@ int32_t cost_through_boxes(Chart const &c,
 int64_t cost_crossings(std::vector<Piece> const &pieces, std::vector<uint32_t> &per_trans);
 Wide cost_corridor(Routes const &r, std::vector<Piece> const &pieces);
 Wide cost_crowding(std::vector<Piece> const &pieces, int32_t em);
+// The fewest axis changes from box `s` through `via` in order to box `t`; a face below 4
+// is left square outward at `s` or entered square inward at `t`.
+int32_t cost_path_turns(scav_rect const &s,
+                        uint32_t s_face,
+                        std::vector<scav_point> const &via,
+                        scav_rect const &t,
+                        uint32_t t_face);
 SCAV_INTERNAL_END
 
 namespace {
@@ -834,6 +841,159 @@ int32_t tier0_of(CostTerms const &t) {
   return sum;
 }
 
+// Divider ports whose two submachines are not adjacent; a fork or join end is exempt.
+int64_t adjacency_of(Chart const &c,
+                     SplitGraph const &g,
+                     SizedLayout const &z,
+                     scav_profile const &p) {
+  int64_t out{ 0 };
+  for (SplitPort const &port : g.ports) {
+    if ((port.sub.v == INVALID) || (port.into.v == INVALID)) { continue; }
+    Transition const &tr{ c.transitions[port.trans.v] };
+    StateKind const src_kind{ c.states[tr.src.v].kind };
+    StateKind const dst_kind{ c.states[tr.dst.v].kind };
+    if ((src_kind == StateKind::Fork) || (src_kind == StateKind::Join) ||
+        (dst_kind == StateKind::Fork) || (dst_kind == StateKind::Join)) {
+      continue;
+    }
+    if (!adjacent(z.sub[port.sub.v], z.sub[port.into.v], p.sub_sep)) { ++out; }
+  }
+  return out;
+}
+
+// A closed axis-aligned region: x in [x0, x1], y in [y0, y1].
+struct Region {
+  Wide x0, x1, y0, y1;
+};
+
+Region region_of(scav_rect const &r) {
+  return { .x0 = r.x, .x1 = Wide{ r.x } + r.w, .y0 = r.y, .y1 = Wide{ r.y } + r.h };
+}
+
+Region region_at(scav_point at) {
+  return { .x0 = at.x, .x1 = at.x, .y0 = at.y, .y1 = at.y };
+}
+
+bool meets(Region const &a, Region const &b) {
+  return (a.x0 <= b.x1) && (b.x0 <= a.x1) && (a.y0 <= b.y1) && (b.y0 <= a.y1);
+}
+
+// A path's first or last piece: its axis (0 horizontal, 1 vertical, 2 any) and the sign of
+// its travel along it (0 either).
+struct Leg {
+  uint32_t axis{ 2 };
+  int32_t sign{ 0 };
+};
+
+constexpr Leg ANY_LEG{};
+
+// Whether `n` nonzero moves along one axis take some coordinate of [a0, a1] to some of
+// [b0, b1], the first with sign `first` and the last with sign `last` (0 either).
+bool axis_reaches(Wide a0,
+                  Wide a1,
+                  Wide b0,
+                  Wide b1,
+                  uint32_t n,
+                  int32_t first,
+                  int32_t last) {
+  if (n == 0) { return (a0 <= b1) && (b0 <= a1); }
+  if ((n == 1) && (first != 0) && (last != 0) && (first != last)) { return false; }
+  int32_t const sign{ (first != 0) ? first : last };
+  if ((n == 1) || ((n == 2) && (first != 0) && (first == last))) {
+    if (sign > 0) { return b1 > a0; }
+    if (sign < 0) { return b0 < a1; }
+    return (a0 != a1) || (b0 != b1) || (a0 != b0);
+  }
+  return true;
+}
+
+constexpr int32_t FAR_TURNS{ 1 << 20 };  // exceeds any count of turns
+
+// Per arrival axis (0 horizontal, 1 vertical), the fewest axis changes from `a` to `b`
+// after arriving at `a` along `in` (2 for none); `first`, `last` constrain the end pieces.
+std::array<int32_t, 2> leg_turns(Region const &a,
+                                 Region const &b,
+                                 uint32_t in,
+                                 Leg first,
+                                 Leg last) {
+  std::array<int32_t, 2> out{ FAR_TURNS, FAR_TURNS };
+  if ((first.axis == 2) && (last.axis == 2) && meets(a, b)) {
+    if (in == 2) {
+      out = { 0, 0 };
+    } else {
+      out[in] = 0;
+    }
+  }
+  for (uint32_t axis = 0; axis < 2; ++axis) {
+    if ((first.axis != 2) && (first.axis != axis)) { continue; }
+    for (uint32_t pieces = 1; pieces <= 6; ++pieces) {
+      uint32_t const end{ ((pieces % 2) == 1) ? axis : (1 - axis) };
+      if ((last.axis != 2) && (last.axis != end)) { continue; }
+      uint32_t const along_x{ (axis == 0) ? ((pieces + 1) / 2) : (pieces / 2) };
+      int32_t const x_first{ ((axis == 0) && (first.axis == 0)) ? first.sign : 0 };
+      int32_t const x_last{ ((end == 0) && (last.axis == 0)) ? last.sign : 0 };
+      int32_t const y_first{ ((axis == 1) && (first.axis == 1)) ? first.sign : 0 };
+      int32_t const y_last{ ((end == 1) && (last.axis == 1)) ? last.sign : 0 };
+      if (!axis_reaches(a.x0, a.x1, b.x0, b.x1, along_x, x_first, x_last) ||
+          !axis_reaches(a.y0, a.y1, b.y0, b.y1, pieces - along_x, y_first, y_last)) {
+        continue;
+      }
+      int32_t const turns{ static_cast<int32_t>(pieces - 1) +
+                           (((in != 2) && (in != axis)) ? 1 : 0) };
+      out[end] = imin(out[end], turns);
+    }
+  }
+  if ((out[0] == FAR_TURNS) && (out[1] == FAR_TURNS)) { out = { 5, 5 }; }
+  return out;
+}
+
+// The fewest axis changes from `s` through `via` in order to `t`; a face below 4 is left
+// square outward or entered square inward, its region then that face.
+int32_t path_turns(Region s,
+                   uint32_t s_face,
+                   std::vector<scav_point> const &via,
+                   Region t,
+                   uint32_t t_face) {
+  auto const leg_of = [](uint32_t face, int32_t sign) {
+    return Leg{ .axis = (face < 2) ? 0U : 1U, .sign = ((face % 2) == 0) ? -sign : sign };
+  };
+  std::array<int32_t, 2> turns{ 0, 0 };
+  Region at{ s };
+  auto const n{ static_cast<uint32_t>(via.size()) };
+  for (uint32_t k = 0; k <= n; ++k) {
+    Region const to{ (k < n) ? region_at(via[k]) : t };
+    Leg const first{ ((k == 0) && (s_face < 4)) ? leg_of(s_face, 1) : ANY_LEG };
+    Leg const last{ ((k == n) && (t_face < 4)) ? leg_of(t_face, -1) : ANY_LEG };
+    if (k == 0) {
+      turns = leg_turns(at, to, 2, first, last);
+    } else {
+      std::array<int32_t, 2> next{ FAR_TURNS, FAR_TURNS };
+      for (uint32_t axis = 0; axis < 2; ++axis) {
+        std::array<int32_t, 2> const step{ leg_turns(at, to, axis, first, last) };
+        for (uint32_t end = 0; end < 2; ++end) {
+          next[end] = imin(next[end], turns[axis] + step[end]);
+        }
+      }
+      turns = next;
+    }
+    at = to;
+  }
+  return imin(turns[0], turns[1]);
+}
+
+// Box `r`, narrowed to face `face` when that is below 4.
+Region face_region(scav_rect const &r, uint32_t face) {
+  Region out{ region_of(r) };
+  switch (face) {
+    case 0: out.x1 = out.x0; break;
+    case 1: out.x0 = out.x1; break;
+    case 2: out.y1 = out.y0; break;
+    case 3: out.y0 = out.y1; break;
+    default: break;
+  }
+  return out;
+}
+
 }  // namespace
 
 SCAV_INTERNAL_BEGIN
@@ -976,6 +1136,14 @@ void cost_grid_query(ChildGrid const &g,
 
 [[maybe_unused]] Wide cost_crowding(std::vector<Piece> const &pieces, int32_t em) {
   return crowding_over(pieces, lanes_of(pieces), em, nullptr);
+}
+
+[[maybe_unused]] int32_t cost_path_turns(scav_rect const &s,
+                                         uint32_t s_face,
+                                         std::vector<scav_point> const &via,
+                                         scav_rect const &t,
+                                         uint32_t t_face) {
+  return path_turns(face_region(s, s_face), s_face, via, face_region(t, t_face), t_face);
 }
 
 SCAV_INTERNAL_END
@@ -1245,19 +1413,7 @@ CostTerms cost_terms(CostContext const &ctx,
     }
   }
 
-  // A divider port whose two submachines are not adjacent charges `adjacency`; a fork or
-  // join end is exempt.
-  for (SplitPort const &port : g.ports) {
-    if ((port.sub.v == INVALID) || (port.into.v == INVALID)) { continue; }
-    Transition const &tr{ c.transitions[port.trans.v] };
-    StateKind const src_kind{ c.states[tr.src.v].kind };
-    StateKind const dst_kind{ c.states[tr.dst.v].kind };
-    if ((src_kind == StateKind::Fork) || (src_kind == StateKind::Join) ||
-        (dst_kind == StateKind::Fork) || (dst_kind == StateKind::Join)) {
-      continue;
-    }
-    if (!adjacent(z.sub[port.sub.v], z.sub[port.into.v], p.sub_sep)) { ++t.adjacency; }
-  }
+  t.adjacency = adjacency_of(c, g, z, p);
 
   // Tier 0 `box_overlap`, `through_box`, `through_band` and `through_region`, from the
   // context's ancestry and this candidate's fill of its child grid.
@@ -1312,6 +1468,88 @@ CostTerms cost_terms(Chart const &c,
                      scav_spaces const &s,
                      scav_profile const &p) {
   return cost_terms(cost_context(c, g), c, g, z, r, s, p);
+}
+
+CostTerms cost_bound(Chart const &c,
+                     SplitGraph const &g,
+                     SubmachineOrders const &o,
+                     SizedLayout const &z,
+                     std::vector<uint32_t> const &faces,
+                     scav_profile const &p,
+                     int32_t clear,
+                     bool rectilinear) {
+  CostTerms t;
+  t.area = area_of(z.chart);
+  t.whitespace = whitespace_of(c, z, t.area);
+  t.adjacency = adjacency_of(c, g, z, p);
+  thread_local std::vector<uint32_t> reversed;
+  thread_local std::vector<std::vector<uint32_t>> bends;
+  thread_local std::vector<scav_point> via;
+  if (rectilinear) {
+    segment_bends(o, static_cast<uint32_t>(g.segments.size()), reversed, bends);
+  }
+  // The face `faces` names at end `end` of segment `seg`, else INVALID.
+  auto const named = [&faces](uint32_t seg, uint32_t end) {
+    uint32_t const at{ (seg << 3U) | (end << 2U) };
+    auto const hit{ std::ranges::lower_bound(faces, at) };
+    return ((hit != faces.end()) && ((*hit & ~3U) == at)) ? (*hit & 3U) : INVALID;
+  };
+  for (uint32_t tr = 0; tr < c.transitions.size(); ++tr) {
+    if ((tr >= g.trans_segments.size()) || (g.trans_segments[tr].len == 0)) { continue; }
+    Transition const &trans{ c.transitions[tr] };
+    if (inner_loop(c, tr)) {
+      t.bends += rectilinear ? 2 : 0;  // out, along and back, the middle of nonzero length
+      continue;
+    }
+    if (trans.src == trans.dst) { continue; }
+    std::array<Region, 2> const box{ region_of(z.state[trans.src.v]),
+                                     region_of(z.state[trans.dst.v]) };
+    Wide const gap_x{ imax(Wide{ 0 },
+                           imax(box[1].x0 - box[0].x1, box[0].x0 - box[1].x1)) };
+    Wide const gap_y{ imax(Wide{ 0 },
+                           imax(box[1].y0 - box[0].y1, box[0].y0 - box[1].y1)) };
+    if (!rectilinear) {
+      t.length += imax(gap_x, gap_y);
+      continue;
+    }
+    t.length += gap_x + gap_y;
+    // A box-to-box segment also takes its waypoints and the faces it names.
+    Span const segs{ g.trans_segments[tr] };
+    SplitSegment const &seg{ g.segments[segs.off] };
+    bool const direct{ (segs.len == 1) && (trans.kind != TransKind::External) &&
+                       (seg.src_port == INVALID) && (seg.dst_port == INVALID) &&
+                       (seg.src_inner == 0) && (seg.dst_inner == 0) };
+    via.clear();
+    std::array<Region, 2> end_at{ box };
+    std::array<uint32_t, 2> face{ INVALID, INVALID };
+    if (direct) {
+      for (uint32_t const bend : bends[segs.off]) { vec_push_back(via, z.node[bend]); }
+      for (uint32_t end = 0; end < 2; ++end) {
+        uint32_t const st{ (end == 0) ? trans.src.v : trans.dst.v };
+        uint32_t const f{ named(segs.off, end) };
+        scav_rect const &r{ z.state[st] };
+        bool const looped{ (st >= z.loop.size()) || (z.loop[st].w > 0) ||
+                           (z.loop[st].h > 0) };
+        int32_t const arc{
+          state_corner_radius(c.states[st].kind, r, z.before[st].x - r.x)
+        };
+        if ((f == INVALID) || kind_inscribed(c.states[st].kind) || looped ||
+            !face_seats(r, f, clear, arc)) {
+          continue;
+        }
+        Region const on{ face_region(r, f) };
+        // A face meeting the next point takes no constraint.
+        Region const next{ via.empty()
+                               ? end_at[1 - end]
+                               : region_at((end == 0) ? via.front() : via.back()) };
+        if (meets(on, next)) { continue; }
+        end_at[end] = on;
+        face[end] = f;
+      }
+    }
+    t.bends += path_turns(end_at[0], face[0], via, end_at[1], face[1]);
+  }
+  return t;
 }
 
 CostTerms cost_columns(Chart const &c,

@@ -319,11 +319,12 @@ declares `scav_stable_sort` — so a call site names its header without a grep.
 layout's processor time (`cpu_ms`, from `std::clock`, wall time on Windows), the
 searches run, the candidate memo's peak bytes, the answers found by drawing rather than
 by laid ordering (`drawn`), and per Level 1 move kind the candidates offered, those the
-memo answered (`deduped`), those taken, the moves culled unoffered as changing nothing
+memo answered (`deduped`), those left unrouted because their route bound reached the
+incumbent (`pruned`), those taken, the moves culled unoffered as changing nothing
 (`culled`), and those the culled search's don't-look bits left unscored in a round that
 took a move (`skipped`). `tools/trace.py --stats [chart...]` runs it over the corpus, or
 the charts given, at both text scales and tabulates it, with `scored` as offered less
-deduped. `deduped` varies by a few tenths
+deduped and pruned. `deduped` varies by a few tenths
 of a percent between runs, since two threads can compute one key at once; the drawing
 does not.
 

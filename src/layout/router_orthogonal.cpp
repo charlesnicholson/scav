@@ -330,10 +330,10 @@ scav_point ortho_attach_face(scav_point toward,
                              bool inscribed,
                              int32_t corner,
                              uint32_t face) {
-  FaceRun const run{ face_run(r, face, clear, corner) };
-  if (!inscribed && (run.len <= (2 * run.inset))) {
+  if (!inscribed && !face_seats(r, face, clear, corner)) {
     return ortho_attach_box(toward, r, clear, inscribed, corner);
   }
+  FaceRun const run{ face_run(r, face, clear, corner) };
   if (face < 2) {  // left or right: the position along it is a y
     int32_t const y{ inscribed ? (r.y + (r.h / 2)) : onto_face(toward.y, run) };
     return { .x = (face == 0) ? r.x : (r.x + r.w), .y = y };

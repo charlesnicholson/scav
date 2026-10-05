@@ -43,6 +43,10 @@ struct RouteNet {
 // resolve as in `ortho_ring`.
 uint32_t face_of(scav_point at, scav_rect const &r);
 
+// True when face `face` of `r` exceeds twice the inset `max(clear, arc)` a seat keeps from
+// each corner.
+bool face_seats(scav_rect const &r, uint32_t face, int32_t clear, int32_t arc);
+
 // Appends to `out` the run between a loop's `ends` on each face of `r` they touch, padded
 // by `clear`, as spans of obstacle `st`.
 void loop_occupied(std::array<scav_point, 2> const &ends,
@@ -130,6 +134,10 @@ class Router {
   // How far the caller grows `region` on every side for this router's lanes.
   [[nodiscard]] virtual int32_t margin(scav_profile const & /*p*/) const { return 0; }
 
+  // True when undegraded nets run axis-aligned through their waypoints and leave a named
+  // face square where `face_seats` holds on a box neither inscribed nor looped.
+  [[nodiscard]] virtual bool rectilinear() const { return false; }
+
   // Bit f set where naming face f at end `end` (0 source, 1 destination) of
   // `in.nets[net]` can change the route; independent of that end's own named face.
   [[nodiscard]] virtual uint32_t effective_faces(RouteInput const & /*in*/,
@@ -162,6 +170,7 @@ class OrthogonalRouter final : public Router {
   }
   [[nodiscard]] uint32_t version() const override { return 1; }
   [[nodiscard]] int32_t margin(scav_profile const &p) const override;
+  [[nodiscard]] bool rectilinear() const override { return true; }
   [[nodiscard]] uint32_t effective_faces(RouteInput const &in,
                                          uint32_t net,
                                          uint32_t end) const override;
