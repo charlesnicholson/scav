@@ -13,7 +13,7 @@
     <li>a port on its own transition's state whose far end lies further away across the ranks than along them moves to the top or bottom border facing it, if that border is unobstructed and free. A port whose end is pinned is never turned;</li>
     <li>a port on a <a href="#decorations">lined face</a>, one that a band of its state covers, moves to the opposite border, else to a top or bottom border its joined state can see. No port is ever turned onto a lined face.</li>
   </ul>
-  <p>A slot starts on its border at its boundary node's coordinate. Phase 3 then slides it along its face, level with the point across it on its outer side: the next end for a slot the route leaves by, the previous end for one it enters by, where that end is another port slot, a bend node or an inner-face end. A box end never moves a slot, since the router seats a box end level with the slot where the box's face allows. The slot stays at its node where that spot is within a corner's inset, within a clearance of a band lining the face, or within a clearance of, or past, another slot on that face. Every slot is decided while planning, before any frame routes, so both frames meeting at a slot see the same point.</p>
+  <p>A slot starts on its border at its boundary node's coordinate. Phase 3 then slides it along its face, level with the point across it on its outer side: the next end for a slot the route leaves by, the previous end for one it enters by, where that end is another port slot, a bend node or an inner-face end. A box end never moves a slot, since the router seats a box end level with the slot where the box's face allows. The slot stays at its node where that spot is within one pad of a corner, within the box clearance of a band lining the face, or within the route clearance of, or past, another slot on that face. Every slot is decided while planning, before any frame routes, so both frames meeting at a slot see the same point.</p>
 
   <h3>Which face an end leaves by</h3>
   <p>The <b>separation rule</b> seats each end on a face of its box: the axis on which the far end lies further <em>outside</em> the box wins (a tie goes to x), and the nearer border on that axis is the face. The seat is the far end's projection onto the face, held off the corners. <b>Inscribed glyphs</b> (discs, diamonds) take the face's midpoint.</p>
@@ -24,7 +24,7 @@
   <p>The router runs A* on a <b>separated orthogonal visibility graph</b>:</p>
   <ul>
     <li><b>Grid</b>: lines through every obstacle edge grown by the clearance, every wall and every route end; an edge is passable unless it enters a grown obstacle. A frame over 2<sup>18</sup> vertices is refused.</li>
-    <li><b>Clearance is a bumper, not a penalty</b>: no route comes within <code>clear = node_sep / 3</code> (<span data-p="route_clearance"></span>) of a box, by construction.</li>
+    <li><b>Clearance is a bumper, not a penalty</b>: no route comes within <code>box_clearance</code> (<span data-p="box_clearance"></span>), the larger of <code>pad</code> and <code>node_sep / 3</code>, of a box, by construction. Inside a state a wall keeps it one <code>pad</code> (<span data-p="border_band"></span>) off the border, so no route runs nearer a border than nested borders sit to each other.</li>
     <li><b>Two planes</b>: each vertex has a horizontal and a vertical copy, joined by an edge costing the <b>bend penalty</b> (one <code>rank_sep</code>), so plain A* minimises length and bends together. A turn at a fixed end costs slightly less, so equal paths turn at their ends.</li>
     <li><b>Deterministic</b>: the heuristic is admissible, and the open list is totally ordered by <code>(f, g, node)</code>, so the result never depends on the <a href="#fast">queue</a>. The search is capped at 2<sup>20</sup> expansions.</li>
     <li><b>Ring points</b>: an end is pushed out by the clearance, and the leg back to the box is emitted, not searched, so it is perpendicular for free.</li>
@@ -48,7 +48,7 @@
   <h3>Nudging lanes apart</h3>
   <p><b>Nudging</b> spreads routes that run alongside each other, per frame and again over the whole chart.</p>
   <ul>
-    <li>A <b>lane</b> is a group of overlapping parallel segments closer than the lane pitch, the larger of an em and the clearance (<span data-p="lane_pitch"></span>).</li>
+    <li>A <b>lane</b> is a group of overlapping parallel segments closer than the lane pitch, the larger of an em and the route clearance (<span data-p="lane_pitch"></span>).</li>
     <li>Within a lane, segments are ordered by where they came from, and reordered where that avoids a crossing; fan-ins and fan-outs move as one bundle.</li>
     <li>Segments spread up to one em apart, within the room their frame and obstacles leave.</li>
     <li>A move is kept only if it creates no collapsed leg, no new overlap with a box or its bumper, no new run along a border and no new shared run; otherwise the bundle stays put. A drawing that overlaps a box is worse than any score.</li>
@@ -88,7 +88,7 @@
 <script>
 (function () {
   'use strict';
-  var F = window.SXF, U = F.ru, P = SX.profile(), CLEAR = P.route_clearance;
+  var F = window.SXF, U = F.ru, P = SX.profile(), CLEAR = P.route_clearance, BUMP = P.box_clearance;
   function beyond(v, lo, len) { return v < lo ? lo - v : v > lo + len ? v - (lo + len) : 0; }
   function ontoFace(v, lo, len, clear, corner) { var inset = Math.min(Math.max(clear, corner), Math.floor(len / 2)); return Math.min(Math.max(v, lo + inset), lo + len - inset); }
   // ortho_attach_box: the separation rule picks the axis, the nearer border the side, the projection the place.
@@ -124,7 +124,7 @@
       var B = BOXES[key], r = B.r, s = U.attach(t, r, B.ins, B.corner);
       var svg = U.root(760, 760 * VB[3] / VB[2]); svg.setAttribute('viewBox', VB.join(' '));
       var g = SX.svg('g'); svg.appendChild(g); svg.style.font = '76px ' + SX.css('--sans'); svg.style.touchAction = 'none';
-      U.el(g, 'rect', { x: r.x - CLEAR, y: r.y - CLEAR, width: r.w + 2 * CLEAR, height: r.h + 2 * CLEAR, rx: 30 }, { fill: 'none', stroke: 'var(--axis)', strokeDasharray: '30 24', strokeWidth: 8 });
+      U.el(g, 'rect', { x: r.x - BUMP, y: r.y - BUMP, width: r.w + 2 * BUMP, height: r.h + 2 * BUMP, rx: 30 }, { fill: 'none', stroke: 'var(--axis)', strokeDasharray: '30 24', strokeWidth: 8 });
       if (B.ins) {
         U.el(g, 'rect', { x: r.x, y: r.y, width: r.w, height: r.h }, { fill: 'none', stroke: 'var(--grid)', strokeWidth: 8 });
         U.el(g, 'polygon', { points: [r.x + r.w / 2, r.y, r.x + r.w, r.y + r.h / 2, r.x + r.w / 2, r.y + r.h, r.x, r.y + r.h / 2].join(',') }, { fill: 'var(--state-fill)', stroke: 'var(--state-stroke)', strokeWidth: 16 });
@@ -225,7 +225,7 @@
 <script>
 (function () {
   'use strict';
-  var F = window.SXF, U = F.ru, P = SX.profile(), CLEAR = P.route_clearance;
+  var F = window.SXF, U = F.ru, P = SX.profile(), CLEAR = P.box_clearance;
   F.route['route-astar'] = function (host) {
     var region = { x: 0, y: 0, w: 3100, h: 1800 };
     var obs = [{ x: 700, y: 300, w: 600, h: 400 }, { x: 1500, y: 900, w: 500, h: 500 }, { x: 2300, y: 200, w: 300, h: 700 }];
@@ -377,7 +377,7 @@
 <script>
 (function () {
   'use strict';
-  var F = window.SXF, U = F.ru, P = SX.profile(), CLEAR = P.route_clearance, INF = 1e9;
+  var F = window.SXF, U = F.ru, P = SX.profile(), CLEAR = P.box_clearance, INF = 1e9;
   function sign(v) { return v < 0 ? -1 : v > 0 ? 1 : 0; }
   // nudge_lanes, horizontal members only: lanes by distance, order by toward, crossing votes by Kahn, room, step.
   U.nudgeH = function (region, obstacles, gap, nets, useVotes) {

@@ -27,7 +27,7 @@
     <div class="gl-item" data-term="chaining / cut"><dt>Chaining / cut</dt><dd>A long edge chained through bend nodes; a cut leaves it unchained. <a href="#order">→ order</a></dd></div>
     <div class="gl-item" data-term="chart cover"><dt>Chart cover</dt><dd>Growing the chart rectangle over every route and label before scoring. <a href="#size">→ size</a></dd></div>
     <div class="gl-item" data-term="choice"><dt>Choice</dt><dd>A pseudostate drawn as a diamond; routes meet it at a face midpoint. <a href="#intro">→ intro</a></dd></div>
-    <div class="gl-item" data-term="clearance"><dt>Clearance</dt><dd>The router's bumper around boxes: <code>node_sep / 3</code> = 96 units. <a href="#route">→ route</a></dd></div>
+    <div class="gl-item" data-term="clearance"><dt>Clearance</dt><dd>The router's bumper around boxes, <code>box_clearance</code>: the larger of <code>pad</code> and <code>node_sep / 3</code>. Between two routes it is <code>route_clearance</code>, <code>node_sep / 3</code>. <a href="#route">→ route</a></dd></div>
     <div class="gl-item" data-term="composite state"><dt>Composite state</dt><dd>A state with at least one submachine. <a href="#intro">→ intro</a></dd></div>
     <div class="gl-item" data-term="concurrent state"><dt>Concurrent state</dt><dd>A state with two or more submachines (regions), drawn side by side. <a href="#intro">→ intro</a></dd></div>
     <div class="gl-item" data-term="corridor"><dt>Corridor</dt><dd>Length two routes share on one line, except their common final leg. <a href="#cost">→ cost</a></dd></div>
@@ -64,7 +64,7 @@
     <div class="gl-item" data-term="net"><dt>Net</dt><dd>One routed segment of a transition. <a href="#route">→ route</a></dd></div>
     <div class="gl-item" data-term="no-text / real text"><dt>No-text / real text</dt><dd>The two measurement scales: no space requests, or measured text. Never compared. <a href="#principles">→ principles</a></dd></div>
     <div class="gl-item" data-term="nudging"><dt>Nudging</dt><dd>Spreading parallel routes into separate tracks after routing. <a href="#route">→ route</a></dd></div>
-    <div class="gl-item" data-term="occupied span"><dt>Occupied span</dt><dd>The run of a border an inner loop's ends touch, padded by the clearance; no outside end is seated there. <a href="#decorations">→ decorated states</a></dd></div>
+    <div class="gl-item" data-term="occupied span"><dt>Occupied span</dt><dd>The run of a border an inner loop's ends touch, padded by the route clearance; no outside end is seated there. <a href="#decorations">→ decorated states</a></dd></div>
     <div class="gl-item" data-term="pad"><dt>Pad</dt><dd>A box's interior ring: 128 units on <code>readable</code>. <a href="#size">→ size</a></dd></div>
     <div class="gl-item" data-term="pathbox / pathclear / placed"><dt>PathBox / PathClear</dt><dd>A label's requested box; the least length of a route's end leg, for its glyph. <a href="#intro">→ intro</a></dd></div>
     <div class="gl-item" data-term="pins"><dt>Pins</dt><dd>Recorded search decisions: rank, cut, reverse, end, orient, fold, loop. <a href="#search">→ search</a></dd></div>
