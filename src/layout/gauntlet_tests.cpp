@@ -355,8 +355,6 @@ TEST_CASE("gauntlet: no element routes an edge through a box" *
 TEST_CASE("gauntlet: every route is axis-aligned, forward, and reaches its ends" *
           doctest::test_suite("full")) {
   for (char const *name : GAUNTLET) {
-    // `regions.scav` skips the reversal check; the open-shapes test pins its count.
-    bool const open{ std::string_view{ name } == "regions.scav" };
     for (scav_profile const &p : { readable(), compact() }) {
       CAPTURE(name);
       CAPTURE(p.profile_id);
@@ -378,7 +376,7 @@ TEST_CASE("gauntlet: every route is axis-aligned, forward, and reaches its ends"
           CHECK((a.x == b.x) != (a.y == b.y));  // axis-aligned and not a point
         }
         // Consecutive collinear legs run in the same direction.
-        for (uint32_t k = 0; (!open) && ((k + 2) < route.len); ++k) {
+        for (uint32_t k = 0; (k + 2) < route.len; ++k) {
           scav_point const a{ l.r.points[route.off + k] };
           scav_point const b{ l.r.points[route.off + k + 1] };
           scav_point const c{ l.r.points[route.off + k + 2] };
@@ -2380,8 +2378,8 @@ TEST_CASE("gauntlet: the shapes still open, counted rather than excused") {
   for (scav_profile const &p : { readable(), compact() }) {
     CAPTURE(p.profile_id);
 
-    // Row 0 unsearched lays the chart out flat; divider ports on the regions' sides make
-    // three routes double back, and none passes through a box.
+    // Row 0 unsearched stacks the regions; each crossing runs square through the divider,
+    // so no route doubles back or passes through a box.
     Laid row_zero;
     lay("regions.scav", one_row(p), row_zero);
     REQUIRE(row_zero.tuple == 0);
@@ -2389,7 +2387,7 @@ TEST_CASE("gauntlet: the shapes still open, counted rather than excused") {
     uint32_t back{ 0 };
     shape_counts(row_zero, through, back);
     CHECK(through == 0);
-    CHECK(back == 3);
+    CHECK(back == 0);
     // The scorer's through-box count over the run's columns agrees.
     CHECK(cost_columns(row_zero.c, row_zero.g, p).through_box == 0);
 
@@ -2975,4 +2973,282 @@ TEST_CASE(
     CHECK(beside >= 1U);
     CHECK(near_borders(l, p) == 0U);
   }
+}
+
+namespace {
+
+// The divider between sibling regions `a` and `b` as the builder draws it: vertical where
+// they sit side by side, else horizontal. `lo` and `hi` are the gap's faces across it,
+// `a_lo` is set where `a` lies on the `lo` side, and `along_lo` to `along_hi` is the span
+// both regions share along it.
+struct Divider {
+  bool vertical{ true };
+  bool a_lo{ true };
+  int32_t line{ 0 };
+  int32_t lo{ 0 }, hi{ 0 };
+  int32_t along_lo{ 0 }, along_hi{ 0 };
+};
+
+// False where `a` and `b` overlap on both axes.
+bool divider_of(scav_rect const &a, scav_rect const &b, Divider &out) {
+  bool const beside{ ((a.x + a.w) <= b.x) || ((b.x + b.w) <= a.x) };
+  bool const stacked{ ((a.y + a.h) <= b.y) || ((b.y + b.h) <= a.y) };
+  if (!beside && !stacked) { return false; }
+  out.vertical = beside;
+  int32_t const a_lo{ beside ? a.x : a.y };
+  int32_t const a_hi{ a_lo + (beside ? a.w : a.h) };
+  int32_t const b_lo{ beside ? b.x : b.y };
+  int32_t const b_hi{ b_lo + (beside ? b.w : b.h) };
+  out.a_lo = a_hi <= b_lo;
+  out.lo = out.a_lo ? a_hi : b_hi;
+  out.hi = out.a_lo ? b_lo : a_lo;
+  out.line = out.lo + ((out.hi - out.lo) / 2);
+  out.along_lo = beside ? imax(a.y, b.y) : imax(a.x, b.x);
+  out.along_hi = beside ? imin(a.y + a.h, b.y + b.h) : imin(a.x + a.w, b.x + b.w);
+  return true;
+}
+
+int32_t across(Divider const &d, scav_point at) { return d.vertical ? at.x : at.y; }
+
+int32_t along(Divider const &d, scav_point at) { return d.vertical ? at.y : at.x; }
+
+// The regions holding transition `t`'s source and target where they are two sibling
+// regions of one state and `t` is not external; false for any other transition.
+bool sibling_regions(Laid const &l, uint32_t t, uint32_t &from, uint32_t &to) {
+  Transition const &tr{ l.c.transitions[t] };
+  CommonAncestor const &lca{ l.g.trans_common[t] };
+  if ((tr.live == 0) || (tr.kind == TransKind::External) || (lca.state.v == INVALID) ||
+      (lca.child[0].v == INVALID) || (lca.child[1].v == INVALID)) {
+    return false;
+  }
+  from = l.c.states[lca.child[0].v].parent.v;
+  to = l.c.states[lca.child[1].v].parent.v;
+  return (from != to) && (l.c.submachines[from].owner == lca.state) &&
+         (l.c.submachines[to].owner == lca.state);
+}
+
+// Whether leg `a`-`b` comes nearer `d` than its gap's faces and `band` either side of the
+// divider, along the span both regions share.
+bool meets_gap(Divider const &d, int32_t band, scav_point a, scav_point b) {
+  return (imax(across(d, a), across(d, b)) > imin(d.lo, d.line - band)) &&
+         (imin(across(d, a), across(d, b)) < imax(d.hi, d.line + band)) &&
+         (imax(along(d, a), along(d, b)) >= d.along_lo) &&
+         (imin(along(d, a), along(d, b)) <= d.along_hi);
+}
+
+// Whether route `t` crosses `d` from its source region's side in one straight leg square
+// to it: the legs nearer than a gap face and a `band` are one run at one height `at`,
+// which starts and ends that far off or at the route's own ends.
+bool crosses_square(Laid const &l,
+                    uint32_t t,
+                    Divider const &d,
+                    int32_t band,
+                    int32_t &at) {
+  scav_span const route{ l.r.route[t] };
+  std::vector<uint32_t> legs;
+  for (uint32_t k = 0; (k + 1) < route.len; ++k) {
+    if (meets_gap(d, band, l.r.points[route.off + k], l.r.points[route.off + k + 1])) {
+      legs.push_back(k);
+    }
+  }
+  if (legs.empty() || ((legs.back() - legs.front() + 1) != legs.size())) { return false; }
+  scav_point const first{ l.r.points[route.off + legs.front()] };
+  scav_point const last{ l.r.points[route.off + legs.back() + 1] };
+  at = along(d, first);
+  for (uint32_t const k : legs) {
+    if ((along(d, l.r.points[route.off + k]) != at) ||
+        (along(d, l.r.points[route.off + k + 1]) != at)) {
+      return false;
+    }
+  }
+  bool const starts{ legs.front() == 0 };
+  bool const ends{ (legs.back() + 2) == route.len };
+  int32_t const from{ across(d, first) };
+  int32_t const to{ across(d, last) };
+  int32_t const near{ imin(d.lo, d.line - band) };
+  int32_t const far{ imax(d.hi, d.line + band) };
+  bool const left{ d.a_lo ? ((from <= near) || starts) : ((from >= far) || starts) };
+  bool const reached{ d.a_lo ? ((to >= far) || ends) : ((to <= near) || ends) };
+  return left && reached;
+}
+
+// Whether `at` lies on route `t`, at a vertex or along a leg.
+bool on_route(Laid const &l, uint32_t t, scav_point at) {
+  scav_span const route{ l.r.route[t] };
+  for (uint32_t k = 0; (k + 1) < route.len; ++k) {
+    scav_point const a{ l.r.points[route.off + k] };
+    scav_point const b{ l.r.points[route.off + k + 1] };
+    if ((at.x >= imin(a.x, b.x)) && (at.x <= imax(a.x, b.x)) && (at.y >= imin(a.y, b.y)) &&
+        (at.y <= imax(a.y, b.y))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Every divider between two live sibling regions with no third region in their gap.
+std::vector<Divider> dividers_of(Laid const &l) {
+  std::vector<Divider> out;
+  for (uint32_t st = 0; st < l.c.states.size(); ++st) {
+    Span const subs{ l.c.states[st].submachines };
+    if ((l.c.states[st].live == 0) || (subs.len < 2)) { continue; }
+    for (uint32_t i = 0; i < subs.len; ++i) {
+      for (uint32_t j = i + 1; j < subs.len; ++j) {
+        uint32_t const a{ l.c.submachine_ids[subs.off + i].v };
+        uint32_t const b{ l.c.submachine_ids[subs.off + j].v };
+        Divider d;
+        if ((l.c.submachines[a].live == 0) || (l.c.submachines[b].live == 0) ||
+            !divider_of(l.z.sub[a], l.z.sub[b], d) || (d.along_hi <= d.along_lo)) {
+          continue;
+        }
+        scav_rect const gap{ d.vertical ? scav_rect{ .x = d.lo,
+                                                     .y = d.along_lo,
+                                                     .w = d.hi - d.lo,
+                                                     .h = d.along_hi - d.along_lo }
+                                        : scav_rect{ .x = d.along_lo,
+                                                     .y = d.lo,
+                                                     .w = d.along_hi - d.along_lo,
+                                                     .h = d.hi - d.lo } };
+        bool clear{ true };
+        for (uint32_t k = 0; k < subs.len; ++k) {
+          uint32_t const m{ l.c.submachine_ids[subs.off + k].v };
+          clear = clear && ((m == a) || (m == b) || (l.c.submachines[m].live == 0) ||
+                            !overlaps(gap, l.z.sub[m]));
+        }
+        if (clear) { out.push_back(d); }
+      }
+    }
+  }
+  return out;
+}
+
+// Legs of every route that run along a divider strictly inside its gap.
+uint32_t gap_runs(Laid const &l) {
+  uint32_t runs{ 0 };
+  for (Divider const &d : dividers_of(l)) {
+    for (uint32_t t = 0; t < l.c.transitions.size(); ++t) {
+      scav_span const route{ l.r.route[t] };
+      for (uint32_t k = 0; (k + 1) < route.len; ++k) {
+        scav_point const a{ l.r.points[route.off + k] };
+        scav_point const b{ l.r.points[route.off + k + 1] };
+        bool const parallel{ (across(d, a) == across(d, b)) &&
+                             (along(d, a) != along(d, b)) };
+        if (parallel && (across(d, a) > d.lo) && (across(d, a) < d.hi) &&
+            (imax(along(d, a), along(d, b)) > d.along_lo) &&
+            (imin(along(d, a), along(d, b)) < d.along_hi)) {
+          ++runs;
+        }
+      }
+    }
+  }
+  return runs;
+}
+
+// Route `t`'s points as text, for a failure's context.
+std::string route_text(Laid const &l, uint32_t t) {
+  std::string out;
+  scav_span const route{ l.r.route[t] };
+  for (uint32_t k = 0; k < route.len; ++k) {
+    scav_point const at{ l.r.points[route.off + k] };
+    out += "(" + std::to_string(at.x) + "," + std::to_string(at.y) + ")";
+  }
+  return out;
+}
+
+// Checks each transition between two sibling regions: it crosses their divider once,
+// square to it, with one port slot on the divider at the crossing and every slot on its
+// route. Returns the crossing heights, keyed by transition.
+std::map<uint32_t, int32_t> check_crossings(Laid const &l, scav_profile const &p) {
+  std::map<uint32_t, int32_t> heights;
+  for (uint32_t t = 0; t < l.c.transitions.size(); ++t) {
+    uint32_t from{ INVALID };
+    uint32_t to{ INVALID };
+    if (!sibling_regions(l, t, from, to)) { continue; }
+    std::string const drawn{ route_text(l, t) };
+    CAPTURE(t);
+    CAPTURE(drawn);
+    Divider d;
+    REQUIRE(divider_of(l.z.sub[from], l.z.sub[to], d));
+    CAPTURE(d.lo);
+    CAPTURE(d.hi);
+    int32_t at{ 0 };
+    CHECK(crosses_square(l, t, d, border_band(p), at));
+    heights[t] = at;
+    scav_span const slots{ l.r.port[t] };
+    uint32_t on_divider{ 0 };
+    for (uint32_t k = 0; k < slots.len; ++k) {
+      scav_port_slot const &slot{ l.r.slots[slots.off + k] };
+      scav_point const pt{ .x = slot.x, .y = slot.y };
+      CAPTURE(k);
+      CHECK(on_route(l, t, pt));
+      on_divider += ((across(d, pt) == d.line) && (along(d, pt) == at)) ? 1U : 0U;
+    }
+    CHECK(on_divider == 1);
+  }
+  return heights;
+}
+
+// Lays `name` out at row 0 and shipped, at both profiles, and checks every crossing; the
+// row-0 drawing sets its two regions side by side, or stacked.
+void crossed_both_ways(char const *name, bool side_by_side) {
+  for (scav_profile const &p : { readable(), compact() }) {
+    for (bool const row_zero : { true, false }) {
+      CAPTURE(p.profile_id);
+      CAPTURE(row_zero);
+      Laid l;
+      lay(name, row_zero ? one_row(p) : p, l);
+      uint32_t const running{ state_named(l.c, "Running") };
+      REQUIRE(running != INVALID);
+      Span const subs{ l.c.states[running].submachines };
+      REQUIRE(subs.len == 2);
+      Divider d;
+      REQUIRE(divider_of(l.z.sub[l.c.submachine_ids[subs.off].v],
+                         l.z.sub[l.c.submachine_ids[subs.off + 1].v],
+                         d));
+      if (row_zero) { REQUIRE(d.vertical == side_by_side); }
+      std::map<uint32_t, int32_t> const heights{ check_crossings(l, p) };
+      CHECK(heights.size() == 4);
+      // Crossings of one divider keep a route clearance apart.
+      for (auto const &[t, at] : heights) {
+        for (auto const &[u, other] : heights) {
+          if (u <= t) { continue; }
+          CAPTURE(t);
+          CAPTURE(u);
+          CHECK((imax(at, other) - imin(at, other)) >= route_clearance(p));
+        }
+      }
+      CHECK(gap_runs(l) == 0);
+    }
+  }
+}
+
+}  // namespace
+
+TEST_CASE(
+    "gauntlet: regions side by side are crossed square, both ways and three abreast") {
+  crossed_both_ways("divider.scav", true);
+}
+
+TEST_CASE("gauntlet: regions one above the other are crossed square, both ways") {
+  crossed_both_ways("stacked.scav", false);
+}
+
+TEST_CASE("gauntlet: every crossing between two regions is square and on its slot" *
+          doctest::test_suite("full")) {
+  // Every chart at row 0 and shipped; no route runs along a gap between two regions.
+  uint32_t crossings{ 0 };
+  for (char const *name : GAUNTLET) {
+    for (scav_profile const &p : { readable(), compact() }) {
+      for (bool const row_zero : { true, false }) {
+        CAPTURE(name);
+        CAPTURE(p.profile_id);
+        CAPTURE(row_zero);
+        Laid l;
+        lay(name, row_zero ? one_row(p) : p, l);
+        crossings += static_cast<uint32_t>(check_crossings(l, p).size());
+        CHECK(gap_runs(l) == 0);
+      }
+    }
+  }
+  CHECK(crossings >= 40U);
 }

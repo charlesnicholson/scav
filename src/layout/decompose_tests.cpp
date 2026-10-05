@@ -50,7 +50,6 @@ TEST_CASE("split: a sibling transition is one segment in the shared frame") {
                                       .frame = root,
                                       .src_port = INVALID,
                                       .dst_port = INVALID,
-                                      .separator = 0,
                                       .src_inner = 0,
                                       .dst_inner = 0 });
   CHECK(g.state_depth[a.v] == 0);
@@ -147,7 +146,7 @@ TEST_CASE("split: every self-transition is one segment in its parent frame") {
   CHECK(crossings(g, a) == 0);
 }
 
-TEST_CASE("split: concurrent siblings get a direct arrow through the separator") {
+TEST_CASE("split: concurrent siblings get a direct arrow through one divider port") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const owner{ build_state(c, root, "O", StateKind::Normal, {}) };
@@ -158,13 +157,14 @@ TEST_CASE("split: concurrent siblings get a direct arrow through the separator")
   build_trans(c, a, b, TransKind::Default, {});
 
   SplitGraph const g{ decompose(c) };
-  REQUIRE(segs_of(g, 0).len == 3);
+  REQUIRE(segs_of(g, 0).len == 2);
+  REQUIRE(g.ports.size() == 1);
+  CHECK(dst_port(g, 0, 0).state.v == INVALID);
   CHECK(dst_port(g, 0, 0).sub == m1);
-  CHECK(dst_port(g, 0, 1).sub == m2);
+  CHECK(dst_port(g, 0, 0).into == m2);
   CHECK(seg(g, 0, 0).frame == m1);
-  CHECK(seg(g, 0, 1).frame == root);  // the separator channel, in the owner's frame
-  CHECK(seg(g, 0, 1).separator == 1);
-  CHECK(seg(g, 0, 2).frame == m2);
+  CHECK(seg(g, 0, 1).frame == m2);
+  CHECK(seg(g, 0, 1).src_port == seg(g, 0, 0).dst_port);  // both regions share it
   CHECK(crossings(g, owner) == 0);  // the owner's border is never crossed
 }
 
@@ -289,6 +289,7 @@ void check_route(Chart const &c, SplitGraph const &g, uint32_t t) {
     SplitPort const &p{ g.ports[ports[k]] };
     CHECK(p.crossing == k);
     CHECK((p.state.v == INVALID) != (p.sub.v == INVALID));
+    CHECK((p.sub.v == INVALID) == (p.into.v == INVALID));
     if (p.state.v != INVALID) {
       if (p.state == tr.src) {
         // The one source-border split: external, source enclosing the target.
@@ -303,8 +304,13 @@ void check_route(Chart const &c, SplitGraph const &g, uint32_t t) {
     } else {
       StateId const owner{ c.submachines[p.sub.v].owner };
       REQUIRE(owner.v != INVALID);
-      CHECK(ancestor_or_self(c, owner, tr.src));  // separators sit inside a common state
+      CHECK(ancestor_or_self(c, owner, tr.src));  // dividers sit inside a common state
       CHECK(ancestor_or_self(c, owner, tr.dst));
+      CHECK(c.submachines[p.into.v].owner == owner);  // between two of its regions
+      CHECK(p.sub != p.into);
+      // The legs either side route in the region left and the region entered.
+      CHECK(g.segments[span.off + k].frame == p.sub);
+      CHECK(g.segments[span.off + k + 1].frame == p.into);
     }
   }
 }
@@ -407,8 +413,8 @@ TEST_CASE("split: a shallow source enters a deep target outermost first") {
 }
 
 TEST_CASE("split: a nested concurrent crossing exits, crosses, and enters") {
-  // The concurrent owner sits inside another composite, so the separator channel
-  // lies in that composite's region.
+  // The concurrent owner sits inside another composite; the crossing is one divider port
+  // between its two regions.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const wrap{ build_state(c, root, "W", StateKind::Normal, {}) };
@@ -425,17 +431,15 @@ TEST_CASE("split: a nested concurrent crossing exits, crosses, and enters") {
   build_trans(c, p1, q1, TransKind::Default, {});
 
   SplitGraph const g{ decompose(c) };
-  REQUIRE(segs_of(g, 0).len == 5);
+  REQUIRE(segs_of(g, 0).len == 4);
   CHECK(dst_port(g, 0, 0).state == p);  // exit
-  CHECK(dst_port(g, 0, 1).sub == m1);   // separator, both sides
-  CHECK(dst_port(g, 0, 2).sub == m2);
-  CHECK(dst_port(g, 0, 3).state == q);  // enter
+  CHECK(dst_port(g, 0, 1).sub == m1);   // the divider, one port for both sides
+  CHECK(dst_port(g, 0, 1).into == m2);
+  CHECK(dst_port(g, 0, 2).state == q);  // enter
   CHECK(seg(g, 0, 0).frame == pm);
   CHECK(seg(g, 0, 1).frame == m1);
-  CHECK(seg(g, 0, 2).frame == wm);  // the channel, in the owner's region
-  CHECK(seg(g, 0, 2).separator == 1);
-  CHECK(seg(g, 0, 3).frame == m2);
-  CHECK(seg(g, 0, 4).frame == qm);
+  CHECK(seg(g, 0, 2).frame == m2);
+  CHECK(seg(g, 0, 3).frame == qm);
   CHECK(crossings(g, o) == 0);
   CHECK(crossings(g, wrap) == 0);
 }
@@ -456,7 +460,7 @@ TEST_CASE("split: siblings deep inside one composite meet in its region") {
   SplitGraph const g{ decompose(c) };
   REQUIRE(segs_of(g, 0).len == 3);
   CHECK(seg(g, 0, 1).frame == nm);  // the common frame is nested, not the root
-  CHECK(seg(g, 0, 1).separator == 0);
+  CHECK(dst_port(g, 0, 0).into.v == INVALID);
   CHECK(crossings(g, n) == 0);
 }
 

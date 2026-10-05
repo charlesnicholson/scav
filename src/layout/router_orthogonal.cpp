@@ -1398,6 +1398,7 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
   RouteScratch &sc{ route_scratch() };
   std::vector<scav_rect> &walls{ sc.walls };
   ortho_enclosure_walls(in.region, in.enclosure, inset, walls);
+  vec_insert(walls, walls.end(), in.gaps.begin(), in.gaps.end());
   scav_rect const &enc{ in.enclosure };
   // The enclosure border whose band holds an end: 0 left, 1 right, 2 top, 3 bottom,
   // INVALID for none.
@@ -1490,6 +1491,19 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
         }
         return at;
       };
+
+  // A stubbed end's leg runs straight from the end to its stub, where the search ends.
+  auto const stub_end = [&lead](scav_point exact, scav_point stub) {
+    vec_push_back(lead, exact);
+    return stub;
+  };
+  // Whether net `nt`'s end `end` names no box and a stub off it.
+  auto const stubbed = [&in](RouteNet const &nt, uint32_t end) {
+    bool const named{ ((end == 0) ? nt.src_obstacle : nt.dst_obstacle) <
+                      in.obstacles.size() };
+    return !named && (((end == 0) ? nt.src_stubbed : nt.dst_stubbed) != 0) &&
+           !same((end == 0) ? nt.src_stub : nt.dst_stub, (end == 0) ? nt.src : nt.dst);
+  };
 
   // Seats every end before approaching any net.
   std::vector<scav_point> &seat{ sc.seat };
@@ -1594,7 +1608,8 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
     uint32_t const lead_first{ static_cast<uint32_t>(lead.size()) };
     uint32_t const src_slot{ 2 * n };
     scav_point const from{
-      approach(net.src, net.src_obstacle, seat[src_slot], net.src_clear)
+      stubbed(net, 0) ? stub_end(net.src, net.src_stub)
+                      : approach(net.src, net.src_obstacle, seat[src_slot], net.src_clear)
     };
     net_lead[n] = { .off = lead_first,
                     .len = static_cast<uint32_t>(lead.size()) - lead_first };
@@ -1648,8 +1663,11 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
       }
     }
     uint32_t const tail_first{ static_cast<uint32_t>(lead.size()) };
-    vec_push_back(anchors,
-                  approach(net.dst, net.dst_obstacle, seat[src_slot + 1], net.dst_clear));
+    vec_push_back(
+        anchors,
+        stubbed(net, 1)
+            ? stub_end(net.dst, net.dst_stub)
+            : approach(net.dst, net.dst_obstacle, seat[src_slot + 1], net.dst_clear));
     net_tail[n] = { .off = tail_first,
                     .len = static_cast<uint32_t>(lead.size()) - tail_first };
     net_anchors[n] = { .off = off, .len = static_cast<uint32_t>(anchors.size()) - off };
@@ -1683,15 +1701,15 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
       if (!in_region(lead[net_tail[n].off + k])) { why = RouteFailure::OutsideRegion; }
     }
 
-    // A direct net (two anchors) leaves and arrives in its end leads' planes; any other
-    // net searches with both ends free.
+    // A direct net (two anchors) leaves and arrives in its end leads' planes, and a
+    // stubbed end in its stub's plane; any other end is free.
     bool const direct{ at.len == 2 };
-    uint32_t const src_plane{ (direct && (net_lead[n].len > 0))
+    uint32_t const src_plane{ ((direct || stubbed(net, 0)) && (net_lead[n].len > 0))
                                   ? leg_plane(lead[net_lead[n].off + net_lead[n].len - 1],
                                               anchors[at.off])
                                   : INVALID };
-    uint32_t const dst_plane{ (direct && (net_tail[n].len > 0))
-                                  ? leg_plane(anchors[at.off + 1],
+    uint32_t const dst_plane{ ((direct || stubbed(net, 1)) && (net_tail[n].len > 0))
+                                  ? leg_plane(anchors[at.off + at.len - 1],
                                               lead[net_tail[n].off + net_tail[n].len - 1])
                                   : INVALID };
 
@@ -1711,7 +1729,14 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
                                           ortho_index_of(use.ys, a.y)) };
         uint32_t const v_to{ use.vertex(ortho_index_of(use.xs, b.x),
                                         ortho_index_of(use.ys, b.y)) };
-        if (!ortho_search(use, v_from, v_to, bend, scratch, hop, src_plane, dst_plane)) {
+        if (!ortho_search(use,
+                          v_from,
+                          v_to,
+                          bend,
+                          scratch,
+                          hop,
+                          (k == 0) ? src_plane : INVALID,
+                          ((k + 2) == at.len) ? dst_plane : INVALID)) {
           shape.clear();
           return false;
         }
@@ -1730,7 +1755,17 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
 
     int32_t reseated{ 0 };
     bool ok{ false };
-    if (why == RouteFailure::None) {
+    // A net whose stub reaches its other end is the leg between its ends.
+    if ((why == RouteFailure::None) && ((stubbed(net, 0) && same(net.src_stub, net.dst) &&
+                                         (net.dst_obstacle >= in.obstacles.size())) ||
+                                        (stubbed(net, 1) && same(net.dst_stub, net.src) &&
+                                         (net.src_obstacle >= in.obstacles.size())))) {
+      shape.clear();
+      vec_push_back(shape, net.src);
+      vec_push_back(shape, net.dst);
+      ok = true;
+    }
+    if ((why == RouteFailure::None) && !ok) {
       // A net kept apart searches first with its `apart` net's route closed.
       sc.closed.clear();
       if (net.apart < n) {

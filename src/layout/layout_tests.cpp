@@ -321,8 +321,8 @@ TEST_CASE("layout: routes are orthogonal, meet borders, and loop on either side"
   SubmachineId const inner{ build_submachine(c, comp, {}, {}) };
   StateId const s1{ build_state(c, inner, "S", StateKind::Normal, {}) };
   StateId const d1{ build_state(c, root, "D", StateKind::Normal, {}) };
-  build_trans(c, s1, d1, TransKind::Default, {});  // t0: one port on comp
-  build_trans(c, d1, d1, TransKind::Default, {});  // t1: loop outside
+  build_trans(c, s1, d1, TransKind::Default, {});   // t0: one port on comp
+  build_trans(c, d1, d1, TransKind::Default, {});   // t1: loop outside
   build_trans(c, d1, d1, TransKind::Internal, {});  // t2: loop inside
   scav_profile const p{ readable() };
   run(c, {}, p);
@@ -1055,9 +1055,22 @@ void check_geometry(Chart const &c) {
         row_of<scav_port_slot>(c, "scav.geom.portslot", ports.off + k)
       };
       SplitPort const &port{ g.ports[g.segments[segs.off + k].dst_port] };
-      scav_rect const boundary{ (port.state.v != INVALID) ? state_rect(c, port.state)
-                                                          : sub_rect(c, port.sub) };
-      CHECK(on_border({ .x = slot.x, .y = slot.y }, boundary));
+      if (port.state.v != INVALID) {
+        CHECK(on_border({ .x = slot.x, .y = slot.y }, state_rect(c, port.state)));
+      } else {
+        // A divider port lies between its two regions, square across from the source's
+        // face it names.
+        scav_rect const from{ sub_rect(c, port.sub) };
+        scav_rect const into{ sub_rect(c, port.into) };
+        CHECK(!inside({ .x = slot.x, .y = slot.y }, from));
+        CHECK(!inside({ .x = slot.x, .y = slot.y }, into));
+        switch (slot.side) {
+          case 0: CHECK(slot.x <= from.x); break;
+          case 1: CHECK(slot.x >= (from.x + from.w)); break;
+          case 2: CHECK(slot.y <= from.y); break;
+          default: CHECK(slot.y >= (from.y + from.h)); break;
+        }
+      }
       CHECK(slot.side <= 3);
       bool on_route{
         false
@@ -1068,9 +1081,7 @@ void check_geometry(Chart const &c) {
         on_route = on_route || ((slot.x >= imin(a.x, b.x)) && (slot.x <= imax(a.x, b.x)) &&
                                 (slot.y >= imin(a.y, b.y)) && (slot.y <= imax(a.y, b.y)));
       }
-      // A separator's middle segment ends a clearance short of its slot.
-      bool const separated{ g.segments[segs.off + k].separator != 0 };
-      CHECK((on_route || separated));
+      CHECK(on_route);
     }
   }
 }
@@ -1253,8 +1264,8 @@ TEST_CASE("layout: no corpus chart runs a route flush along a box" *
       }
     }
   }
-  // Four nets, one on kiln, one on printer and two on vac, route only after giving up their
-  // clearance.
+  // Four nets, one on kiln, one on printer and two on vac, route only after giving up
+  // their clearance.
   CHECK(reseated == 4);
   MESSAGE("routes flush against a box:\n", report);
   // One report line per flush run; at most ten across the corpus.
@@ -1289,7 +1300,7 @@ TEST_CASE("layout: Tier 0 at the scale target, and where the grid gives out") {
     // Every frame fits the grid budget and every end is reachable: all 3,704
     // segments route.
     CHECK(r.degraded() == 0);
-    // No route passes through a box, separator-port stubs included.
+    // No route passes through a box, divider-port stubs included.
     CHECK(t.through_box == 0);
   }
   {

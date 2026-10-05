@@ -33,6 +33,10 @@ struct RouteNet {
   uint32_t apart{ INVALID };                  // -> an earlier net this one keeps clear of
   // -> obstacles: the box a loop between two points on its border runs off.
   uint32_t loop_box{ INVALID };
+  // Per end naming no box, 1 where its leg runs straight to `src_stub` or `dst_stub` and
+  // the route meets that point along the leg's line.
+  uint32_t src_stubbed{ 0 }, dst_stubbed{ 0 };
+  scav_point src_stub{}, dst_stub{};
 };
 
 // Face of `r` that `at` lies on: 0 left, 1 right, 2 top, 3 bottom, else INVALID. Corners
@@ -79,6 +83,9 @@ struct RouteInput {
   // out of its `border_band`; an end in that band leaves square to the border.
   scav_rect enclosure{};
   std::vector<OccupiedSpan> occupied;  // inner loops' legs on box faces
+  // Walls a route meets only along its border or an end's stub: the gaps between the
+  // frame's region and its sibling regions.
+  std::vector<scav_rect> gaps;
 };
 
 enum class RouteFailure : int32_t {

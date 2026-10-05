@@ -56,9 +56,10 @@ CommonAncestor common_of(Chart const &c,
 
 // One planned boundary crossing, in route order.
 struct Crossing {
-  enum : uint32_t { Exit, SepSrc, SepDst, Enter } kind;
-  StateId state;     // Exit and Enter
-  SubmachineId sub;  // SepSrc and SepDst
+  enum : uint32_t { Exit, Divider, Enter } kind;
+  StateId state;      // Exit and Enter
+  SubmachineId sub;   // Divider: the region left
+  SubmachineId into;  // Divider: the region entered
 };
 
 }  // namespace
@@ -124,35 +125,44 @@ SplitGraph decompose(Chart const &c) {
       if (i == 0) {  // src encloses dst; its border splits unless internal or local
         src_inner = (tr.kind == TransKind::Internal) || (tr.kind == TransKind::Local);
         if (!src_inner) {
-          vec_push_back(route, { .kind = Crossing::Enter, .state = tr.src, .sub = {} });
+          vec_push_back(
+              route,
+              { .kind = Crossing::Enter, .state = tr.src, .sub = {}, .into = {} });
         }
       }
       for (size_t k = 1; k < i; ++k) {
-        vec_push_back(route, { .kind = Crossing::Exit, .state = chain_src[k], .sub = {} });
+        vec_push_back(
+            route,
+            { .kind = Crossing::Exit, .state = chain_src[k], .sub = {}, .into = {} });
       }
       if ((i > 0) && (j > 0) && (i < chain_src.size())) {
         // The chains meet at a state. An external route out of a machine exits and
-        // re-enters it; any other crosses the separator between two of its submachines.
+        // re-enters it; any other crosses the divider between two of its submachines.
         SubmachineId const sub_src{ c.states[chain_src[i - 1].v].parent };
         SubmachineId const sub_dst{ c.states[chain_dst[j - 1].v].parent };
         if (external && ((i > 1) || (j > 1) || (sub_src != sub_dst))) {
-          vec_push_back(route,
-                        { .kind = Crossing::Exit, .state = chain_src[i], .sub = {} });
-          vec_push_back(route,
-                        { .kind = Crossing::Enter, .state = chain_src[i], .sub = {} });
+          vec_push_back(
+              route,
+              { .kind = Crossing::Exit, .state = chain_src[i], .sub = {}, .into = {} });
+          vec_push_back(
+              route,
+              { .kind = Crossing::Enter, .state = chain_src[i], .sub = {}, .into = {} });
         } else if (sub_src != sub_dst) {
-          vec_push_back(route, { .kind = Crossing::SepSrc, .state = {}, .sub = sub_src });
-          vec_push_back(route, { .kind = Crossing::SepDst, .state = {}, .sub = sub_dst });
+          vec_push_back(
+              route,
+              { .kind = Crossing::Divider, .state = {}, .sub = sub_src, .into = sub_dst });
         }
       }
       // `j == 0` when dst encloses src: an external route exits dst and ends on its
       // border; any other ends inside dst, on its inner face.
       if ((j == 0) && external) {
-        vec_push_back(route, { .kind = Crossing::Exit, .state = tr.dst, .sub = {} });
+        vec_push_back(route,
+                      { .kind = Crossing::Exit, .state = tr.dst, .sub = {}, .into = {} });
       }
       for (size_t k = j; k-- > 1;) {
-        vec_push_back(route,
-                      { .kind = Crossing::Enter, .state = chain_dst[k], .sub = {} });
+        vec_push_back(
+            route,
+            { .kind = Crossing::Enter, .state = chain_dst[k], .sub = {}, .into = {} });
       }
       dst_inner = (j == 0) && !external;
     }
@@ -169,14 +179,12 @@ SplitGraph decompose(Chart const &c) {
     uint32_t prev{ INVALID };
     for (size_t k = 0; k < route.size(); ++k) {
       Crossing const &x{ route[k] };
+      bool const divider{ x.kind == Crossing::Divider };
       uint32_t const port{ static_cast<uint32_t>(g.ports.size()) };
       vec_push_back(g.ports,
-                    { .state = (x.kind == Crossing::Exit) || (x.kind == Crossing::Enter)
-                                   ? x.state
-                                   : StateId{ INVALID },
-                      .sub = (x.kind == Crossing::SepSrc) || (x.kind == Crossing::SepDst)
-                                 ? x.sub
-                                 : SubmachineId{ INVALID },
+                    { .state = divider ? StateId{ INVALID } : x.state,
+                      .sub = divider ? x.sub : SubmachineId{ INVALID },
+                      .into = divider ? x.into : SubmachineId{ INVALID },
                       .trans = { t },
                       .crossing = static_cast<uint32_t>(k) });
       vec_push_back(g.segments,
@@ -185,15 +193,11 @@ SplitGraph decompose(Chart const &c) {
                       .frame = frame,
                       .src_port = prev,
                       .dst_port = port,
-                      .separator = (x.kind == Crossing::SepDst) ? 1U : 0U,
                       .src_inner = ((k == 0) && src_inner) ? 1U : 0U,
                       .dst_inner = 0 });
       switch (x.kind) {
         case Crossing::Exit: frame = c.states[x.state.v].parent; break;
-        case Crossing::SepSrc:
-          frame = c.states[c.submachines[x.sub.v].owner.v].parent;
-          break;
-        case Crossing::SepDst: frame = x.sub; break;
+        case Crossing::Divider: frame = x.into; break;
         case Crossing::Enter: frame = c.states[entered_next(k).v].parent; break;
         default: break;
       }
@@ -205,7 +209,6 @@ SplitGraph decompose(Chart const &c) {
                     .frame = frame,
                     .src_port = prev,
                     .dst_port = INVALID,
-                    .separator = 0,
                     .src_inner = (route.empty() && src_inner) ? 1U : 0U,
                     .dst_inner = dst_inner ? 1U : 0U });
 

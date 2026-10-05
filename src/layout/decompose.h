@@ -13,10 +13,11 @@
 namespace scav {
 
 // A hierarchical port, one per (transition, crossed boundary): a state border, or the
-// separator between two concurrent submachines.
+// divider between two concurrent submachines of one state.
 struct SplitPort {
-  StateId state;     // INVALID for a separator port
-  SubmachineId sub;  // INVALID for a state-border port
+  StateId state;      // INVALID for a divider port
+  SubmachineId sub;   // a divider port's source region; INVALID for a state-border port
+  SubmachineId into;  // a divider port's target region; INVALID for a state-border port
   TransId trans;
   uint32_t crossing;  // this port's ordinal along its transition's route
   constexpr bool operator==(SplitPort const &) const = default;
@@ -30,7 +31,6 @@ struct SplitSegment {
   SubmachineId frame;  // the submachine this segment routes in
   uint32_t src_port;
   uint32_t dst_port;
-  uint32_t separator;  // 1 = the channel between two concurrent submachines
   uint32_t src_inner;  // 0/1; 1 only when src_port is INVALID
   uint32_t dst_inner;  // 0/1; 1 only when dst_port is INVALID
   constexpr bool operator==(SplitSegment const &) const = default;

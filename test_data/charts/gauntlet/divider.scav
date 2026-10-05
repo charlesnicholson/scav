@@ -1,0 +1,15 @@
+// Regions side by side, with transitions crossing their divider both ways and three of
+// them crossing it the same way. Each crosses the dashed line once, square to it, and no
+// route runs along the gap between the regions.
+chart divider "crossings both ways between regions side by side" {
+  state Running {
+    submachine motor { state Stopped, state Spinning, state Braking, trans * -> Stopped },
+    submachine light { state Dark, state Lit, state Dim, trans * -> Dark },
+  },
+
+  trans * -> Running,
+  trans Running:motor/Spinning -> Running:light/Lit "spun up",
+  trans Running:motor/Spinning -> Running:light/Dim "slowed",
+  trans Running:motor/Braking -> Running:light/Dark "braked",
+  trans Running:light/Dim -> Running:motor/Stopped "lamp fault",
+}

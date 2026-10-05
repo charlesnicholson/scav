@@ -2744,19 +2744,16 @@ CostTerms terms(Chart const &c,
     if (subject != INVALID) { mark(c.transitions[subject].src, 0); }
   }
 
-  for (SplitSegment const &seg : g.segments) {
-    if (seg.separator == 0) { continue; }
-    Transition const &tr{ c.transitions[seg.trans.v] };
+  for (SplitPort const &port : g.ports) {
+    if ((port.sub.v == INVALID) || (port.into.v == INVALID)) { continue; }
+    Transition const &tr{ c.transitions[port.trans.v] };
     StateKind const src_kind{ c.states[tr.src.v].kind };
     StateKind const dst_kind{ c.states[tr.dst.v].kind };
     if ((src_kind == StateKind::Fork) || (src_kind == StateKind::Join) ||
         (dst_kind == StateKind::Fork) || (dst_kind == StateKind::Join)) {
       continue;
     }
-    SubmachineId const from{ g.ports[seg.src_port].sub };
-    SubmachineId const to{ g.ports[seg.dst_port].sub };
-    if ((from.v == INVALID) || (to.v == INVALID)) { continue; }
-    if (!adjacent(z.sub[from.v], z.sub[to.v], p.sub_sep)) { ++t.adjacency; }
+    if (!adjacent(z.sub[port.sub.v], z.sub[port.into.v], p.sub_sep)) { ++t.adjacency; }
   }
 
   Ancestry const an{ cost_flatten_ancestry(c) };

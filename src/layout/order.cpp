@@ -982,7 +982,7 @@ void order_submachines(SubmachineOrders &o,
         return (c.states[pt.state.v].parent.v == m) ? sc.state_local[pt.state.v]
                                                     : boundary_node(seg, port);
       }
-      if (pt.sub.v == m) { return boundary_node(seg, port); }
+      if ((pt.sub.v == m) || (pt.into.v == m)) { return boundary_node(seg, port); }
       StateId const owner{ c.submachines[pt.sub.v].owner };
       if ((owner.v != INVALID) && (c.states[owner.v].parent.v == m)) {
         return sc.state_local[owner.v];

@@ -1,0 +1,29 @@
+// Regions one above the other, each a chain across the page, with transitions crossing
+// their divider both ways and three of them crossing it the same way. Each crosses the
+// dashed line once, square to it, and no route runs along the gap between the regions.
+chart stacked "crossings both ways between regions one above the other" {
+  state Running {
+    submachine motor {
+      state Stopped,
+      state Spinning,
+      state Braking,
+      trans * -> Stopped,
+      trans Stopped -> Spinning "start",
+      trans Spinning -> Braking "brake",
+    },
+    submachine light {
+      state Dark,
+      state Lit,
+      state Dim,
+      trans * -> Dark,
+      trans Dark -> Lit "on",
+      trans Lit -> Dim "dim",
+    },
+  },
+
+  trans * -> Running,
+  trans Running:motor/Spinning -> Running:light/Lit "spun up",
+  trans Running:motor/Braking -> Running:light/Dim "slowed",
+  trans Running:motor/Spinning -> Running:light/Dark "dropped",
+  trans Running:light/Dim -> Running:motor/Stopped "lamp fault",
+}
