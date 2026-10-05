@@ -2332,7 +2332,7 @@ Improved run_search(Chart const &c,
                              win,
                              [&](uint32_t i, bool labels) {
                                MemoUse use;
-                               return score(i, labels, use, nullptr);
+                               return score(i, labels, use, nullptr, true);
                              });
       }
 #endif
