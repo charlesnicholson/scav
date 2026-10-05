@@ -72,7 +72,7 @@ enum class SeatPass : uint16_t {
 };
 
 // A Level 1 move's outcome; `CandidateScored.pass`.
-enum class MoveVerdict : uint16_t { Taken, NotViable, Inflated, NotBetter };
+enum class MoveVerdict : uint16_t { Taken, NotViable, Inflated, NotBetter, Degraded };
 
 // Which of a row's searches converged; `RowSearched.pass`. `Refold` adds fold moves.
 enum class RowPass : uint16_t { First, Refold };

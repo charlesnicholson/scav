@@ -853,6 +853,7 @@ struct Scored {
   std::array<int32_t, TIER2_TERMS> share{};
   bool viable{ false };
   bool inflated{ false };
+  bool degraded{ false };  // a net fell back to a straight line
 };
 
 void put_pins(SearchPins const &p, std::vector<uint32_t> &w) {
@@ -908,7 +909,7 @@ bool same_cost(Cost const &a, Cost const &b) {
 
 bool same_scored(Scored const &a, Scored const &b) {
   return (a.viable == b.viable) && (a.inflated == b.inflated) &&
-         same_cost(a.cost, b.cost) && (a.share == b.share);
+         (a.degraded == b.degraded) && same_cost(a.cost, b.cost) && (a.share == b.share);
 }
 #endif
 
@@ -955,6 +956,10 @@ Scored scored_of(Chart const &c,
   out.viable = true;
   if (cand.inflations != 0) {
     out.inflated = true;
+    return out;
+  }
+  if (cand.routes.degraded() != 0) {
+    out.degraded = true;
     return out;
   }
   CostTerms terms{ cost_terms(scoring, c, g, cand.sized, cand.routes, s, objective) };
@@ -1012,7 +1017,10 @@ struct MemoUse {
 };
 
 MemoScore memo_score(Scored const &s) {
-  return { .cost = s.cost, .viable = s.viable, .inflated = s.inflated };
+  return { .cost = s.cost,
+           .viable = s.viable,
+           .inflated = s.inflated,
+           .degraded = s.degraded };
 }
 
 Scored scored_from(MemoScore const &m) {
@@ -1020,6 +1028,7 @@ Scored scored_from(MemoScore const &m) {
   out.cost = m.cost;
   out.viable = m.viable;
   out.inflated = m.inflated;
+  out.degraded = m.degraded;
   return out;
 }
 
@@ -1264,7 +1273,9 @@ Scored score_move(Chart const &c,
                        labelled);
       Scored const want{ scored_of(c, g, scoring, s, objective, fresh, labelled) };
       if ((want.viable != out.viable) || (want.inflated != out.inflated) ||
-          (want.viable && !want.inflated && !same_cost(want.cost, out.cost))) {
+          (want.degraded != out.degraded) ||
+          (want.viable && !want.inflated && !want.degraded &&
+           !same_cost(want.cost, out.cost))) {
         ScopedLock const held{ test_candidate_memo_lock };
         ++test_candidate_memo_mismatches;
       }
@@ -1362,7 +1373,8 @@ uint64_t test_label_bound_mismatches{ 0 };
 
 // True when a candidate's bound may still beat `incumbent`.
 bool may_win(Scored const &bound, Cost const &incumbent) {
-  return bound.viable && !bound.inflated && cost_less(bound.cost, incumbent);
+  return bound.viable && !bound.inflated && !bound.degraded &&
+         cost_less(bound.cost, incumbent);
 }
 
 // A move's identity across rounds: kind, subject and parameters. Exact while ranks, legs
@@ -1487,7 +1499,7 @@ uint32_t least_by_bound(uint32_t n,
   order.clear();
   uint32_t open{ 0 };
   for (uint32_t i = 0; i < n; ++i) {
-    if (!got[i].viable || got[i].inflated) { continue; }
+    if (!got[i].viable || got[i].inflated || got[i].degraded) { continue; }
     ++open;
     if (may_win(got[i], incumbent)) { vec_push_back(order, i); }
   }
@@ -1535,9 +1547,9 @@ void verify_bounded_round(uint32_t n,
   Cost best{ incumbent };
   bool same{ true };
   for (uint32_t i = 0; i < n; ++i) {
-    same =
-        same && (full[i].viable == got[i].viable) && (full[i].inflated == got[i].inflated);
-    if (!full[i].viable || full[i].inflated) { continue; }
+    same = same && (full[i].viable == got[i].viable) &&
+           (full[i].inflated == got[i].inflated) && (full[i].degraded == got[i].degraded);
+    if (!full[i].viable || full[i].inflated || full[i].degraded) { continue; }
     same = same && !cost_less(full[i].cost, got[i].cost);
     if (ranks_before(full[i].cost, jit_of(i), i, best, jit_of(want), want, incumbent)) {
       best = full[i].cost;
@@ -2159,8 +2171,10 @@ Improved run_search(Chart const &c,
       if (!sc.viable) {
         verdict = MoveVerdict::NotViable;
       } else if (sc.inflated) {
-        // A move whose lay-out needed inflated spacing is never taken.
+        // A move whose lay-out needed inflated spacing or degraded a net is never taken.
         verdict = MoveVerdict::Inflated;
+      } else if (sc.degraded) {
+        verdict = MoveVerdict::Degraded;
       } else if (ranks_before(sc.cost, jit_of(i), i, best, jit_of(took), took, out.cost)) {
         verdict = MoveVerdict::Taken;
         best = sc.cost;

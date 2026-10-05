@@ -30,6 +30,7 @@ struct MemoScore {
   Cost cost{};
   bool viable{ false };
   bool inflated{ false };
+  bool degraded{ false };
 };
 
 // What `find_facing` found.
@@ -137,7 +138,8 @@ class CandidateMemo {
 
  private:
   // An entry's unlabelled then labelled score: `t0` the Tier-0 count or a negative tag for
-  // unset, not viable, inflated or retried; `t2_hi`, `t2_lo` the Tier-2 sum's words.
+  // unset, not viable, inflated, degraded or retried; `t2_hi`, `t2_lo` the Tier-2 sum's
+  // words.
   struct ScoreRecord {
     std::array<int32_t, 2> t0;
     std::array<uint32_t, 2> t2_hi;

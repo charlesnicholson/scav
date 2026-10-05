@@ -79,6 +79,7 @@ char const *verdict_name(uint16_t v) {
     case MoveVerdict::NotViable: return "not_viable";
     case MoveVerdict::Inflated: return "inflated";
     case MoveVerdict::NotBetter: return "not_better";
+    case MoveVerdict::Degraded: return "degraded";
   }
   return "?";
 }

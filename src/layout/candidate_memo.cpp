@@ -19,6 +19,7 @@ constexpr int32_t TAG_UNSET{ -1 };
 constexpr int32_t TAG_NOT_VIABLE{ -2 };
 constexpr int32_t TAG_INFLATED{ -3 };
 constexpr int32_t TAG_RETRIED{ -4 };
+constexpr int32_t TAG_DEGRADED{ -5 };
 constexpr uint32_t SHAPE_WORDS{ 3 + (5 * 4) };  // the most words a state's shape takes
 
 // `v` less `from` as a word; clears `fits` where the difference leaves `int32_t`.
@@ -706,6 +707,7 @@ bool CandidateMemo::read(ScoreRecord const &r, uint32_t k, MemoScore &out) {
   out = MemoScore{};
   out.viable = t0 != TAG_NOT_VIABLE;
   out.inflated = t0 == TAG_INFLATED;
+  out.degraded = t0 == TAG_DEGRADED;
   if (t0 >= 0) {
     out.cost.t0_violations = t0;
     out.cost.t2 =
@@ -715,12 +717,12 @@ bool CandidateMemo::read(ScoreRecord const &r, uint32_t k, MemoScore &out) {
 }
 
 void CandidateMemo::set_score(uint32_t e, bool labelled, MemoScore const &s) {
-  bool const scored{ s.viable && !s.inflated };
+  bool const scored{ s.viable && !s.inflated && !s.degraded };
   if ((e == INVALID) ||
       (scored && ((s.cost.t0_violations < 0) || (s.cost.t1_hints != 0)))) {
     return;
   }
-  int32_t t0{ s.viable ? TAG_INFLATED : TAG_NOT_VIABLE };
+  int32_t t0{ s.viable ? (s.inflated ? TAG_INFLATED : TAG_DEGRADED) : TAG_NOT_VIABLE };
   if (scored) { t0 = s.cost.t0_violations; }
   auto const t2{ static_cast<uint64_t>(scored ? s.cost.t2 : 0) };
   uint32_t const k{ labelled ? 1U : 0U };
