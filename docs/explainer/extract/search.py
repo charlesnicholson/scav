@@ -12,8 +12,7 @@ import common as X
 METHOD = {
     "order": "(a) the trace: `scav dump --json --layout --portfolio-row R --trace --trace-search` -- every Level 1 round's candidates are emitted back to back (candidate_scored + candidate_terms) after the round is scored, so a round is a run of consecutive candidate events; the last `taken` in a round is the move the round takes (`taken` marks each new running best in enumeration order).",
     "geometry": "(b) every incumbent is re-derived with `--portfolio-row R --no-search` plus that incumbent's pins; `verified` says the re-derived t0/t2 equal the trace's score for that move.",
-    "kicks": "A kick (iterated local search) is not a candidate_scored event: it re-decides one frame by dropping that frame's rank/cut/face/side/fold pins, adds a reversal, a turn to run down (--orient) or a refold, and searches that frame again. The kick steps below are named from src/layout/layout.cpp kick_rounds and checked by re-derivation.",
-    "share_order": X.TERMS}
+    "kicks": "A kick (iterated local search) is not a candidate_scored event: it re-decides one frame by dropping that frame's rank/cut/face/side/fold pins, adds a reversal, a turn to run down (--orient) or a refold, and searches that frame again. The kick steps below are named from src/layout/layout.cpp kick_rounds and checked by re-derivation."}
 KICK_ROUND_1 = "every kick of the first kick round, converged; kicks scored on frames other than the one kicked are scoped to that frame. Frames 0 and 2 improve on 6473, so their winners are searched together: 8240->5628, dearer than orient 0 alone, which is taken; orient 2 rested on top of it stays at 5628 and is dropped. Start/converged costs: reverse t1 19538->6684, reverse t9 9736->6961, orient 0 14148->5595, orient 1 6643 (no move improves), orient 2 6401 (no move improves), refold 0 ->5701, refold 1 ->6688, refold 2 ->6473. Kick-start costs re-derived with --no-search."
 KICKS_TRIED = [(4, 8, "reverse t1 leg 0 (frame 0)"), (9, 12, "reverse t9 leg 0 (frame 0)"),
                (13, 15, "orient frame 0 down"), (16, 16, "orient frame 1 down"),
@@ -23,13 +22,10 @@ KICKS_TRIED = [(4, 8, "reverse t1 leg 0 (frame 0)"), (9, 12, "reverse t9 leg 0 (
                (28, 28, "rest: orient frame 2 on top of orient frame 0")]
 
 
-PER_EM = {"corridor": 1, "excess_len": 1, "label_near": 1, "aspect": 1, "crowding": 1, "length": 1,
-          "area": 2, "whitespace": 2}  # cost.cpp weighted_terms: lengths in ems, areas in ems squared, by ceiling
-
-
 def weighted(terms: dict, prof: dict) -> int:
     """The Tier 2 sum under the dump's profile weights and em."""
-    return sum(prof["w_" + k] * -(-terms[k] // prof["em"] ** PER_EM.get(k, 0)) for k in X.TERMS)
+    t2 = terms["tier2"]
+    return sum(prof["w_" + k] * -(-t2[k] // prof["em"] ** terms["em_power"][k]) for k in t2)
 
 
 def with_bound(scav: X.Scav, row: list, base: list, m: dict) -> dict:
@@ -39,9 +35,9 @@ def with_bound(scav: X.Scav, row: list, base: list, m: dict) -> dict:
     c, chart, prof = doc["geometry"]["cost"], doc["geometry"]["chart"], doc["geometry"]["profile"]
     if weighted(c, prof) != c["t2"]:
         raise RuntimeError(f"brew {pin_of(m)}: weights give {weighted(c, prof)}, scav {c['t2']}")
-    b = dict(c, label=0, label_near=0)
+    b = dict(c, tier2=dict(c["tier2"], label=0, label_near=0))
     if not all(r[2] <= chart[2] and r[3] <= chart[3] for r in doc["geometry"]["placed"]):
-        b["aspect"] = 0
+        b["tier2"]["aspect"] = 0
     xs = [v for r in doc["geometry"]["state"] for v in (r[0], r[0] + r[2])]
     xs += [q[0] for leg in doc["geometry"]["route"] for q in leg]
     ys = [v for r in doc["geometry"]["state"] for v in (r[1], r[1] + r[3])]

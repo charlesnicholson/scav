@@ -26,28 +26,28 @@
   <p><code>t1</code> is reserved for author's layout hints, which are not built; it is always 0.</p>
 
   <h3>Tier 2: thirteen weighted terms</h3>
-  <p><code>t2</code> is an integer sum. Each term is converted to a unit first: counts stay counts, lengths are divided by the <b>em</b> (the font size, 192 units on <code>readable</code>) and areas by em², rounding up. Then it is multiplied by its weight.</p>
+  <p><code>t2</code> is an integer sum. Each term is converted to a unit first: counts stay counts, lengths are divided by the <b>em</b> (the font size, <span data-p="em"></span> units on <code>readable</code>) and areas by em², rounding up. Then it is multiplied by its weight.</p>
   <table class="sx-table" id="cost-terms-table">
     <tr><th>term</th><th>charges</th><th>unit</th><th class="num">weight</th></tr>
-    <tr><td><code>bends</code></td><td>each change of direction</td><td>count</td><td class="num">512</td></tr>
-    <tr><td><code>corridor</code></td><td>length two transitions share on one line, except the final leg into a common target (the <em>trunk</em>)</td><td>em</td><td class="num">48</td></tr>
-    <tr><td><code>crossings</code></td><td>each crossing between transitions</td><td>count</td><td class="num">512</td></tr>
-    <tr><td><code>excess_len</code></td><td>route length beyond its chord or label width, times (1 + its crossings)</td><td>em</td><td class="num">4</td></tr>
-    <tr><td><code>adjacency</code></td><td>a transition joining two non-adjacent regions (fork and join exempt)</td><td>count</td><td class="num">16</td></tr>
-    <tr><td><code>label</code></td><td>overlapping label pairs, and a label over an enclosing state's bands</td><td>count</td><td class="num">768</td></tr>
-    <tr><td><code>label_near</code></td><td>a label's shortfall: nearer a foreign leg than its own</td><td>em</td><td class="num">48</td></tr>
-    <tr><td><code>aspect</code></td><td>the chart's distance from 16:10, <code>|w·10 − h·16|</code></td><td>em</td><td class="num">2</td></tr>
-    <tr><td><code>area</code></td><td>the chart's <code>w × h</code></td><td>em²</td><td class="num">1</td></tr>
-    <tr><td><code>crowding</code></td><td>parallel segments of different transitions closer than an em, falling linearly to zero at one em</td><td>em</td><td class="num">512</td></tr>
-    <tr><td><code>length</code></td><td>total route length</td><td>em</td><td class="num">8</td></tr>
-    <tr><td><code>transit_bends</code></td><td>bends inside a state the route only passes through, on top of <code>bends</code></td><td>count</td><td class="num">768</td></tr>
-    <tr><td><code>whitespace</code></td><td>empty interior of composites (measured, unweighted)</td><td>em²</td><td class="num">0</td></tr>
+    <tr><td><code>bends</code></td><td>each change of direction</td><td>count</td><td class="num" data-p="w_bends"></td></tr>
+    <tr><td><code>corridor</code></td><td>length two transitions share on one line, except the final leg into a common target (the <em>trunk</em>)</td><td>em</td><td class="num" data-p="w_corridor"></td></tr>
+    <tr><td><code>crossings</code></td><td>each crossing between transitions</td><td>count</td><td class="num" data-p="w_crossings"></td></tr>
+    <tr><td><code>excess_len</code></td><td>route length beyond its chord or label width, times (1 + its crossings)</td><td>em</td><td class="num" data-p="w_excess_len"></td></tr>
+    <tr><td><code>adjacency</code></td><td>a transition joining two non-adjacent regions (fork and join exempt)</td><td>count</td><td class="num" data-p="w_adjacency"></td></tr>
+    <tr><td><code>label</code></td><td>overlapping label pairs, and a label over an enclosing state's bands</td><td>count</td><td class="num" data-p="w_label"></td></tr>
+    <tr><td><code>label_near</code></td><td>a label's shortfall: nearer a foreign leg than its own</td><td>em</td><td class="num" data-p="w_label_near"></td></tr>
+    <tr><td><code>aspect</code></td><td>the chart's distance from <span data-p="dar_num"></span>:<span data-p="dar_den"></span>, <code>|w·dar_den − h·dar_num|</code></td><td>em</td><td class="num" data-p="w_aspect"></td></tr>
+    <tr><td><code>area</code></td><td>the chart's <code>w × h</code></td><td>em²</td><td class="num" data-p="w_area"></td></tr>
+    <tr><td><code>crowding</code></td><td>parallel segments of different transitions closer than an em, falling linearly to zero at one em</td><td>em</td><td class="num" data-p="w_crowding"></td></tr>
+    <tr><td><code>length</code></td><td>total route length</td><td>em</td><td class="num" data-p="w_length"></td></tr>
+    <tr><td><code>transit_bends</code></td><td>bends inside a state the route only passes through, on top of <code>bends</code></td><td>count</td><td class="num" data-p="w_transit_bends"></td></tr>
+    <tr><td><code>whitespace</code></td><td>empty interior of composites (measured, unweighted)</td><td>em²</td><td class="num" data-p="w_whitespace"></td></tr>
   </table>
   <p>Weights are capped at 1,024, which keeps the sum inside 64 bits.</p>
   <div data-fig="cost-overlay"></div>
 
   <h3>Weights are exchange rates</h3>
-  <p>With every term in its own unit, a weight says how much of one defect a reader would trade for another. On <code>readable</code>, one bend costs the same as one crossing, one em of crowded lanes, 64 em of route length, or 512 em² of canvas. Without the unit conversion, area (degree 2 in the coordinates) swamped every other term. The weights were then fitted to pick the drawing with the fewest defects a reader counts.</p>
+  <p>With every term in its own unit, a weight says how much of one defect a reader would trade for another. On <code>readable</code>, a bend costs <code>w_bends</code> and an em of route length costs <code>w_length</code>, so one bend trades for <code>w_bends / w_length</code> em of length. Without the unit conversion, area (degree 2 in the coordinates) swamped every other term. The weights were then fitted to pick the drawing with the fewest defects a reader counts.</p>
   <div data-fig="cost-weights"></div>
 
   <h3>Shares</h3>
@@ -59,7 +59,7 @@
 <script>
 // Figure: a real chart with each term's charges drawn on it.
 window.SXcostOverlay = function (sec) {
-  var C = SXcost, rows = SX.data('rows').charts.brew;
+  var C = SXcost, P = SX.profile(), rows = SX.data('rows').charts.brew;
   var f = SX.figure(sec.querySelector('[data-fig="cost-overlay"]'), { caption: '<b>Toggle a term</b> to see what it charges and <b>hover</b> a mark for its number. <b>Switch</b> to brew before the search to see bends, crossings and labels on routes.' });
   var src = 'shipped', on = { bends: true, crossings: true, corridor: true, crowding: true, excess_len: false, area: false, lor: true };
   var drawings = {
@@ -101,7 +101,7 @@ window.SXcostOverlay = function (sec) {
     if (on.area) {
       var b = g.box, r = h.rect(b, { fill: 'none', stroke: col('area'), 'stroke-width': 2 * u, 'stroke-dasharray': (8 * u) + ' ' + (5 * u) });
       r.style.pointerEvents = 'stroke';
-      tipOn(r, '<b>area</b> ' + fmt(b[2]) + ' × ' + fmt(b[3]) + ' = ' + fmt(M.T.area) + ' units² → ' + fmt(C.cdiv(M.T.area, C.UNIT.area)) + ' em²<br><b>aspect</b> |' + fmt(b[2]) + '·10 − ' + fmt(b[3]) + '·16| = ' + fmt(M.T.aspect) + ' → ' + fmt(C.cdiv(M.T.aspect, C.EM)) + ' em × 2');
+      tipOn(r, '<b>area</b> ' + fmt(b[2]) + ' × ' + fmt(b[3]) + ' = ' + fmt(M.T.area) + ' units² → ' + fmt(C.cdiv(M.T.area, C.UNIT.area)) + ' em²<br><b>aspect</b> |' + fmt(b[2]) + '·' + P.dar_den + ' − ' + fmt(b[3]) + '·' + P.dar_num + '| = ' + fmt(M.T.aspect) + ' → ' + fmt(C.cdiv(M.T.aspect, C.EM)) + ' em × 2');
     }
     if (on.excess_len) mk.excess.forEach(function (e) {
       var l = h.line(e.t.points, { stroke: col('excess_len'), 'stroke-width': 6 * u, 'stroke-opacity': 0.55, 'stroke-linejoin': 'round' });
@@ -117,7 +117,7 @@ window.SXcostOverlay = function (sec) {
     if (on.crowding) mk.crowding.forEach(function (c) {
       var r = c.axis === 0 ? [c.lo, c.at0, c.hi - c.lo, c.apart] : [c.at0, c.lo, c.apart, c.hi - c.lo];
       var n = h.rect(r, { fill: col('crowding'), 'fill-opacity': 0.5, stroke: col('crowding'), 'stroke-width': 1 * u });
-      tipOn(n, '<b>crowding</b>: t' + c.u + ' and t' + c.v + ' run ' + fmt(c.hi - c.lo) + ' units side by side, ' + c.apart + ' apart (an em is 192)<br>' + fmt(c.hi - c.lo) + ' × (192 − ' + c.apart + ') / 192 = ' + c.charge.toFixed(1));
+      tipOn(n, '<b>crowding</b>: t' + c.u + ' and t' + c.v + ' run ' + fmt(c.hi - c.lo) + ' units side by side, ' + c.apart + ' apart (an em is ' + C.EM + ')<br>' + fmt(c.hi - c.lo) + ' × (' + C.EM + ' − ' + c.apart + ') / ' + C.EM + ' = ' + c.charge.toFixed(1));
     });
     if (on.lor) mk.lor.forEach(function (x) {
       var b = x.t.label_box;
@@ -128,13 +128,13 @@ window.SXcostOverlay = function (sec) {
     });
     if (on.bends) mk.bends.forEach(function (b) {
       var d = h.dot(b.p, 5 * u, { fill: col('bends'), stroke: 'var(--surface-1)', 'stroke-width': 1.5 * u });
-      tipOn(d, '<b>bend</b> on ' + name(g, b.t.id) + '<br>1 × 512 = 512');
+      tipOn(d, '<b>bend</b> on ' + name(g, b.t.id) + '<br>1 × ' + C.W.bends + ' = ' + C.W.bends);
     });
     if (on.crossings) mk.crossings.forEach(function (c) {
       var s = 6 * u, p = c.p;
       var n = h.line([[p[0] - s, p[1] - s], [p[0] + s, p[1] + s], [p[0], p[1]], [p[0] + s, p[1] - s], [p[0] - s, p[1] + s]], { stroke: col('crossings'), 'stroke-width': 2.5 * u });
       var hit = h.dot(p, 9 * u, { fill: 'transparent' });
-      tipOn(hit, '<b>crossing</b>: t' + c.u + ' × t' + c.v + '<br>1 × 512 = 512');
+      tipOn(hit, '<b>crossing</b>: t' + c.u + ' × t' + c.v + '<br>1 × ' + C.W.crossings + ' = ' + C.W.crossings);
     });
     table(g, M);
   }
@@ -173,6 +173,8 @@ window.SXcostWeights = function (sec) {
   });
   var cands = groups.map(function (q, i) { return { label: 'row ' + q.rows[0] + (i ? '' : ' · shipped'), g: R[q.rows[0]].searched, rows: q.rows.slice(1).join(', ') }; });
   var LADDER = [0, 1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 111, 128, 192, 256, 384, 512, 768, 1024];
+  C.TERMS.forEach(function (k) { if (LADDER.indexOf(C.W[k]) < 0) LADDER.push(C.W[k]); });  // every readable weight is a stop
+  LADDER.sort(function (a, b) { return a - b; });
   var LIVE = ['bends', 'excess_len', 'aspect', 'area', 'length', 'whitespace'];
   var COL = { bends: '--series-1', excess_len: '--series-2', aspect: '--series-3', area: '--series-4', length: '--series-5', whitespace: '--series-6' };
   var w = Object.assign({}, C.W), sliders = {};

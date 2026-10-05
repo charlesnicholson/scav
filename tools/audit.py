@@ -148,23 +148,29 @@ def corner_arc(doc, state):
     return doc["geometry"]["state_corner"][state]
 
 
-def on_exit(pt, pts, doc, state):
-    """`pt` lies on the exit face of `state`'s inner loop `pts`, which its first leg gives:
-    the border where that side has no band, the band's inner edge where it has one."""
+# Per face (0 left, 1 right, 2 top, 3 bottom): the band lining it and its `ruled` bit.
+BAND = {0: ("state_lead", 2), 1: ("state_trail", 3), 2: ("state_before", 0), 3: ("state_after", 1)}
+
+
+def on_exit(pt, doc, state):
+    """`pt` lies on a drawn edge of the face `state`'s loop room exits by, as the dump's
+    `state_loop_place` and `state_ruled` give it: the border where no band lines that face,
+    a ruled band's inner edge where one does."""
     g = doc["geometry"]
+    face = g["state_loop_place"][state][0]
     bx, by, bw, bh = g["state"][state]
-    lead, trail = g["state_lead"][state], g["state_trail"][state]
-    before, after = g["state_before"][state], g["state_after"][state]
-    left = lead[0] + lead[2] if lead[2] else bx
-    right = trail[0] if trail[2] else bx + bw
-    top = before[1] + before[3] if before[3] else by
-    bottom = after[1] if after[3] else by + bh
-    (ax, ay), (cx, cy) = pts[0], pts[1]
-    if ay == cy and cx != ax:  # left or right face: the first leg runs inward
-        return pt[0] == (left if cx > ax else right) and top <= pt[1] <= bottom
-    if ax == cx and cy != ay:  # top or bottom face
-        return pt[1] == (top if cy > ay else bottom) and left <= pt[0] <= right
-    return False
+    key, bit = BAND[face]
+    band = g[key][state]
+    vertical = face < 2
+    if band[2 if vertical else 3] > 0:
+        if not g["state_ruled"][state] >> bit & 1:
+            return False
+        edge = [band[0] + band[2], band[0], band[1] + band[3], band[1]][face]
+    else:
+        edge = [bx, bx + bw, by, by + bh][face]
+    if vertical:
+        return pt[0] == edge and by <= pt[1] <= by + bh
+    return pt[1] == edge and bx <= pt[0] <= bx + bw
 
 
 def inner_loop(doc, trans):
@@ -221,7 +227,7 @@ def audit(svg, every, chart, doc, verbose):
             return True
         state = inner_loop(doc, trans)
         pts = route.get(trans, [])
-        return state is not None and len(pts) > 1 and on_exit(pt, pts, doc, state)
+        return state is not None and len(pts) > 1 and on_exit(pt, doc, state)
 
     for m in POLYLINE.finditer(svg):
         pts, trans = points(m.group(1)), m.group(2)

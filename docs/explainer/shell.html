@@ -216,6 +216,8 @@ table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, tr
   SX.svg = function (tag, attrs) { return apply(document.createElementNS(NS, tag), attrs, [].slice.call(arguments, 2)); };
   SX.css = function (name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); };
   SX.fmt = function (n) { return Number(n).toLocaleString('en-US'); };
+  // The readable profile and the spacing scav derives from it, as brew's dump gives them.
+  SX.profile = function () { return SX.data('charts').charts.brew.text.profile; };
 
   // Tooltip: SX.tip.show(event, html), SX.tip.hide().
   var tipEl;
@@ -560,13 +562,18 @@ table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, tr
 
   // ---- window.SXcost: cost.cpp's weights, units and term kernels ----
   window.SXcost = (function () {
-    var TERMS = ['bends', 'corridor', 'crossings', 'excess_len', 'adjacency', 'label', 'label_near', 'aspect', 'area', 'crowding', 'length', 'transit_bends', 'whitespace'];
-    var W = { bends: 512, corridor: 48, crossings: 512, excess_len: 4, adjacency: 16, label: 768, label_near: 48, aspect: 2, area: 1, crowding: 512, length: 8, transit_bends: 768, whitespace: 0 };
-    var EM = 192;
-    var UNIT = { bends: 1, corridor: EM, crossings: 1, excess_len: EM, adjacency: 1, label: 1, label_near: EM, aspect: EM, area: EM * EM, crowding: EM, length: EM, transit_bends: 1, whitespace: EM * EM };
-    var UNAME = { 1: 'count', 192: 'em', 36864: 'em²' };
+    var D = null;
+    // The term list, weights, em and units of brew's dump: its profile and each term's em power.
+    function d() {
+      if (D) return D;
+      var g = SX.data('charts').charts.brew.text, P = g.profile, EM = P.em, W = {}, UNIT = {}, UNAME = {};
+      var TERMS = Object.keys(g.cost.terms);
+      TERMS.forEach(function (k) { W[k] = P['w_' + k]; UNIT[k] = Math.pow(EM, g.cost.em_power[k]); });
+      UNAME[1] = 'count'; UNAME[EM] = 'em'; UNAME[EM * EM] = 'em²';
+      return (D = { TERMS: TERMS, W: W, EM: EM, UNIT: UNIT, UNAME: UNAME });
+    }
     function cdiv(a, b) { return Math.ceil(a / b); }               // terms are non-negative
-    function weighted(terms, w) { var s = 0; TERMS.forEach(function (k) { s += (w || W)[k] * cdiv(terms[k], UNIT[k]); }); return s; }
+    function weighted(terms, w) { var s = 0, c = d(); c.TERMS.forEach(function (k) { s += (w || c.W)[k] * cdiv(terms[k], c.UNIT[k]); }); return s; }
     function isqrt(n) { var r = Math.floor(Math.sqrt(n)); while (r * r > n) r--; while ((r + 1) * (r + 1) <= n) r++; return r; }
     function seglen(a, b) { var dx = b[0] - a[0], dy = b[1] - a[1]; return dx === 0 ? Math.abs(dy) : dy === 0 ? Math.abs(dx) : isqrt(dx * dx + dy * dy); }
     function dir(a, b) { function ax(f, t) { return t > f ? 2 : t < f ? 0 : 1; } return ax(a[0], b[0]) * 3 + ax(a[1], b[1]); }
@@ -597,6 +604,7 @@ table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, tr
     function inTrunk(t, len, k) { return k + t.tail >= len || (t.merged && k + t.tail + 1 === len); }
     // Every term this figure can draw, with the marks that earn it.
     function measure(g) {
+      var EM = d().EM;
       var R = {}, pieces = [], m = { bends: [], crossings: [], corridor: [], crowding: [], excess: [], lor: [] };
       var T = { bends: 0, crossings: 0, corridor: 0, crowding: 0, length: 0, excess_len: 0, label_over_route: 0 };
       (g.trans || []).forEach(function (t) {
@@ -654,7 +662,8 @@ table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, tr
       var bx = g.box; T.area = bx[2] * bx[3]; T.aspect = Math.abs(bx[2] * 10 - bx[3] * 16);
       return { T: T, marks: m, crossOf: crossOf };
     }
-    return { TERMS: TERMS, W: W, EM: EM, UNIT: UNIT, UNAME: UNAME, cdiv: cdiv, weighted: weighted, measure: measure };
+    return { get TERMS() { return d().TERMS; }, get W() { return d().W; }, get EM() { return d().EM; }, get UNIT() { return d().UNIT; },
+             get UNAME() { return d().UNAME; }, cdiv: cdiv, weighted: weighted, measure: measure };
   })();
 
   // Sections register an init; it runs once, when the section first nears the viewport.
@@ -678,6 +687,10 @@ table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, tr
         (s.querySelector('[data-fig]') || s).appendChild(SX.el('p', { class: 'note', text: 'This figure failed to load: ' + err.message }));
       }
     }
+    // A `data-p` element shows that profile value, times `data-k` where given.
+    [].forEach.call(document.querySelectorAll('[data-p]'), function (n) {
+      n.textContent = SX.fmt(SX.profile()[n.getAttribute('data-p')] * (+n.getAttribute('data-k') || 1));
+    });
     // Every section draws at load, so the page has its final height before anyone scrolls.
     secs.forEach(draw);
     // A link opened with #anchor: the browser scrolled before the figures existed.

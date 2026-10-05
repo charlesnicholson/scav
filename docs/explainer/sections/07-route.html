@@ -24,7 +24,7 @@
   <p>The router runs A* on a <b>separated orthogonal visibility graph</b>:</p>
   <ul>
     <li><b>Grid</b>: lines through every obstacle edge grown by the clearance, every wall and every route end; an edge is passable unless it enters a grown obstacle. A frame over 2<sup>18</sup> vertices is refused.</li>
-    <li><b>Clearance is a bumper, not a penalty</b>: no route comes within <code>clear = node_sep / 3</code> (96) of a box, by construction.</li>
+    <li><b>Clearance is a bumper, not a penalty</b>: no route comes within <code>clear = node_sep / 3</code> (<span data-p="route_clearance"></span>) of a box, by construction.</li>
     <li><b>Two planes</b>: each vertex has a horizontal and a vertical copy, joined by an edge costing the <b>bend penalty</b> (one <code>rank_sep</code>), so plain A* minimises length and bends together. A turn at a fixed end costs slightly less, so equal paths turn at their ends.</li>
     <li><b>Deterministic</b>: the heuristic is admissible, and the open list is totally ordered by <code>(f, g, node)</code>, so the result never depends on the <a href="#fast">queue</a>. The search is capped at 2<sup>20</sup> expansions.</li>
     <li><b>Ring points</b>: an end is pushed out by the clearance, and the leg back to the box is emitted, not searched, so it is perpendicular for free.</li>
@@ -48,7 +48,7 @@
   <h3>Nudging lanes apart</h3>
   <p><b>Nudging</b> spreads routes that run alongside each other, per frame and again over the whole chart.</p>
   <ul>
-    <li>A <b>lane</b> is a group of overlapping parallel segments closer than one em (192).</li>
+    <li>A <b>lane</b> is a group of overlapping parallel segments closer than the lane pitch, the larger of an em and the clearance (<span data-p="lane_pitch"></span>).</li>
     <li>Within a lane, segments are ordered by where they came from, and reordered where that avoids a crossing; fan-ins and fan-outs move as one bundle.</li>
     <li>Segments spread up to one em apart, within the room their frame and obstacles leave.</li>
     <li>A move is kept only if it creates no collapsed leg, no new overlap with a box or its bumper, no new run along a border and no new shared run; otherwise the bundle stays put. A drawing that overlaps a box is worse than any score.</li>
@@ -57,7 +57,7 @@
 
   <h3>End legs and failures</h3>
   <p>Every route ends on its border. <code>PathClear</code> is the least length a route's first and last legs keep, for the application's end glyph: the router's approach to a box runs out at least that far, and both nudging passes keep those legs at least that long. A net fails if an end lies outside its region, if the frame's grid is too large, or if it is <b>unreachable</b> even with zero clearance. A net only the walls seal off does not fail: it is <a href="#decorations">walled</a> and crosses a band. A failed net is drawn as a straight line with a <code>RouteDegraded</code> diagnostic.</p>
-  <p>Only unreachable nets trigger the <b>inflation retry</b>, since the others do not depend on spacing: <code>rank_sep</code>, <code>node_sep</code> and <code>sub_sep</code> grow by 32 units on a copy of the profile and sizing and routing rerun, up to 8 times, keeping the least-degraded attempt. The cost is still scored under the caller's profile, and the search never accepts an inflated candidate: fitting only after widening everything is a bigger drawing, not a better one.</p>
+  <p>Only unreachable nets trigger the <b>inflation retry</b>, since the others do not depend on spacing: <code>rank_sep</code>, <code>node_sep</code> and <code>sub_sep</code> grow by <span data-p="spacing_inflation_increment"></span> units on a copy of the profile and sizing and routing rerun, up to <span data-p="spacing_inflation_cap"></span> times, keeping the least-degraded attempt. The cost is still scored under the caller's profile, and the search never accepts an inflated candidate: fitting only after widening everything is a bigger drawing, not a better one.</p>
 
   <h3>One end, four faces</h3>
   <p>The figure lays out <code>estop</code> with each face pinned in turn, each a full rerun of ordering, sizing and routing.</p>
@@ -88,7 +88,7 @@
 <script>
 (function () {
   'use strict';
-  var F = window.SXF, U = F.ru, CLEAR = 96;
+  var F = window.SXF, U = F.ru, P = SX.profile(), CLEAR = P.route_clearance;
   function beyond(v, lo, len) { return v < lo ? lo - v : v > lo + len ? v - (lo + len) : 0; }
   function ontoFace(v, lo, len, clear, corner) { var inset = Math.min(Math.max(clear, corner), Math.floor(len / 2)); return Math.min(Math.max(v, lo + inset), lo + len - inset); }
   // ortho_attach_box: the separation rule picks the axis, the nearer border the side, the projection the place.
@@ -103,11 +103,15 @@
     }
     p.bx = bx; p.by = by; return p;
   };
-  var BOXES = {
-    state: { label: 'state 896 × 640', r: { x: -448, y: -320, w: 896, h: 640 }, corner: 80, ins: false, t: { x: 1300, y: 700 } },
-    fork: { label: 'fork bar 64 × 960', r: { x: -32, y: -480, w: 64, h: 960 }, corner: 0, ins: false, t: { x: 1500, y: -880 } },
-    choice: { label: 'choice 320 × 320 (inscribed)', r: { x: -160, y: -160, w: 320, h: 320 }, corner: 0, ins: true, t: { x: 1400, y: 900 } }
-  };
+  // A plain state, a fork bar and a choice at their least boxes: the interior minimum, plus the pad ring for a state.
+  var BOXES = (function () {
+    function at(kind, ring, ins, t) {
+      var w = P['min_w.' + kind] + ring, h = P['min_h.' + kind] + ring;
+      return { label: kind + ' ' + SX.fmt(w) + ' × ' + SX.fmt(h) + (ins ? ' (inscribed)' : ''), r: { x: -Math.floor(w / 2), y: -Math.floor(h / 2), w: w, h: h },
+               corner: kind === 'normal' ? Math.min(Math.floor(Math.min(w, h) / 8), P.pad) : 0, ins: ins, t: t };
+    }
+    return { state: at('normal', 2 * P.pad, false, { x: 1300, y: 700 }), fork: at('fork', 0, false, { x: 1500, y: -880 }), choice: at('choice', 0, true, { x: 1400, y: 900 }) };
+  })();
   var FACE = ['left', 'right', 'top', 'bottom'];
   F.route['route-face'] = function (host) {
     var key = 'state', t = Object.assign({}, BOXES[key].t);
@@ -158,7 +162,7 @@
       });
       f.stage.innerHTML = ''; f.stage.appendChild(svg); f.stage.appendChild(out);
       current = svg;
-      out.innerHTML = (s.bx >= s.by ? 'x separation ' + SX.fmt(s.bx) + ' ≥ y separation ' + SX.fmt(s.by) + (s.bx === s.by ? ' (a tie goes to x)' : '') + ', so the end leaves sideways' : 'y separation ' + SX.fmt(s.by) + ' > x separation ' + SX.fmt(s.bx) + ', so the end leaves up or down') + ', by the ' + FACE[s.face] + ' face. ' + (B.ins ? 'Inscribed glyph: the face midpoint.' : 'Inset off each corner: min(max(clear 96, corner ' + B.corner + '), half the face) = ' + inset + '.');
+      out.innerHTML = (s.bx >= s.by ? 'x separation ' + SX.fmt(s.bx) + ' ≥ y separation ' + SX.fmt(s.by) + (s.bx === s.by ? ' (a tie goes to x)' : '') + ', so the end leaves sideways' : 'y separation ' + SX.fmt(s.by) + ' > x separation ' + SX.fmt(s.bx) + ', so the end leaves up or down') + ', by the ' + FACE[s.face] + ' face. ' + (B.ins ? 'Inscribed glyph: the face midpoint.' : 'Inset off each corner: min(max(clear ' + CLEAR + ', corner ' + B.corner + '), half the face) = ' + inset + '.');
     }
     draw();
   };
@@ -221,13 +225,13 @@
 <script>
 (function () {
   'use strict';
-  var F = window.SXF, U = F.ru, CLEAR = 96;
+  var F = window.SXF, U = F.ru, P = SX.profile(), CLEAR = P.route_clearance;
   F.route['route-astar'] = function (host) {
     var region = { x: 0, y: 0, w: 3100, h: 1800 };
     var obs = [{ x: 700, y: 300, w: 600, h: 400 }, { x: 1500, y: 900, w: 500, h: 500 }, { x: 2300, y: 200, w: 300, h: 700 }];
-    var A = { x: 200, y: 1500 }, B = { x: 2800, y: 450 }, bend = 576, stepper = null;
+    var A = { x: 200, y: 1500 }, B = { x: 2800, y: 450 }, bend = P.bend_penalty, stepper = null;
     var f = SX.figure(host, { caption: '<b>A* on the separated grid.</b> <b>Step</b> the search, <b>drag</b> an end or <b>slide</b> the bend penalty. At 0 it expands far more and may return a jog.' });
-    var sl = SX.slider({ label: 'bend penalty', min: 0, max: 1152, step: 16, value: bend, format: function (v) { return v + (v === 576 ? ' (rank_sep)' : ''); }, onInput: function (v) { bend = v; build(); } });
+    var sl = SX.slider({ label: 'bend penalty', min: 0, max: 2 * P.bend_penalty, step: 16, value: bend, format: function (v) { return v + (v === P.bend_penalty ? ' (rank_sep)' : ''); }, onInput: function (v) { bend = v; build(); } });
     f.ctrl.appendChild(sl.el);
     var stepHost = SX.el('div'); f.ctrl.appendChild(stepHost);
     var info = SX.el('div', { class: 'note', style: { minHeight: '2.6em', fontFamily: SX.css('--mono'), fontSize: '12.5px' } });
@@ -373,7 +377,7 @@
 <script>
 (function () {
   'use strict';
-  var F = window.SXF, U = F.ru, CLEAR = 96, INF = 1e9;
+  var F = window.SXF, U = F.ru, P = SX.profile(), CLEAR = P.route_clearance, INF = 1e9;
   function sign(v) { return v < 0 ? -1 : v > 0 ? 1 : 0; }
   // nudge_lanes, horizontal members only: lanes by distance, order by toward, crossing votes by Kahn, room, step.
   U.nudgeH = function (region, obstacles, gap, nets, useVotes) {
@@ -455,14 +459,14 @@
   ];
   var COL = ['var(--series-1)', 'var(--series-3)', 'var(--series-7)'];
   F.route['route-nudge'] = function (host) {
-    var region = { x: 0, y: 0, w: 2800, h: 1600 }, votes = true, box = false, gap = 192, k = 3;
+    var region = { x: 0, y: 0, w: 2800, h: 1600 }, votes = true, box = false, gap = P.lane_pitch, k = 3;
     var f = SX.figure(host, { caption: '<b>Nudging one lane.</b> <b>Step</b> from the routed drawing to the spread lane; <b>untick</b> the crossing votes to see the plain order. <b>Add the box</b> or <b>slide</b> the gap to limit the room.' });
     var st = SX.stepper({ steps: 4, start: 3, interval: 1200, label: function (i) { return ['as routed', 'lane', 'order', 'spread'][i]; }, onStep: function (i) { k = i; draw(); } });
     f.ctrl.appendChild(st.el);
     var row = SX.el('div', { class: 'ctrl' }); f.ctrl.appendChild(row);
     row.appendChild(SX.toggle({ label: 'crossing votes', value: votes, onChange: function (v) { votes = v; draw(); } }).el);
     row.appendChild(SX.toggle({ label: 'box above the lane', value: box, onChange: function (v) { box = v; draw(); } }).el);
-    row.appendChild(SX.slider({ label: 'gap', min: 96, max: 400, step: 8, value: gap, format: function (v) { return v + (v === 192 ? ' (em)' : ''); }, onInput: function (v) { gap = v; draw(); } }).el);
+    row.appendChild(SX.slider({ label: 'gap', min: 96, max: 400, step: 8, value: gap, format: function (v) { return v + (v === P.lane_pitch ? ' (lane pitch)' : ''); }, onInput: function (v) { gap = v; draw(); } }).el);
     var out = SX.el('div', { class: 'note', style: { minHeight: '2.6em' } });
     function draw() {
       var obs = box ? [{ x: 1000, y: 420, w: 600, h: 230 }] : [];

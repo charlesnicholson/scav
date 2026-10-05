@@ -41,13 +41,13 @@
     <li><b>Whitespace elimination</b> grows rectangles to fill their rows; extents do not change.</li>
     <li>The one-row <b>box packer</b> is also tried when the profile's <code>trybox</code> is set, and wins if it scales larger.</li>
   </ul>
-  <p>A packing aims at the profile's DAR (16:10 on <code>readable</code>) or, on some Level 2 rows, at the owner state's interior. A packing that would exceed <code>COORD_MAX</code> never displaces one that fits.</p>
+  <p>A packing aims at the profile's DAR (<span data-p="dar_num"></span>:<span data-p="dar_den"></span> on <code>readable</code>) or, on some Level 2 rows, at the owner state's interior. A packing that would exceed <code>COORD_MAX</code> never displaces one that fits.</p>
   <div data-fig="size-pack"></div>
 
   <h3>Bottom-up to the root</h3>
   <p>A composite's box wraps its packed submachines, its four bands and its loop room:</p>
   <p><code>w = max(min_w, w_before + max(packed_w, loop_w) + w_after, kind_min_w) + 2·pad</code><br><code>h = max(h_before + packed_h + sep + loop_h + h_after, kind_min_h) + 2·pad</code></p>
-  <p>The <code>h_*</code> and <code>w_*</code> terms are the bands the application requested above, below, before and after the submachine area. The <a href="#decorations">loop room</a>, <code>loop_w × loop_h</code>, holds the state's internal self-transitions in a corner of its free interior, above or below the submachine area as its <a href="#decorations">placement</a> says, and its extents depend on that placement; <code>sep</code> is <code>sub_sep</code> when both are present, else 0. <code>pad</code> (128) is the interior ring. A bare pseudostate has none, so an arrow stops on its mark. A plain state is at least 896 × 640 on <code>readable</code>; pseudostate minimums are in <a href="#intro">the model</a>.</p>
+  <p>The <code>h_*</code> and <code>w_*</code> terms are the bands the application requested above, below, before and after the submachine area. The <a href="#decorations">loop room</a>, <code>loop_w × loop_h</code>, holds the state's internal self-transitions in a corner of its free interior, above or below the submachine area as its <a href="#decorations">placement</a> says, and its extents depend on that placement; <code>sep</code> is <code>sub_sep</code> when both are present, else 0. <code>pad</code> (<span data-p="pad"></span>) is the interior ring. A bare pseudostate has none, so an arrow stops on its mark. A plain state is at least <span data-p="min_w.normal"></span> × <span data-p="min_h.normal"></span> plus the pad ring on <code>readable</code>; pseudostate minimums are in <a href="#intro">the model</a>.</p>
   <div data-fig="size-bottomup"></div>
   <p>After routing, the chart rectangle grows over every route point and label before scoring, so area and aspect price the canvas that ships.</p>
   <div class="callout why"><span class="t">Rejected</span>Top-down sizing (its size estimate is unsolved, and per-level scaling breaks port continuity); constraint-based adjustment (coordinates are generated, not adjusted); network-simplex placement (no fewer visible defects, and slower).</div>
@@ -254,7 +254,8 @@
 (function () {
   'use strict';
   var F = window.SXF, U = F.su;
-  var RS = 576, LH = 269, SW = 896, SH = 640, NS = 288;
+  var P = SX.profile(), RS = P.rank_sep, LH = P.line_height, NS = P.node_sep;
+  var SW = P['min_w.normal'] + 2 * P.pad, SH = P['min_h.normal'] + 2 * P.pad;  // a plain state's least box
   // Phase 1's charges (order.cpp rank_derived) for one component: one-gap labels, the lane
   // estimate, then spanning labels widest first onto the widest gap counting the estimate.
   F.su.charge = function (bounds, edges, pitch) {
@@ -315,15 +316,15 @@
         }
         box(g, s, bx, by, SW, SH, 'B');
         if (label > 0) {
-          var ly = by + SH / 2 - 96 - LH;
+          var ly = by + SH / 2 - P.label_leader - LH;
           var lx0 = SW + (RS + extra - label) / 2;
           U.el(g, 'rect', { x: lx0 * s, y: ly * s, width: label * s, height: LH * s }, { fill: 'color-mix(in srgb, var(--hl-2) 14%, transparent)', stroke: 'var(--hl-2)', strokeDasharray: '4 3' });
           U.text(g, lx0 * s + 4, (ly + LH * 0.72) * s, 'label', { fontSize: '11px', fill: 'var(--text-secondary)' });
         }
-        dim(g, s, 0, SW, -120, '896');
-        dim(g, s, SW, SW + RS, -120, 'rank_sep 576');
+        dim(g, s, 0, SW, -120, SX.fmt(SW));
+        dim(g, s, SW, SW + RS, -120, 'rank_sep ' + SX.fmt(RS));
         if (extra) dim(g, s, SW + RS, bx, -360, 'max(label ' + label + ', lanes ' + lanes + ') = ' + SX.fmt(extra), 'var(--hl)');
-        out.innerHTML = 'B.x = 896 + 576 + ' + SX.fmt(extra) + ' = <b>' + SX.fmt(bx) + '</b>' + (fan ? ' (two of three edges turn: lanes = 2 × 269 = 538)' : '') + '. Chart width ' + SX.fmt(bx + SW) + '.';
+        out.innerHTML = 'B.x = ' + SX.fmt(SW) + ' + ' + SX.fmt(RS) + ' + ' + SX.fmt(extra) + ' = <b>' + SX.fmt(bx) + '</b>' + (fan ? ' (two of three edges turn: lanes = 2 × ' + SX.fmt(LH) + ' = ' + SX.fmt(2 * LH) + ')' : '') + '. Chart width ' + SX.fmt(bx + SW) + '.';
       } else {
         var edges = [{ from: 0, to: 1, label: 400, t: 'A → B' }, { from: 1, to: 2, label: midL, t: 'B → C' }, { from: 2, to: 3, label: 300, t: 'C → D' }, { from: 0, to: 3, label: longL, t: 'A → D' }];
         var res = U.charge(3, edges, LH), xs = [0];
@@ -341,10 +342,10 @@
         U.el(g, 'polyline', { points: [[SW / 2, 0], [SW / 2, -700], [xs[3] + SW / 2, -700], [xs[3] + SW / 2, 0]].map(function (p) { return p[0] * s2 + ',' + p[1] * s2; }).join(' '), 'stroke-width': 1.6 }, { stroke: 'var(--route)', fill: 'none' });
         if (longAt && longL) {
           var lx = xs[longAt.at] + SW + RS / 2;
-          U.el(g, 'rect', { x: lx * s2, y: (-700 - 96 - LH) * s2, width: longL * s2, height: LH * s2 }, { fill: 'color-mix(in srgb, var(--hl-2) 14%, transparent)', stroke: 'var(--hl-2)', strokeDasharray: '4 3' });
+          U.el(g, 'rect', { x: lx * s2, y: (-700 - P.label_leader - LH) * s2, width: longL * s2, height: LH * s2 }, { fill: 'color-mix(in srgb, var(--hl-2) 14%, transparent)', stroke: 'var(--hl-2)', strokeDasharray: '4 3' });
           U.text(g, lx * s2, (-700 - 120 - LH) * s2, 'A → D label, charged to gap ' + longAt.at + (longAt.before >= longL ? ' (no wider than its label charge: adds nothing)' : ''), { fontSize: '11.5px', fill: 'var(--text-secondary)' });
         }
-        out.innerHTML = 'Label charges, which space the ranks: ' + res.labels.map(function (v, b) { return 'gap ' + b + ' <b>' + SX.fmt(v) + '</b>'; }).join(', ') + '. One-gap labels charge first (A → B 400, B → C ' + SX.fmt(midL) + ', C → D 300). A → D and one other edge count as turning in gaps 0 and 2, so the lane estimate reserves 2 × 269 = 538 there. ' + (longAt ? 'A → D takes the widest gap counting that estimate, ties to the middle: gap <b>' + longAt.at + '</b>.' : 'A → D has no label to charge.');
+        out.innerHTML = 'Label charges, which space the ranks: ' + res.labels.map(function (v, b) { return 'gap ' + b + ' <b>' + SX.fmt(v) + '</b>'; }).join(', ') + '. One-gap labels charge first (A → B 400, B → C ' + SX.fmt(midL) + ', C → D 300). A → D and one other edge count as turning in gaps 0 and 2, so the lane estimate reserves 2 × ' + SX.fmt(LH) + ' = ' + SX.fmt(2 * LH) + ' there. ' + (longAt ? 'A → D takes the widest gap counting that estimate, ties to the middle: gap <b>' + longAt.at + '</b>.' : 'A → D has no label to charge.');
       }
       f.stage.innerHTML = ''; f.stage.appendChild(svg); f.stage.appendChild(out);
     }
@@ -467,8 +468,9 @@
 (function () {
   'use strict';
   var F = window.SXF, U = F.su;
-  var SW = 896, SH = 640, RS = 576, NS = 288;
-  var DARS = [{ value: '16:10', label: '16:10 (readable)' }, { value: '4:3', label: '4:3 (compact)' }, { value: '1:1', label: '1:1' }, { value: '1:2', label: '1:2' }];
+  var P = SX.profile(), RS = P.rank_sep, NS = P.node_sep, RDAR = P.dar_num + ':' + P.dar_den;
+  var SW = P['min_w.normal'] + 2 * P.pad, SH = P['min_h.normal'] + 2 * P.pad;  // a plain state's least box
+  var DARS = [{ value: RDAR, label: RDAR + ' (readable)' }, { value: '4:3', label: '4:3 (compact)' }, { value: '1:1', label: '1:1' }, { value: '1:2', label: '1:2' }];
   function ratio(s) { var p = s.split(':'); return [+p[0], +p[1]]; }
   // A chain of n plain states, folded as size.cpp folds a run: cut where the running width passes the target.
   U.foldChain = function (n, num, den, rule) {
@@ -494,7 +496,7 @@
     return { target: target, flat: flat, folded: folded, stacked: stacked, pick: pick, why: why, cuts: chunks.length - 1 };
   };
   F.size['size-fold'] = function (host) {
-    var n = 8, dar = '16:10', rule = 'scale';
+    var n = 8, dar = RDAR, rule = 'scale';
     var f = SX.figure(host, { caption: '<b>Folding.</b> <b>Slide</b> the chain\'s length or <b>change</b> the aspect or fold rule. The scale measure (bars, larger wins) picks among flat, packed and stacked.' });
     f.ctrl.appendChild(SX.slider({ label: 'states', min: 2, max: 16, value: n, onInput: function (v) { n = v; draw(); } }).el);
     f.ctrl.appendChild(SX.choice({ options: DARS, value: dar, onChange: function (v) { dar = v; draw(); } }).el);
@@ -540,7 +542,7 @@
     regions: { label: 'five regions', sep: 19, rects: [[420, 240], [300, 180], [260, 300], [380, 150], [200, 200]] }
   };
   F.size['size-pack'] = function (host) {
-    var key = 'up', dar = '16:10', compaction = false, white = true, packer = 'lr';
+    var key = 'up', dar = RDAR, compaction = false, white = true, packer = 'lr';
     var f = SX.figure(host, { caption: '<b>LR-rectpacking.</b> <b>Step</b> through the greedy placement inside the target width (dashed); the last step applies compaction and whitespace elimination. <b>Toggle</b> those two; <b>Box</b> and <b>Best</b> compare the one-row packer.' });
     var r1 = SX.el('div', { class: 'ctrl' }), r2 = SX.el('div', { class: 'ctrl' }); f.ctrl.appendChild(r1); f.ctrl.appendChild(r2);
     r1.appendChild(SX.choice({ options: Object.keys(SETS).map(function (k) { return { value: k, label: SETS[k].label }; }), value: key, onChange: function (v) { key = v; build(); } }).el);
@@ -593,7 +595,7 @@
 <script>
 (function () {
   'use strict';
-  var F = window.SXF, U = F.su, PAD = 128;
+  var F = window.SXF, U = F.su, P = SX.profile(), PAD = P.pad;
   function describe(e, geom) {
     var nm = function (s) { return s.replace(/^#\d+$/, 'initial'); };
     switch (e.kind) {
@@ -653,7 +655,7 @@
         h.mark('state', s.st.id, 'var(--hl)');
         s.subs.forEach(function (r) { h.rect(r, { fill: 'none', stroke: 'var(--hl-2)', 'stroke-width': 32, 'stroke-dasharray': '60 50' }); });
         var w = s.pw + 2 * PAD, hh = s.hb + s.ph + s.ha + 2 * PAD;
-        log.innerHTML = '<b>' + s.st.path + '</b> takes its ' + (s.subs.length > 1 ? s.subs.length + ' packed regions (' + (s.subs[0][1] === s.subs[1][1] ? 'side by side' : 'stacked') + ', <code>sub_sep</code> 192 apart)' : 'submachine') + ': packed ' + SX.fmt(s.pw) + ' × ' + SX.fmt(s.ph) + '.<br>w = ' + SX.fmt(s.pw) + ' + 2·128 = <b>' + SX.fmt(w) + '</b>; h = ' + s.hb + ' (header) + ' + SX.fmt(s.ph) + ' + ' + s.ha + ' + 2·128 = <b>' + SX.fmt(hh) + '</b>' + (w === s.st.rect[2] && hh === s.st.rect[3] ? ', exactly its rect.' : ' (rect ' + s.st.rect[2] + ' × ' + s.st.rect[3] + ').');
+        log.innerHTML = '<b>' + s.st.path + '</b> takes its ' + (s.subs.length > 1 ? s.subs.length + ' packed regions (' + (s.subs[0][1] === s.subs[1][1] ? 'side by side' : 'stacked') + ', <code>sub_sep</code> ' + SX.fmt(P.sub_sep) + ' apart)' : 'submachine') + ': packed ' + SX.fmt(s.pw) + ' × ' + SX.fmt(s.ph) + '.<br>w = ' + SX.fmt(s.pw) + ' + 2·' + PAD + ' = <b>' + SX.fmt(w) + '</b>; h = ' + s.hb + ' (header) + ' + SX.fmt(s.ph) + ' + ' + s.ha + ' + 2·' + PAD + ' = <b>' + SX.fmt(hh) + '</b>' + (w === s.st.rect[2] && hh === s.st.rect[3] ? ', exactly its rect.' : ' (rect ' + s.st.rect[2] + ' × ' + s.st.rect[3] + ').');
       } else {
         var root = T.sizing.subs['0'], box = geom.box;
         h.rect(root, { fill: 'none', stroke: 'var(--hl-2)', 'stroke-width': 40, 'stroke-dasharray': '120 80' });

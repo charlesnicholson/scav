@@ -286,6 +286,12 @@ constexpr std::array<char const *, TIER2_TERMS> TERMS{
   "length", "transit_bends", "whitespace"
 };
 
+// Per Tier-2 term, the power of the em it is divided by before weighting: 0 counts, 1
+// lengths, 2 areas.
+constexpr std::array<uint32_t, TIER2_TERMS> EM_POWER{
+  0, 1, 0, 1, 0, 0, 1, 1, 2, 1, 1, 0, 2
+};
+
 std::array<int64_t, TIER2_TERMS> term_values(CostTerms const &t) {
   return { t.bends,  t.corridor,      t.crossings, t.excess_len, t.adjacency,
            t.label,  t.label_near,    t.aspect,    t.area,       t.crowding,
@@ -294,14 +300,42 @@ std::array<int64_t, TIER2_TERMS> term_values(CostTerms const &t) {
 
 // The profile values layout reads and the spacing it derives from them, parallel to
 // `profile_values`.
-constexpr std::array<char const *, 29> PROFILE{
-  "em",           "line_height",     "pad",          "rank_sep",        "node_sep",
-  "sub_sep",      "dar_num",         "dar_den",      "route_clearance", "border_band",
-  "bend_penalty", "label_leader",    "loop_gap",     "loop_reach",      "loop_lane",
-  "w_bends",      "w_corridor",      "w_crossings",  "w_excess_len",    "w_adjacency",
-  "w_label",      "w_label_near",    "w_aspect",     "w_area",          "w_crowding",
-  "w_length",     "w_transit_bends", "w_whitespace", "portfolio_m"
-};
+constexpr std::array<char const *, 34> PROFILE{ "em",
+                                                "line_height",
+                                                "pad",
+                                                "rank_sep",
+                                                "node_sep",
+                                                "sub_sep",
+                                                "dar_num",
+                                                "dar_den",
+                                                "route_clearance",
+                                                "border_band",
+                                                "bend_penalty",
+                                                "label_leader",
+                                                "loop_gap",
+                                                "loop_reach",
+                                                "loop_lane",
+                                                "w_bends",
+                                                "w_corridor",
+                                                "w_crossings",
+                                                "w_excess_len",
+                                                "w_adjacency",
+                                                "w_label",
+                                                "w_label_near",
+                                                "w_aspect",
+                                                "w_area",
+                                                "w_crowding",
+                                                "w_length",
+                                                "w_transit_bends",
+                                                "w_whitespace",
+                                                "portfolio_m",
+                                                "lane_pitch",
+                                                "portfolio_k",
+                                                "sweep_count",
+                                                "spacing_inflation_cap",
+                                                "spacing_inflation_increment" };
+
+int64_t imax64(int64_t a, int64_t b) { return (a > b) ? a : b; }
 
 std::array<int64_t, PROFILE.size()> profile_values(scav_profile const &p) {
   return { p.font_size_grid,
@@ -332,7 +366,29 @@ std::array<int64_t, PROFILE.size()> profile_values(scav_profile const &p) {
            p.w_length,
            p.w_transit_bends,
            p.w_whitespace,
-           p.portfolio_m };
+           p.portfolio_m,
+           imax64(route_clearance(p), p.font_size_grid),  // the orthogonal router's lanes
+           p.portfolio_k,
+           p.sweep_count,
+           p.spacing_inflation_cap,
+           p.spacing_inflation_increment };
+}
+
+// Appends ` name value` per state kind: `kind_min_w` and `kind_min_h`, the least interior.
+template <typename Write>
+void each_kind_min(scav_profile const &p, Write write) {
+  for (uint32_t k = 0; k < 9; ++k) {
+    std::string name{ "min_w." };
+    name += syntax_state_kind_name(static_cast<StateKind>(k));
+    write(name, p.kind_min_w[k]);
+    name.replace(0, 5, "min_h");
+    write(name, p.kind_min_h[k]);
+  }
+}
+
+// The least straight run at each end of transition `t`, zero past the table.
+scav_path_clear trans_clear(scav_spaces const &s, uint32_t t) {
+  return (t < s.n_path_clear) ? s.path_clear[t] : scav_path_clear{};
 }
 
 // `scav_box_space::ruled` per state, 0 past the table.
@@ -397,6 +453,8 @@ void append_geometry_text(std::string &out,
     out += TERMS[i];
     out += ' ';
     append_i64v(out, values[i]);
+    out += " em_power ";
+    string_append_u32(out, EM_POWER[i]);
     out += " share ";
     append_i64v(out, shares[i]);
     out += "bp\n";
@@ -409,6 +467,12 @@ void append_geometry_text(std::string &out,
     out += ' ';
     append_i64v(out, prof[i]);
   }
+  each_kind_min(p, [&](std::string const &name, int32_t v) {
+    out += ' ';
+    out += name;
+    out += ' ';
+    append_i32v(out, v);
+  });
   out += '\n';
   for (uint32_t i = 0; i < placed.size(); ++i) {
     out += "  placed t";
@@ -488,6 +552,13 @@ void append_geometry_text(std::string &out,
       out += ',';
       append_i32v(out, pt.y);
       out += ')';
+    }
+    scav_path_clear const clear{ trans_clear(s, t) };
+    if ((clear.src != 0) || (clear.dst != 0)) {
+      out += " clear ";
+      append_i32v(out, clear.src);
+      out += ' ';
+      append_i32v(out, clear.dst);
     }
     for (uint32_t k = 0; k < port_spans[t].len; ++k) {
       scav_port_slot const sl{ slots[port_spans[t].off + k] };
@@ -696,18 +767,23 @@ void append_geometry_json(std::string &out,
     append_i32v(out, t0[i]);
   }
   out += '}';
-  for (uint32_t i = 0; i < TIER2_TERMS; ++i) {
-    out += ",\n      ";
-    append_json_string(out, TERMS[i]);
-    out += ": ";
-    append_i64v(out, values[i]);
-  }
-  out += ",\n      \"shares_bp\": [";
-  for (uint32_t i = 0; i < TIER2_TERMS; ++i) {
-    if (i != 0) { out += ", "; }
-    append_i64v(out, shares[i]);
-  }
-  out += "]\n    }";
+  // Tier 2 per term: its value, its share of t2 and its em power, in CostTerms order.
+  auto const tier2 = [&](char const *key, auto const &v) {
+    out += ",\n      \"";
+    out += key;
+    out += "\": {";
+    for (uint32_t i = 0; i < TIER2_TERMS; ++i) {
+      if (i != 0) { out += ", "; }
+      append_json_string(out, TERMS[i]);
+      out += ": ";
+      append_i64v(out, static_cast<int64_t>(v[i]));
+    }
+    out += '}';
+  };
+  tier2("tier2", values);
+  tier2("shares_bp", shares);
+  tier2("em_power", EM_POWER);
+  out += "\n    }";
 
   out += ",\n    \"profile\": {";
   std::array<int64_t, PROFILE.size()> const prof{ profile_values(p) };
@@ -717,6 +793,12 @@ void append_geometry_json(std::string &out,
     out += ": ";
     append_i64v(out, prof[i]);
   }
+  each_kind_min(p, [&](std::string const &name, int32_t v) {
+    out += ", ";
+    append_json_string(out, name);
+    out += ": ";
+    append_i32v(out, v);
+  });
   out += "},\n    \"placed\": [";
   for (uint32_t i = 0; i < placed.size(); ++i) {
     if (i != 0) { out += ", "; }
@@ -769,6 +851,16 @@ void append_geometry_json(std::string &out,
   for (uint32_t i = 0; i < c.states.size(); ++i) {
     if (i != 0) { out += ", "; }
     string_append_u32(out, state_ruled(s, i));
+  }
+  out += "],\n    \"path_clear\": [";
+  for (uint32_t t = 0; t < c.transitions.size(); ++t) {
+    if (t != 0) { out += ", "; }
+    scav_path_clear const clear{ trans_clear(s, t) };
+    out += '[';
+    append_i32v(out, clear.src);
+    out += ", ";
+    append_i32v(out, clear.dst);
+    out += ']';
   }
   // Each inner loop's [state, face, lo, len] on a face of its state.
   std::vector<OccupiedSpan> occupied;
