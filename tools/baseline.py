@@ -154,8 +154,8 @@ def to_puml(model: dict) -> tuple[str, list[str]]:
     for trans in model["transitions"]:
         if not trans["live"]:
             continue
-        # A non-external transition's label becomes a description line of its source.
-        if trans["kind"] != "external":
+        # An internal or local transition's label becomes a description line of its source.
+        if trans["kind"] in ("internal", "local"):
             if trans["label"]:
                 described.setdefault(trans["src"], []).append(trans["label"])
             continue

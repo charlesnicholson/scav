@@ -185,8 +185,8 @@ SX.register('decorations', function (sec) {
     var stage = SX.el('div'), read = SX.el('div', { class: 'dx-read' });
     f.stage.appendChild(stage); f.stage.appendChild(read);
     var byId = {}; G.states.forEach(function (s) { byId[s.id] = s; });
-    var inner = function (t) { return t.src === t.dst && t.kind !== 'external'; };
-    var outer = function (t) { return t.src === t.dst && t.kind === 'external'; };
+    var inner = function (t) { return t.src === t.dst && (t.kind === 'internal' || t.kind === 'local'); };
+    var outer = function (t) { return t.src === t.dst && !inner(t); };
     var composite = function (s) { return s.submachines.length > 0; };
     var faceOf = function (p, r) { return p[0] === r[0] ? 0 : p[0] === r[0] + r[2] ? 1 : p[1] === r[1] ? 2 : p[1] === r[1] + r[3] ? 3 : -1; };
     // The last --loop pin naming each state: {face, end}.

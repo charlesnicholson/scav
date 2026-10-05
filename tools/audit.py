@@ -176,7 +176,7 @@ def on_exit(pt, doc, state):
 def inner_loop(doc, trans):
     """The state an internal or local self-transition is drawn inside, else None."""
     edge = doc["transitions"][int(trans)]
-    if edge["src"] != edge["dst"] or edge["kind"] == "external":
+    if edge["src"] != edge["dst"] or edge["kind"] not in ("internal", "local"):
         return None
     return edge["src"]
 
@@ -376,7 +376,7 @@ def audit(svg, every, chart, doc, verbose):
         # A composite end holding the other end encloses the label as well.
         under |= {s for s, t in ((src, dst), (dst, src)) if s in enclosing(doc, t)}
         # An internal or local self-transition is drawn inside its state.
-        if src == dst and edge["kind"] != "external":
+        if src == dst and edge["kind"] in ("internal", "local"):
             under.add(src)
         for i in live:
             if i in under:

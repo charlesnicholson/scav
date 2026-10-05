@@ -1,6 +1,7 @@
 // An elevator car: deep history restores the car after a power cut, a junction
-// merges two arrivals, a local transition stays inside the door cycle, and
-// descriptions and internal loops sit in the states they belong to.
+// merges two arrivals, a local transition stays inside the door cycle, external
+// transitions leave and re-enter service, and descriptions and internal loops sit
+// in the states they belong to.
 chart elevator "elevator car controller" {
   state Service "car in normal service" {
     state Parked "doors closed, no calls",
@@ -45,4 +46,6 @@ chart elevator "elevator car controller" {
   trans Inspection -> Service "key off",
   trans Inspection -> Inspection "jog",
   trans Service/Doors/Open -> Inspection "fire service",
+  trans external Service/Travel/Cruise -> Service/Parked "overspeed",
+  trans external Service/Doors -> Service "door fault",
 }
