@@ -54,6 +54,7 @@ uint32_t layout_test_search_memo_mismatches();
 void layout_test_candidate_memo(bool on, bool verify);
 void layout_test_candidate_memo_budget(uint64_t bytes);
 uint64_t layout_test_candidate_memo_deduped();
+uint64_t layout_test_candidate_memo_drawn();
 uint64_t layout_test_candidate_memo_faced();
 uint64_t layout_test_candidate_memo_mismatches();
 std::vector<Cost> const &layout_test_schedule_first();
@@ -278,6 +279,7 @@ struct Candidate {
   // from them again turns no port.
   SearchPins laid;
   scav_rect sized_chart{};  // `sized.chart` before the routes and labels covered it
+  bool retried{ false };    // the spacing retry sized the laid ordering again
 };
 
 bool same_rect(scav_rect const &a, scav_rect const &b) {
@@ -636,6 +638,7 @@ void lay_routes(Candidate &out,
                 CandidateReuse const &with,
                 bool labels) {
   scav_profile const &knobs{ row.knobs };
+  out.retried = false;
   route_transitions(out.routes,
                     c,
                     g,
@@ -660,6 +663,7 @@ void lay_routes(Candidate &out,
                       (k < knobs.spacing_inflation_cap);
        ++k) {
     if (!inflate(wider, knobs.spacing_inflation_increment)) { break; }
+    out.retried = true;
     SizedLayout next_sized;
     std::vector<Diagnostic> spilled;
     if (!size_layout(c,
@@ -724,6 +728,7 @@ void search_candidate(Candidate &out,
   out.inflations = 0;
   out.viable = false;
   out.sized_chart = {};
+  out.retried = false;
   SubmachineOrders const *use{ &orders };
   if (from != nullptr) {
     if (!from->ok) {
@@ -909,6 +914,7 @@ bool test_candidate_memo_verify{ false };
 uint64_t test_candidate_memo_budget{ CandidateMemo::BUDGET };
 Mutex test_candidate_memo_lock;
 uint64_t test_candidate_memo_deduped{ 0 };
+uint64_t test_candidate_memo_drawn{ 0 };
 uint64_t test_candidate_memo_faced{ 0 };
 uint64_t test_candidate_memo_mismatches{ 0 };
 #endif
@@ -967,19 +973,26 @@ struct MoveScratch {
   SubmachineOrders moved;
   Candidate whole, face;
   CandidateScratch keep;
+  std::vector<uint32_t> faces;  // the move's box-end faces
 };
 
 // A search's view of the candidate memo; a null `table` scores every move in full.
 struct MemoAccess {
   CandidateMemo *table{ nullptr };
-  uint32_t row{ 0 };         // the search row's `row_word`
-  uint32_t laid{ INVALID };  // the incumbent's laid arrangement
+  uint32_t row{ 0 };          // the search row's `row_word`
+  uint32_t profile{ 0 };      // the search row's `profile_word`
+  uint32_t drawn{ INVALID };  // the incumbent's drawing
+  // The incumbent's phase-1 ordering, laid ordering and drawing, encoded.
+  CandidateMemo::Blocks const *ordered{ nullptr };
+  CandidateMemo::Blocks const *laid{ nullptr };
+  CandidateMemo::Blocks const *drawing{ nullptr };
 };
 
 // How one scored move met the memo.
 struct MemoUse {
   uint32_t entry{ INVALID };  // its score entry
   bool deduped{ false };      // the score memo answered it
+  bool drawn{ false };        // the answer came by its drawing
   bool labelled{ false };     // the answer is the labelled score
   bool faced{ false };        // the facing memo answered its facing pass
 };
@@ -1001,8 +1014,8 @@ MoveScratch &move_scratch() {
   return s;
 }
 
-// `score_move` through `memo.table`: a laid ordering seen under the same box-end faces
-// takes its stored score, and a phase-1 ordering seen takes its facing pass's turns.
+// `score_move` through `memo.table`: a laid ordering or drawing seen under the same faces
+// takes its stored score, and a phase-1 ordering seen its facing pass's turns.
 Scored score_memoized(Chart const &c,
                       SplitGraph const &g,
                       CostContext const &scoring,
@@ -1023,18 +1036,25 @@ Scored score_memoized(Chart const &c,
   cand.inflations = 0;
   cand.viable = false;
   cand.sized_chart = {};
+  cand.retried = false;
   Scored out;
-  // Looks up the laid ordering numbered `ids` under the move's faces; true when a stored
-  // score answers.
-  auto const recall = [&](uint32_t arranged) {
-    CandidateMemo::Recalled const got{
-      table.find_score(memo.row, arranged, &pins, labels)
-    };
+  table.box_faces(&pins, sc.faces);
+  // Takes `got`'s entry and the score it answers with, if any; true when one does.
+  auto const take = [&](CandidateMemo::Recalled const &got) {
     use.entry = got.entry;
     use.deduped = got.found;
     use.labelled = got.labelled;
     if (got.found) { out = scored_from(got.score); }
     return got.found;
+  };
+  // Looks up drawing `drawn` under the move's faces; true when a stored score answers.
+  auto const recall_drawn = [&](uint32_t drawn) {
+    if (drawn == INVALID) {
+      use.entry = INVALID;
+      return false;
+    }
+    use.drawn = take(table.find_score(drawn, sc.faces, labels));
+    return use.drawn;
   };
   SubmachineOrders const *laid{ nullptr };
   bool sized{ false };
@@ -1043,14 +1063,14 @@ Scored score_memoized(Chart const &c,
       cand = Candidate{};
       return out;
     }
-    if ((memo.laid != INVALID) && recall(memo.laid)) { return out; }
+    if (recall_drawn(memo.drawn)) { return out; }
     cand.sized = from->sized;
     cand.laid = pins;
     turn_pins(cand.laid, from->flips);
     laid = &from->laid;
   } else {
     order_submachines(sc.moved, c, g, s, objective, 1, pins);
-    uint32_t const arranged{ table.arrangement(sc.moved) };
+    uint32_t const arranged{ table.arrangement(sc.moved, memo.ordered) };
     Facing &flips{ sc.keep.flips };
     FacingFound const found{ (arranged != INVALID)
                                  ? table.find_facing(memo.row, arranged, sc.moved, flips)
@@ -1080,10 +1100,18 @@ Scored score_memoized(Chart const &c,
       if (!ok) { return out; }
       sized = true;
     }
+    uint32_t key{ INVALID };  // the laid ordering's key
+    // Looks up the laid ordering under the move's faces; true when its linked score
+    // answers.
     auto const recall_laid = [&]() {
-      uint32_t const at{ (laid == &sc.moved) ? arranged : table.arrangement(*laid) };
+      uint32_t const at{ (laid == &sc.moved) ? arranged
+                                             : table.arrangement(*laid, memo.laid) };
+      key = INVALID;
       use.entry = INVALID;
-      return (arranged != INVALID) && (at != INVALID) && recall(at);
+      if ((arranged == INVALID) || (at == INVALID)) { return false; }
+      CandidateMemo::Linked const linked{ table.find_ordering(memo.row, at, sc.faces) };
+      key = linked.key;
+      return take(table.recall(linked.entry, labels));
     };
     if (recall_laid()) { return out; }
     // A turned ordering that does not size leaves the phase-1 ordering laid.
@@ -1117,10 +1145,19 @@ Scored score_memoized(Chart const &c,
       cand.laid = SearchPins{};
       return out;
     }
+    bool const drawn{ recall_drawn(
+        table.drawing(*laid, cand.sized, memo.profile, memo.drawing)) };
+    table.link(key, use.entry);
+    if (drawn) { return out; }
   }
   lay_routes(cand, c, g, *laid, s, row, router, 1, &pins, { .reuse = reuse }, labels);
   out = scored_of(c, g, scoring, s, objective, cand, labels);
-  table.set_score(use.entry, labels, memo_score(out));
+  if (cand.retried) {
+    table.set_retried(use.entry);
+    use.entry = INVALID;
+  } else {
+    table.set_score(use.entry, labels, memo_score(out));
+  }
   if (routed != nullptr) { *routed = { .cand = &cand }; }
   return out;
 }
@@ -1191,6 +1228,7 @@ Scored score_move(Chart const &c,
     {
       ScopedLock const held{ test_candidate_memo_lock };
       test_candidate_memo_deduped += use.deduped ? 1U : 0U;
+      test_candidate_memo_drawn += use.drawn ? 1U : 0U;
       test_candidate_memo_faced += use.faced ? 1U : 0U;
     }
     if (test_candidate_memo_verify && (use.deduped || use.faced)) {
@@ -1486,16 +1524,35 @@ Improved run_search(Chart const &c,
   if ((memo != nullptr) && (trace_sink() == nullptr)) {
     access.table = memo;
     access.row = memo->row_word(row);
+    access.profile = memo->profile_word(row.knobs);
   }
+  // The incumbent's encodings, which each candidate's frames are numbered against.
+  CandidateMemo::Blocks ordered_blocks;
+  CandidateMemo::Blocks laid_blocks;
+  CandidateMemo::Blocks drawn_blocks;
+  if (access.table != nullptr) {
+    access.ordered = &ordered_blocks;
+    access.laid = &laid_blocks;
+    access.drawing = &drawn_blocks;
+  }
+  std::vector<uint32_t> held_faces;
   auto const remember_incumbent = [&]() {
-    access.laid = INVALID;
+    access.drawn = INVALID;
     if ((access.table == nullptr) || !incumbent.ok) { return; }
-    access.laid = access.table->arrangement(incumbent.laid);
-    if ((access.laid != INVALID) && (out.best.inflations == 0)) {
-      CandidateMemo::Recalled const at{
-        access.table->find_score(access.row, access.laid, &held, true)
-      };
-      access.table->set_score(at.entry, true, { .cost = out.cost, .viable = true });
+    CandidateMemo &table{ *access.table };
+    (void)table.arrangement(here, nullptr, &ordered_blocks);
+    uint32_t const arranged{ table.arrangement(incumbent.laid, nullptr, &laid_blocks) };
+    access.drawn = table.drawing(incumbent.laid,
+                                 incumbent.sized,
+                                 access.profile,
+                                 nullptr,
+                                 &drawn_blocks);
+    if ((access.drawn == INVALID) || out.best.retried) { return; }
+    table.box_faces(&held, held_faces);
+    CandidateMemo::Recalled const at{ table.find_score(access.drawn, held_faces, true) };
+    table.set_score(at.entry, true, { .cost = out.cost, .viable = true });
+    if (arranged != INVALID) {
+      table.link(table.find_ordering(access.row, arranged, held_faces).key, at.entry);
     }
   };
   remember_incumbent();
@@ -1833,6 +1890,7 @@ Improved run_search(Chart const &c,
       auto const kind{ static_cast<uint32_t>(round[i].kind) };
       ++counted.offered[kind];
       counted.deduped[kind] += uses[i].deduped ? 1U : 0U;
+      counted.drawn += uses[i].drawn ? 1U : 0U;
       counted.faced += uses[i].faced ? 1U : 0U;
     }
 
@@ -2901,12 +2959,17 @@ void layout_test_candidate_memo(bool on, bool verify) {
   test_candidate_memo_verify = verify;
   ScopedLock const held{ test_candidate_memo_lock };
   test_candidate_memo_deduped = 0;
+  test_candidate_memo_drawn = 0;
   test_candidate_memo_faced = 0;
   test_candidate_memo_mismatches = 0;
 }
 uint64_t layout_test_candidate_memo_deduped() {
   ScopedLock const held{ test_candidate_memo_lock };
   return test_candidate_memo_deduped;
+}
+uint64_t layout_test_candidate_memo_drawn() {
+  ScopedLock const held{ test_candidate_memo_lock };
+  return test_candidate_memo_drawn;
 }
 uint64_t layout_test_candidate_memo_faced() {
   ScopedLock const held{ test_candidate_memo_lock };

@@ -2,6 +2,7 @@
 // candidate memo, unscored no-op faces, culled moves, and face moves scored from the
 // incumbent's prefix.
 
+#include "layout/candidate_memo.h"
 #include "layout/pack.h"
 #include "layout/size.h"
 #include "layout/trace.h"
@@ -48,6 +49,7 @@ uint32_t layout_test_search_memo_mismatches();
 void layout_test_candidate_memo(bool on, bool verify);
 void layout_test_candidate_memo_budget(uint64_t bytes);
 uint64_t layout_test_candidate_memo_deduped();
+uint64_t layout_test_candidate_memo_drawn();
 uint64_t layout_test_candidate_memo_faced();
 uint64_t layout_test_candidate_memo_mismatches();
 std::vector<Cost> const &layout_test_schedule_first();
@@ -541,10 +543,12 @@ TEST_CASE("search: the candidate memo lays out what scoring every move in full d
 TEST_CASE(
     "search: every move the candidate memo answers scores as that move laid out "
     "afresh") {
-  // Each answer, taken or not, from the score memo or the facing memo, is checked.
+  // Each answer, taken or not, by laid ordering, by drawing or from the facing memo, is
+  // checked.
   CandidateGuard const guard;
   constexpr std::array<char const *, 3> CHARTS{ "brew.scav", "dock.scav", "estop.scav" };
   uint64_t deduped{ 0 };
+  uint64_t drawn{ 0 };
   uint64_t faced{ 0 };
   for (bool const labelled : { false, true }) {
     for (char const *name : CHARTS) {
@@ -553,11 +557,13 @@ TEST_CASE(
       layout_test_candidate_memo(true, true);
       REQUIRE(lay_out(name, labelled).ok);
       deduped += layout_test_candidate_memo_deduped();
+      drawn += layout_test_candidate_memo_drawn();
       faced += layout_test_candidate_memo_faced();
       CHECK(layout_test_candidate_memo_mismatches() == 0);
     }
   }
-  CHECK(deduped > 0);
+  CHECK(drawn > 0);
+  CHECK(deduped > drawn);
   CHECK(faced > 0);
 }
 
@@ -593,7 +599,7 @@ TEST_CASE(
     Budget() = default;
     Budget(Budget const &) = delete;
     Budget &operator=(Budget const &) = delete;
-    ~Budget() { layout_test_candidate_memo_budget(uint64_t{ 64 } << 20U); }
+    ~Budget() { layout_test_candidate_memo_budget(CandidateMemo::BUDGET); }
   } const budget;
   CandidateGuard const guard;
   constexpr std::array<char const *, 2> CHARTS{ "brew.scav", "dock.scav" };
@@ -602,7 +608,7 @@ TEST_CASE(
     for (char const *name : CHARTS) {
       CAPTURE(labelled);
       CAPTURE(name);
-      layout_test_candidate_memo_budget(uint64_t{ 64 } << 20U);
+      layout_test_candidate_memo_budget(CandidateMemo::BUDGET);
       layout_test_candidate_memo(false, false);
       Laid const without{ lay_out(name, labelled) };
       layout_test_candidate_memo_budget(4096);
@@ -617,6 +623,51 @@ TEST_CASE(
     }
   }
   CHECK(deduped > 0);
+}
+
+namespace {
+
+// `name` laid out on one thread at `readable` with `rows` Level 2 rows: its search counts.
+SearchStats counted(char const *name, uint32_t rows) {
+  std::string path{ SCAV_TEST_DATA_DIR "/charts/" };
+  path += name;
+  Loader loader;
+  Chart c;
+  std::vector<Diagnostic> diags;
+  std::string failed;
+  REQUIRE(load_file(path.c_str(), loader, c, diags, failed));
+  scav_profile p{ readable() };
+  p.portfolio_m = static_cast<int32_t>(rows);
+  scav_layout_opts const opts{ .profile = p, .router = 0, .threads = 1 };
+  std::vector<scav_placed> placed;
+  SearchStats out;
+  search_stats_set(&out);
+  bool const laid{ layout_run(c, {}, opts, placed, diags) };
+  search_stats_set(nullptr);
+  REQUIRE(laid);
+  return out;
+}
+
+}  // namespace
+
+TEST_CASE("search: two rows that draw every candidate alike lay each out once") {
+  // Rows 0 and 1 differ only in `trybox`, and no frame of these charts packs by box. On
+  // one thread row 1's searches follow row 0's, and the memo answers each by its drawing.
+  CandidateGuard const guard;
+  layout_test_candidate_memo(true, true);
+  constexpr std::array<char const *, 3> CHARTS{ "gauntlet/above.scav",
+                                                "gauntlet/long.scav",
+                                                "gauntlet/ring.scav" };
+  for (char const *name : CHARTS) {
+    CAPTURE(name);
+    SearchStats const one{ counted(name, 1) };
+    SearchStats const two{ counted(name, 2) };
+    CHECK(total(two.offered) > total(one.offered));
+    CHECK((total(two.offered) - total(two.deduped)) ==
+          (total(one.offered) - total(one.deduped)));
+    CHECK(two.drawn > one.drawn);
+  }
+  CHECK(layout_test_candidate_memo_mismatches() == 0);
 }
 
 TEST_CASE(
@@ -650,6 +701,9 @@ TEST_CASE(
   CHECK(total(on.offered) > 0);
   CHECK(total(on.deduped) > 0);
   CHECK(total(on.taken) > 0);
+  CHECK(on.drawn > 0);
+  CHECK(on.drawn <= total(on.deduped));
+  CHECK(off.drawn == 0);
   CHECK(on.faced > 0);
   CHECK(off.faced == 0);
   CHECK(on.searches > 0);

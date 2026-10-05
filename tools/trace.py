@@ -139,12 +139,12 @@ def search_stats(scav, chart, layout):
 
 
 def print_stats(scav, charts, layout):
-    """One row per chart and scale: moves culled, offered, answered by the memo, laid out
-    in full, taken; searches; the memo's peak; the layout's CPU. Then the same split by
-    move kind."""
+    """One row per chart and scale: moves culled, offered, answered by the memo and of
+    those by drawing, laid out in full, taken; searches; the memo's peak; the layout's CPU.
+    Then the same split by move kind."""
     scales = [[]] if "--no-text" in layout else [[], ["--no-text"]]
     kinds = {m: [0, 0, 0, 0] for m in MOVES}
-    print(f"{'chart':14} {'scale':6} {'culled':>8} {'offered':>9} {'deduped':>9} "
+    print(f"{'chart':14} {'scale':6} {'culled':>8} {'offered':>9} {'deduped':>9} {'drawn':>9} "
           f"{'scored':>9} {'taken':>6} {'searches':>8} {'memo MB':>8} {'cpu s':>8}")
     for chart in charts:
         for scale in scales:
@@ -160,7 +160,7 @@ def print_stats(scav, charts, layout):
                 kinds[m][2] += v["deduped"]
                 kinds[m][3] += v["taken"]
             print(f"{Path(chart).stem:14} {'notext' if scale else 'text':6} {culled:8} "
-                  f"{offered:9} {deduped:9} {offered - deduped:9} {taken:6} "
+                  f"{offered:9} {deduped:9} {s['drawn']:9} {offered - deduped:9} {taken:6} "
                   f"{s['searches']:8} {s['memo_bytes'] / 1e6:8.1f} {st['cpu_ms'] / 1e3:8.2f}")
     print()
     print(f"{'move':14} {'culled':>8} {'offered':>9} {'deduped':>9} {'scored':>9} "

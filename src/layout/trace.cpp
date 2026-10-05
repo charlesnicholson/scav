@@ -206,6 +206,7 @@ void search_stats_add(SearchStats const &add) {
     to->taken[k] += add.taken[k];
     to->culled[k] += add.culled[k];
   }
+  to->drawn += add.drawn;
   to->faced += add.faced;
   to->searches += add.searches;
   to->recalled += add.recalled;
@@ -217,6 +218,7 @@ void search_stats_to_json(SearchStats const &st, std::vector<char> &out) {
   j.raw("{\"searches\":");
   j.num(static_cast<int64_t>(st.searches));
   j.kv("recalled", static_cast<int64_t>(st.recalled));
+  j.kv("drawn", static_cast<int64_t>(st.drawn));
   j.kv("faced", static_cast<int64_t>(st.faced));
   j.kv("memo_bytes", static_cast<int64_t>(st.memo_bytes));
   j.raw(",\"moves\":{");

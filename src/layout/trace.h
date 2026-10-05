@@ -278,6 +278,7 @@ inline constexpr uint32_t TRACE_MOVES{ 8 };  // `TRACE_MOVE_*` values
 // those taken, and those culled unoffered as changing nothing.
 struct SearchStats {
   std::array<uint64_t, TRACE_MOVES> offered{}, deduped{}, taken{}, culled{};
+  uint64_t drawn{ 0 };       // moves the memo answered by their drawing
   uint64_t faced{ 0 };       // moves whose facing pass the memo answered
   uint64_t searches{ 0 };    // Level 1 searches run
   uint64_t recalled{ 0 };    // Level 1 searches the search memo answered

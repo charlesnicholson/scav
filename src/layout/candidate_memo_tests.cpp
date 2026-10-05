@@ -3,6 +3,7 @@
 #include "layout/candidate_memo.h"
 #include "layout/decompose.h"
 #include "layout/order.h"
+#include "layout/route.h"
 #include "layout/size.h"
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
@@ -45,6 +46,13 @@ struct Fixture {
     return order_submachines(c, g, s, p, 1, pins);
   }
 
+  [[nodiscard]] SizedLayout size(SubmachineOrders const &o) const {
+    SizedLayout z;
+    std::vector<Diagnostic> diags;
+    REQUIRE(size_layout(c, g, o, s, p, z, diags));
+    return z;
+  }
+
   // A rank pin that changes the ordering.
   [[nodiscard]] SearchPins moved_rank() const {
     SubmachineOrders const plain{ order() };
@@ -62,6 +70,29 @@ struct Fixture {
       }
     }
     FAIL("no rank pin moves kiln");
+    return {};
+  }
+
+  // A rank pin under which segment `seg` chains through two bends or more.
+  [[nodiscard]] SearchPins chained_rank(uint32_t &seg) const {
+    SubmachineOrders const plain{ order() };
+    std::vector<uint32_t> reversed;
+    std::vector<std::vector<uint32_t>> bends;
+    for (uint32_t st = 0; st < c.states.size(); ++st) {
+      if ((c.states[st].live == 0) || (plain.state_node[st] == INVALID)) { continue; }
+      for (uint32_t r = 0; r < plain.sub_ranks[c.states[st].parent.v]; ++r) {
+        SearchPins pins;
+        pins.ranks.push_back({ .state = StateId{ st }, .rank = r });
+        segment_bends(order(pins),
+                      static_cast<uint32_t>(g.segments.size()),
+                      reversed,
+                      bends);
+        for (seg = 0; seg < bends.size(); ++seg) {
+          if (bends[seg].size() >= 2) { return pins; }
+        }
+      }
+    }
+    FAIL("no rank pin chains a kiln segment through two bends");
     return {};
   }
 
@@ -121,10 +152,21 @@ TEST_CASE(
   REQUIRE(arranged != INVALID);
   CHECK(memo.arrangement(moved) != arranged);
   CHECK(memo.arrangement(plain) == arranged);
+
+  // Numbered against another ordering's encoding, a frame takes the number it would take
+  // anyway.
+  CandidateMemo::Blocks encoded;
+  REQUIRE(memo.frame_ids(plain, fresh, nullptr, &encoded));
+  CHECK(fresh == a);
+  CHECK(encoded.ids == a);
+  std::vector<uint32_t> like;
+  REQUIRE(memo.frame_ids(moved, like, &encoded));
+  CHECK(like == b);
+  CHECK(memo.arrangement(moved, &encoded) == memo.arrangement(moved));
 }
 
 TEST_CASE(
-    "candidate memo: a score entry is the row, the laid arrangement and the box-end "
+    "candidate memo: an ordering key is the row, the laid arrangement and the box-end "
     "faces") {
   Fixture const f;
   CandidateMemo memo{ f.c, f.g };
@@ -142,37 +184,158 @@ TEST_CASE(
   EndPin boxed;
   EndPin ported;
   f.ends(boxed, ported);
-  auto const entry = [&](uint32_t r, uint32_t arranged, std::vector<EndPin> const &ends) {
+  auto const key = [&](uint32_t r, uint32_t arranged, std::vector<EndPin> const &ends) {
     SearchPins pins;
     pins.ends = ends;
-    return memo.find_score(r, arranged, &pins, true).entry;
+    std::vector<uint32_t> faces;
+    memo.box_faces(&pins, faces);
+    return memo.find_ordering(r, arranged, faces).key;
   };
-  uint32_t const base{ entry(row, plain, {}) };
+  uint32_t const base{ key(row, plain, {}) };
   REQUIRE(base != INVALID);
-  CHECK(entry(row, plain, {}) == base);
-  CHECK(entry(row2, plain, {}) != base);
-  CHECK(entry(row, moved, {}) != base);
+  CHECK(key(row, plain, {}) == base);
+  CHECK(key(row2, plain, {}) != base);
+  CHECK(key(row, moved, {}) != base);
   // The router reads no pin at a port end.
-  CHECK(entry(row, plain, { ported }) == base);
-  uint32_t const faced{ entry(row, plain, { boxed }) };
+  CHECK(key(row, plain, { ported }) == base);
+  uint32_t const faced{ key(row, plain, { boxed }) };
   CHECK(faced != base);
   // The last pin naming an end decides it, and pins naming different ends commute.
   EndPin other_face{ boxed };
   other_face.face = 3;
-  CHECK(entry(row, plain, { other_face, boxed }) == faced);
-  CHECK(entry(row, plain, { boxed, other_face }) != faced);
+  CHECK(key(row, plain, { other_face, boxed }) == faced);
+  CHECK(key(row, plain, { boxed, other_face }) != faced);
   EndPin arrival{ boxed };
   arrival.end = 1;
-  CHECK(entry(row, plain, { boxed, arrival }) == entry(row, plain, { arrival, boxed }));
-  CHECK(entry(row, plain, { boxed, arrival }) != faced);
+  CHECK(key(row, plain, { boxed, arrival }) == key(row, plain, { arrival, boxed }));
+  CHECK(key(row, plain, { boxed, arrival }) != faced);
+}
+
+TEST_CASE(
+    "candidate memo: a drawing is what routing reads of the sizing and the ordering") {
+  Fixture const f;
+  CandidateMemo memo{ f.c, f.g };
+  SubmachineOrders const plain{ f.order() };
+  SizedLayout const z{ f.size(plain) };
+  uint32_t const profile{ memo.profile_word(f.p) };
+  scav_profile boxing{ f.p };
+  boxing.trybox ^= 1;
+  CHECK(memo.profile_word(boxing) == profile);  // only sizing reads `trybox`
+  scav_profile wider{ f.p };
+  wider.node_sep += 1;
+  uint32_t const wider_word{ memo.profile_word(wider) };
+  CHECK(wider_word != profile);
+  uint32_t const drawn{ memo.drawing(plain, z, profile) };
+  REQUIRE(drawn != INVALID);
+  CHECK(memo.drawing(plain, z, profile) == drawn);
+  CHECK(memo.drawing(plain, z, wider_word) != drawn);
+  CandidateMemo::Blocks kept;
+  CHECK(memo.drawing(plain, z, profile, nullptr, &kept) == drawn);
+
+  // The drawing of `plain` and `z` after `edit`, alike numbered against `kept` or not.
+  auto const after = [&](auto const &edit) {
+    SubmachineOrders o{ plain };
+    SizedLayout w{ z };
+    edit(o, w);
+    uint32_t const out{ memo.drawing(o, w, profile, &kept) };
+    CHECK(memo.drawing(o, w, profile) == out);
+    return out;
+  };
+  // A nested frame and its first state, a state node, and a segment with a boundary node.
+  uint32_t nested{ INVALID };
+  for (uint32_t m = 0; (m < f.c.submachines.size()) && (nested == INVALID); ++m) {
+    if (f.c.submachines[m].owner.v != INVALID) { nested = m; }
+  }
+  REQUIRE(nested != INVALID);
+  uint32_t const kid{ f.c.state_ids[f.c.submachines[nested].children.off].v };
+  uint32_t state_node{ INVALID };
+  for (uint32_t n = 0; (n < plain.nodes.size()) && (state_node == INVALID); ++n) {
+    if (plain.nodes[n].kind == OrderKind::State) { state_node = n; }
+  }
+  uint32_t noded{ INVALID };
+  for (uint32_t seg = 0; (seg < f.g.segments.size()) && (noded == INVALID); ++seg) {
+    if (plain.seg_node[seg] != INVALID) { noded = seg; }
+  }
+  REQUIRE(state_node != INVALID);
+  REQUIRE(noded != INVALID);
+
+  // What routing does not read leaves the drawing alone: fold flags, a state node's
+  // point, and the ordering's rank gaps.
+  CHECK(after([](SubmachineOrders &, SizedLayout &w) {
+          for (uint8_t &fold : w.folded) { fold ^= 1U; }
+        }) == drawn);
+  CHECK(after([&](SubmachineOrders &, SizedLayout &w) { ++w.node[state_node].x; }) ==
+        drawn);
+  CHECK(after([](SubmachineOrders &o, SizedLayout &) {
+          for (int32_t &gap : o.gaps) { ++gap; }
+        }) == drawn);
+
+  // Each input routing, labels or cost read moves it.
+  CHECK(after([](SubmachineOrders &, SizedLayout &w) { ++w.chart.w; }) != drawn);
+  CHECK(after([&](SubmachineOrders &, SizedLayout &w) { ++w.state[kid].y; }) != drawn);
+  CHECK(after([&](SubmachineOrders &, SizedLayout &w) { ++w.before[kid].h; }) != drawn);
+  CHECK(after([&](SubmachineOrders &, SizedLayout &w) { ++w.after[kid].h; }) != drawn);
+  CHECK(after([&](SubmachineOrders &, SizedLayout &w) { ++w.lead[kid].w; }) != drawn);
+  CHECK(after([&](SubmachineOrders &, SizedLayout &w) { ++w.trail[kid].w; }) != drawn);
+  CHECK(after([&](SubmachineOrders &, SizedLayout &w) { ++w.loop[kid].x; }) != drawn);
+  CHECK(after([&](SubmachineOrders &, SizedLayout &w) { w.loop_place[kid] ^= 1U; }) !=
+        drawn);
+  CHECK(after([&](SubmachineOrders &, SizedLayout &w) { ++w.sub[nested].x; }) != drawn);
+  CHECK(after([&](SubmachineOrders &, SizedLayout &w) { ++w.sub[nested].h; }) != drawn);
+  CHECK(after([&](SubmachineOrders &, SizedLayout &w) { w.lean[noded] ^= 1U; }) != drawn);
+  CHECK(after([&](SubmachineOrders &o, SizedLayout &w) {
+          ++w.node[o.seg_node[noded]].y;
+        }) != drawn);
+  CHECK(after([&](SubmachineOrders &o, SizedLayout &) { o.seg_node[noded] = INVALID; }) !=
+        drawn);
+  CHECK(after([&](SubmachineOrders &o, SizedLayout &) { o.seg_side[noded] ^= 1U; }) !=
+        drawn);
+  CHECK(after([&](SubmachineOrders &o, SizedLayout &) { o.seg_port[noded] = INVALID; }) !=
+        drawn);
+  // A frame moved whole, with its states and every node, is another drawing.
+  auto const shift = [&](SubmachineOrders &, SizedLayout &w) {
+    ++w.sub[nested].x;
+    Span const kids{ f.c.submachines[nested].children };
+    for (uint32_t k = 0; k < kids.len; ++k) { ++w.state[f.c.state_ids[kids.off + k].v].x; }
+    for (scav_point &n : w.node) { ++n.x; }
+  };
+  CHECK(after(shift) != drawn);
+
+  // A bend's point moves the drawing, and so does a reversed edge, which turns its chain
+  // of bends end for end.
+  uint32_t chained{ INVALID };
+  SubmachineOrders const longer{ f.order(f.chained_rank(chained)) };
+  REQUIRE(chained < f.g.segments.size());
+  SizedLayout const lz{ f.size(longer) };
+  uint32_t const long_drawn{ memo.drawing(longer, lz, profile) };
+  std::vector<uint32_t> reversed;
+  std::vector<std::vector<uint32_t>> bends;
+  segment_bends(longer, static_cast<uint32_t>(f.g.segments.size()), reversed, bends);
+  REQUIRE(bends[chained].size() >= 2);
+  auto const bent = [&](auto const &edit) {
+    SubmachineOrders o{ longer };
+    SizedLayout w{ lz };
+    edit(o, w);
+    return memo.drawing(o, w, profile);
+  };
+  CHECK(bent([&](SubmachineOrders &, SizedLayout &w) { ++w.node[bends[chained][0]].x; }) !=
+        long_drawn);
+  auto const turned = [&](SubmachineOrders &o, SizedLayout &) {
+    for (OrderEdge &e : o.edges) {
+      if (e.segment == chained) { e.reversed ^= 1U; }
+    }
+  };
+  CHECK(bent(turned) != long_drawn);
 }
 
 TEST_CASE("candidate memo: a score comes back as stored, each of its two kinds apart") {
   Fixture const f;
   CandidateMemo memo{ f.c, f.g };
-  uint32_t const plain{ memo.arrangement(f.order()) };
-  uint32_t const row{ memo.row_word(f.row) };
-  CandidateMemo::Recalled const first{ memo.find_score(row, plain, nullptr, false) };
+  SubmachineOrders const plain{ f.order() };
+  uint32_t const drawn{ memo.drawing(plain, f.size(plain), memo.profile_word(f.p)) };
+  REQUIRE(drawn != INVALID);
+  std::vector<uint32_t> const none;
+  CandidateMemo::Recalled const first{ memo.find_score(drawn, none, false) };
   REQUIRE(first.entry != INVALID);
   CHECK_FALSE(first.found);
   uint32_t const e{ first.entry };
@@ -192,24 +355,29 @@ TEST_CASE("candidate memo: a score comes back as stored, each of its two kinds a
   CHECK(got.cost.t0_violations == 2);
   CHECK(got.cost.t2 == 5);
   // A labelled request waits for the labelled score; a bound request takes the bound.
-  CHECK_FALSE(memo.find_score(row, plain, nullptr, true).found);
-  CandidateMemo::Recalled const as_bound{ memo.find_score(row, plain, nullptr, false) };
+  CHECK_FALSE(memo.find_score(drawn, none, true).found);
+  CandidateMemo::Recalled const as_bound{ memo.find_score(drawn, none, false) };
   CHECK(as_bound.found);
   CHECK_FALSE(as_bound.labelled);
   CHECK(as_bound.entry == e);
 
   memo.set_score(e, true, labelled);
-  CandidateMemo::Recalled const as_labelled{ memo.find_score(row, plain, nullptr, true) };
+  CandidateMemo::Recalled const as_labelled{ memo.find_score(drawn, none, true) };
   REQUIRE(as_labelled.found);
   CHECK(as_labelled.labelled);
   CHECK(as_labelled.score.cost.t2 == labelled.cost.t2);
   CHECK(as_labelled.score.cost.t0_violations == 0);
+  CandidateMemo::Recalled const by_entry{ memo.recall(e, true) };
+  CHECK(by_entry.found);
+  CHECK(by_entry.entry == e);
+  CHECK(by_entry.score.cost.t2 == labelled.cost.t2);
 
   // A bound request with only the labelled score set takes the labelled one.
-  uint32_t const moved{ memo.arrangement(f.order(f.moved_rank())) };
-  uint32_t const e2{ memo.find_score(row, moved, nullptr, true).entry };
+  std::vector<uint32_t> const faced{ 1U };
+  uint32_t const e2{ memo.find_score(drawn, faced, true).entry };
+  CHECK(e2 != e);
   memo.set_score(e2, true, { .viable = true, .inflated = true });
-  CandidateMemo::Recalled const inflated{ memo.find_score(row, moved, nullptr, false) };
+  CandidateMemo::Recalled const inflated{ memo.find_score(drawn, faced, false) };
   REQUIRE(inflated.found);
   CHECK(inflated.labelled);
   CHECK(inflated.score.viable);
@@ -218,6 +386,58 @@ TEST_CASE("candidate memo: a score comes back as stored, each of its two kinds a
   REQUIRE(memo.score(e2, false, got));
   CHECK_FALSE(got.viable);
   CHECK(memo.peak_bytes() > 0);
+}
+
+TEST_CASE("candidate memo: an ordering key reads the score entry linked to it") {
+  Fixture const f;
+  CandidateMemo memo{ f.c, f.g };
+  SubmachineOrders const plain{ f.order() };
+  uint32_t const row{ memo.row_word(f.row) };
+  uint32_t const arranged{ memo.arrangement(plain) };
+  uint32_t const drawn{ memo.drawing(plain, f.size(plain), memo.profile_word(f.p)) };
+  REQUIRE(arranged != INVALID);
+  REQUIRE(drawn != INVALID);
+  std::vector<uint32_t> const none;
+  CandidateMemo::Linked const fresh{ memo.find_ordering(row, arranged, none) };
+  REQUIRE(fresh.key != INVALID);
+  CHECK(fresh.entry == INVALID);
+  CHECK_FALSE(memo.recall(fresh.entry, true).found);
+  uint32_t const e{ memo.find_score(drawn, none, true).entry };
+  memo.link(fresh.key, e);
+  CandidateMemo::Linked const again{ memo.find_ordering(row, arranged, none) };
+  CHECK(again.key == fresh.key);
+  CHECK(again.entry == e);
+  memo.set_score(
+      e,
+      true,
+      { .cost = { .t0_violations = 1, .t1_hints = 0, .t2 = 3 }, .viable = true });
+  CandidateMemo::Recalled const got{ memo.recall(again.entry, true) };
+  REQUIRE(got.found);
+  CHECK(got.score.cost.t2 == 3);
+}
+
+TEST_CASE("candidate memo: a retried entry never answers and takes no score") {
+  Fixture const f;
+  CandidateMemo memo{ f.c, f.g };
+  SubmachineOrders const plain{ f.order() };
+  uint32_t const drawn{ memo.drawing(plain, f.size(plain), memo.profile_word(f.p)) };
+  REQUIRE(drawn != INVALID);
+  std::vector<uint32_t> const none;
+  uint32_t const e{ memo.find_score(drawn, none, true).entry };
+  REQUIRE(e != INVALID);
+  MemoScore const s{ .cost = { .t0_violations = 0, .t1_hints = 0, .t2 = 4 },
+                     .viable = true };
+  memo.set_score(e, true, s);
+  REQUIRE(memo.find_score(drawn, none, true).found);
+  memo.set_retried(e);
+  CandidateMemo::Recalled const got{ memo.find_score(drawn, none, true) };
+  CHECK_FALSE(got.found);
+  CHECK(got.entry == INVALID);
+  CHECK_FALSE(memo.recall(e, false).found);
+  memo.set_score(e, true, s);
+  MemoScore read;
+  CHECK_FALSE(memo.score(e, true, read));
+  CHECK_FALSE(memo.find_score(drawn, none, true).found);
 }
 
 TEST_CASE(
@@ -267,9 +487,11 @@ TEST_CASE("candidate memo: past its budget it empties, and issues no number twic
   // A budget one entry fills: every insert past the first empties the tables.
   CandidateMemo memo{ f.c, f.g, 1 };
   uint32_t const row{ memo.row_word(f.row) };
-  uint32_t const plain{ memo.arrangement(f.order()) };
-  REQUIRE(plain != INVALID);
-  uint32_t const e{ memo.find_score(row, plain, nullptr, true).entry };
+  SubmachineOrders const plain{ f.order() };
+  uint32_t const drawn{ memo.drawing(plain, f.size(plain), memo.profile_word(f.p)) };
+  REQUIRE(drawn != INVALID);
+  std::vector<uint32_t> const none;
+  uint32_t const e{ memo.find_score(drawn, none, true).entry };
   REQUIRE(e != INVALID);
   memo.set_score(
       e,
@@ -278,13 +500,19 @@ TEST_CASE("candidate memo: past its budget it empties, and issues no number twic
   // Emptied away, the entry reads unset and takes no score.
   MemoScore got;
   CHECK_FALSE(memo.score(e, true, got));
+  CHECK_FALSE(memo.recall(e, true).found);
   // The same key comes back under a new number.
-  uint32_t const again{ memo.find_score(row, plain, nullptr, true).entry };
+  uint32_t const again{ memo.find_score(drawn, none, true).entry };
   REQUIRE(again != INVALID);
   CHECK(again != e);
-  CHECK_FALSE(memo.find_score(row, plain, nullptr, true).found);
+  CHECK_FALSE(memo.find_score(drawn, none, true).found);
+  // A link to an entry since emptied away reads nothing.
+  uint32_t const plain_at{ memo.arrangement(plain) };
+  REQUIRE(plain_at != INVALID);
+  memo.link(memo.find_ordering(row, plain_at, none).key, again);
+  CHECK_FALSE(memo.recall(memo.find_ordering(row, plain_at, none).entry, true).found);
   uint32_t const moved{ memo.arrangement(f.order(f.moved_rank())) };
   REQUIRE(moved != INVALID);
-  CHECK(moved != plain);
+  CHECK(moved != plain_at);
   CHECK(memo.peak_bytes() > 0);
 }

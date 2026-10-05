@@ -178,11 +178,11 @@ uint32_t KeyIndex::find(uint32_t const *key, uint32_t len, uint64_t hash) const 
   return (entry == 0) ? INVALID : (entry - 1);
 }
 
-// Doubles the slots (at least 1024) and reinserts every slot at its check word.
+// Doubles the slots (at least 64) and reinserts every slot at its check word.
 void KeyIndex::grow() {
   std::vector<Slot> old;
   old.swap(slots);
-  vec_assign(slots, imax(old.size() * 2, size_t{ 1024 }), Slot{});
+  vec_assign(slots, imax(old.size() * 2, size_t{ 64 }), Slot{});
   size_t const mask{ slots.size() - 1 };
   for (Slot const &slot : old) {
     if (slot.entry == 0) { continue; }

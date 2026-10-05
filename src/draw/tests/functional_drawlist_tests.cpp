@@ -28,6 +28,9 @@ void layout_test_label_bound(bool on, bool verify);
 uint64_t layout_test_label_bound_skipped();
 uint64_t layout_test_label_bound_labelled();
 uint64_t layout_test_label_bound_mismatches();
+void layout_test_candidate_memo(bool on, bool verify);
+uint64_t layout_test_candidate_memo_drawn();
+uint64_t layout_test_candidate_memo_mismatches();
 
 }  // namespace scav
 
@@ -160,6 +163,25 @@ TEST_CASE(
     CHECK(layout_test_label_bound_skipped() > 0);
     CHECK(layout_test_label_bound_labelled() > 0);
     CHECK(layout_test_label_bound_mismatches() == 0);
+  }
+}
+
+TEST_CASE(
+    "drawlist corpus: under real text every move the candidate memo answers scores as "
+    "laid out afresh") {
+  struct Restore {
+    Restore() = default;
+    Restore(Restore const &) = delete;
+    Restore &operator=(Restore const &) = delete;
+    ~Restore() { layout_test_candidate_memo(true, false); }
+  } const restore;
+  Metrics const m{ bundled() };
+  for (char const *name : { "brew.scav", "dock.scav", "estop.scav" }) {
+    CAPTURE(name);
+    layout_test_candidate_memo(true, true);
+    (void)run_pipeline(name, m, readable(), false);
+    CHECK(layout_test_candidate_memo_drawn() > 0);
+    CHECK(layout_test_candidate_memo_mismatches() == 0);
   }
 }
 
