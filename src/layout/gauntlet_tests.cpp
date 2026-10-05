@@ -2792,9 +2792,9 @@ void lay_pinned(char const *chart,
 
 }  // namespace
 
-TEST_CASE("gauntlet: pinned so its own legs must cross, a route crosses itself") {
-  // `A` fills `Outer`'s top right corner: its leg down to the bottom walls the right face
-  // off from `Inner`, so the way back in on the right crosses it, and Tier 0 counts that.
+TEST_CASE("gauntlet: pinned where the bumpers close the way round, a route goes round") {
+  // `A` fills `Outer`'s top right corner: its leg down to the bottom leaves the way back
+  // in on the right narrower than the bumpers, so the route takes it without them.
   Laid l;
   uint32_t t{ INVALID };
   lay_pinned("bypass.scav",
@@ -2806,8 +2806,8 @@ TEST_CASE("gauntlet: pinned so its own legs must cross, a route crosses itself")
                .orients = { { .frame = SubmachineId{ 2 } } } },
              l,
              t);
-  CHECK(knots_of(l, t) == 1);
-  CHECK(cost_columns(l.c, l.g, one_row(readable())).self_crossing == 1);
+  CHECK(knots_of(l, t) == 0);
+  CHECK(cost_columns(l.c, l.g, one_row(readable())).self_crossing == 0);
 }
 
 TEST_CASE(

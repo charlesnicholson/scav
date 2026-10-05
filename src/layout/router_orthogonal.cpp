@@ -1740,9 +1740,26 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
       ok = attempt(g);
       if (!sc.closed.empty()) {
         reopen_route(g, sc.closed);
-        if (!ok) {
-          ok = attempt(g);
-          trace_emit({ .kind = TraceKind::RouteCrossed, .seg = { .seg = net.seg } });
+        if (!ok) {  // kept apart without bumpers, else across the `apart` route
+          if (!tight_built) {
+            tight_built = true;
+            tight_ok = ortho_grid(in.region, in.obstacles, anchors, 0, tight, &walls);
+          }
+          if (tight_ok) {
+            scav_span const had{ out.net_points[net.apart] };
+            sc.closed.clear();
+            close_route(tight, out.points.data() + had.off, had.len, sc.closed);
+            ok = attempt(tight);
+            reopen_route(tight, sc.closed);
+            if (ok) {
+              reseated = 1;
+              trace_emit({ .kind = TraceKind::RouteReseated, .seg = { .seg = net.seg } });
+            }
+          }
+          if (!ok) {
+            ok = attempt(g);
+            trace_emit({ .kind = TraceKind::RouteCrossed, .seg = { .seg = net.seg } });
+          }
         }
       }
     }

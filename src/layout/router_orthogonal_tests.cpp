@@ -2881,22 +2881,35 @@ TEST_CASE(
     CHECK(apart.points[across.off + k].y <= 2000);
   }
 
-  // `A` in the region's top right corner: no way round, so net 1 crosses and says so.
+  // `A` in the region's top right corner: the way round is narrower than the bumpers, so
+  // net 1 goes round without them and says so.
   in.obstacles[0] = rect(3000, 0, 1000, 1100);
   in.nets[0].src = pt(3500, 800);
   in.nets[0].dst = pt(3500, 3000);
   in.nets[1].seg = 7;
-  LayoutTrace trace;
-  trace_sink_set(&trace);
+  auto const traced = [&](RouteOutput &out, TraceKind kind) {
+    LayoutTrace trace;
+    trace_sink_set(&trace);
+    ORTHO.route(in, out);
+    trace_sink_set(nullptr);
+    return std::ranges::count_if(trace.events, [kind](TraceEvent const &e) {
+      return (e.kind == kind) && (e.seg.seg == 7);
+    });
+  };
+  RouteOutput tight;
+  CHECK(traced(tight, TraceKind::RouteReseated) == 1);
+  REQUIRE(tight.net_points.size() == 2);
+  CHECK(tight.metrics[1].failed == RouteFailure::None);
+  CHECK(knots(tight) == 0);
+
+  // `A` past the region's top right corner: no way round at all, so net 1 crosses and says
+  // so.
+  in.obstacles[0] = rect(3000, -100, 1100, 1200);
   RouteOutput walled;
-  ORTHO.route(in, walled);
-  trace_sink_set(nullptr);
+  CHECK(traced(walled, TraceKind::RouteCrossed) == 1);
   REQUIRE(walled.net_points.size() == 2);
   CHECK(walled.metrics[1].failed == RouteFailure::None);
   CHECK(knots(walled) == 1);
-  CHECK(std::ranges::count_if(trace.events, [](TraceEvent const &e) {
-          return (e.kind == TraceKind::RouteCrossed) && (e.seg.seg == 7);
-        }) == 1);
 }
 
 TEST_CASE("ortho: a loop from a box to a point on its face runs its reach out") {
@@ -2976,7 +2989,8 @@ TEST_CASE("ortho: a loop between two points on one face of its box runs its reac
   }
 }
 
-TEST_CASE("ortho: a loop's reach stops a clearance short of a neighbour beyond its face") {
+TEST_CASE(
+    "ortho: a loop's reach stops a box clearance short of a neighbour beyond its face") {
   // `B` stands 288 right of the box, across the loop's span on its right face.
   scav_rect const box{ rect(2000, 2000, 1000, 600) };
   scav_rect const near{ rect(3288, 2100, 400, 400) };
@@ -2993,8 +3007,7 @@ TEST_CASE("ortho: a loop's reach stops a clearance short of a neighbour beyond i
   scav_span const loop{ out.net_points[0] };
   int32_t far{ 0 };
   for (uint32_t k = 0; k < loop.len; ++k) { far = imax(far, out.points[loop.off + k].x); }
-  int32_t const clear{ route_clearance(in.profile) };
-  CHECK(far == (near.x - clear));
+  CHECK(far == (near.x - box_clearance(in.profile)));
 }
 
 TEST_CASE("ortho: an unpinned loop takes its box's least-used face, the right on a tie") {

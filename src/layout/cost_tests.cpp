@@ -732,6 +732,8 @@ TEST_CASE("cost: a route that crosses itself is a Tier-0 violation") {
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   build_trans(c, a, b, TransKind::Default, {});
+  scav_profile p{ profile() };
+  p.pad = 8;  // under every gap between these routes and the boxes
   SizedLayout z{ blank(c) };
   z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 40 };
   z.state[b.v] = { .x = 400, .y = 0, .w = 100, .h = 40 };
@@ -745,10 +747,10 @@ TEST_CASE("cost: a route that crosses itself is a Tier-0 violation") {
                                    { .x = 200, .y = -50 },
                                    { .x = 450, .y = -50 },
                                    { .x = 450, .y = 0 } } }) };
-  CostTerms const t{ cost_terms(c, decompose(c), z, knot, {}, profile()) };
+  CostTerms const t{ cost_terms(c, decompose(c), z, knot, {}, p) };
   CHECK(t.self_crossing == 1);
   CHECK(t.retrace == 0);
-  CHECK(cost_of(t, profile()).t0_violations == 1);
+  CHECK(cost_of(t, p).t0_violations == 1);
 
   Routes const square{ routes_of(c,
                                  { { { .x = 100, .y = 20 },
@@ -756,7 +758,7 @@ TEST_CASE("cost: a route that crosses itself is a Tier-0 violation") {
                                      { .x = 300, .y = 100 },
                                      { .x = 450, .y = 100 },
                                      { .x = 450, .y = 40 } } }) };
-  CHECK(cost_terms(c, decompose(c), z, square, {}, profile()).self_crossing == 0);
+  CHECK(cost_terms(c, decompose(c), z, square, {}, p).self_crossing == 0);
 }
 
 TEST_CASE("cost: an external route between two regions that crosses their divider") {
