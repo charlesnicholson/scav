@@ -701,6 +701,41 @@ TEST_CASE("cost: a route through a region neither end is in is a Tier-0 violatio
   CHECK(cost_terms(c, decompose(c), z, through, {}, profile()).through_region == 1);
 }
 
+TEST_CASE("cost: a route along its owner's border beside a sibling region crosses it") {
+  // `On` stacks `main` over `aux`; `Ready` in `main` goes to `X`, level with `aux`.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const on{ build_state(c, root, "On", StateKind::Normal, {}) };
+  SubmachineId const main_sub{ build_submachine(c, on, "main", {}) };
+  SubmachineId const aux_sub{ build_submachine(c, on, "aux", {}) };
+  StateId const ready{ build_state(c, main_sub, "Ready", StateKind::Normal, {}) };
+  StateId const x{ build_state(c, root, "X", StateKind::Normal, {}) };
+  build_trans(c, ready, x, TransKind::External, {});
+
+  SizedLayout z{ blank(c) };
+  z.state[on.v] = { .x = 0, .y = 0, .w = 400, .h = 200 };
+  z.sub[main_sub.v] = { .x = 20, .y = 10, .w = 360, .h = 80 };
+  z.sub[aux_sub.v] = { .x = 20, .y = 110, .w = 360, .h = 80 };
+  z.state[ready.v] = { .x = 60, .y = 30, .w = 100, .h = 40 };
+  z.state[x.v] = { .x = -300, .y = 130, .w = 100, .h = 40 };
+  auto const regions = [&](Routes const &r) {
+    return cost_terms(c, decompose(c), z, r, {}, profile()).through_region;
+  };
+
+  // Down the pad ring past the divider, outside both region rects, then out: two pieces.
+  CHECK(regions(routes_of(c,
+                          { { { .x = 60, .y = 50 },
+                              { .x = 10, .y = 50 },
+                              { .x = 10, .y = 150 },
+                              { .x = -200, .y = 150 } } })) == 2);
+  // Out of `On` level with `main`, then down outside it.
+  CHECK(regions(routes_of(c,
+                          { { { .x = 60, .y = 50 },
+                              { .x = -100, .y = 50 },
+                              { .x = -100, .y = 150 },
+                              { .x = -200, .y = 150 } } })) == 0);
+}
+
 TEST_CASE("cost: a region is tested where the descent reaches its owner") {
   // `Shell` holds `On`, which holds regions `main` and `aux`; `Ready` in `main` goes to
   // `X` outside.
@@ -2215,8 +2250,46 @@ int32_t box_overlaps(Chart const &c, SizedLayout const &z) {
   return total;
 }
 
+// Region `m`'s rect grown across to its owner's box and along to the midpoints of the gaps
+// to its live sibling regions; its rect alone without siblings.
+scav_rect region_cell(Chart const &c, SizedLayout const &z, uint32_t m) {
+  scav_rect const &r{ z.sub[m] };
+  StateId const owner{ c.submachines[m].owner };
+  if (owner.v == INVALID) { return r; }
+  scav_rect const &b{ z.state[owner.v] };
+  int32_t lo_x{ r.x };
+  int32_t hi_x{ r.x + r.w };
+  int32_t lo_y{ r.y };
+  int32_t hi_y{ r.y + r.h };
+  Span const subs{ c.states[owner.v].submachines };
+  for (uint32_t k = 0; k < subs.len; ++k) {
+    uint32_t const o{ c.submachine_ids[subs.off + k].v };
+    if ((o == m) || (c.submachines[o].live == 0)) { continue; }
+    scav_rect const &q{ z.sub[o] };
+    if (((q.y + q.h) <= r.y) || (q.y >= (r.y + r.h))) {
+      lo_x = std::min(lo_x, b.x);
+      hi_x = std::max(hi_x, b.x + b.w);
+      if ((q.y + q.h) <= r.y) {
+        lo_y = std::min(lo_y, q.y + q.h + ((r.y - (q.y + q.h)) / 2));
+      } else {
+        hi_y = std::max(hi_y, r.y + r.h + ((q.y - (r.y + r.h)) / 2));
+      }
+    } else if (((q.x + q.w) <= r.x) || (q.x >= (r.x + r.w))) {
+      lo_y = std::min(lo_y, b.y);
+      hi_y = std::max(hi_y, b.y + b.h);
+      if ((q.x + q.w) <= r.x) {
+        lo_x = std::min(lo_x, q.x + q.w + ((r.x - (q.x + q.w)) / 2));
+      } else {
+        hi_x = std::max(hi_x, r.x + r.w + ((q.x - (r.x + r.w)) / 2));
+      }
+    }
+  }
+  return { .x = lo_x, .y = lo_y, .w = hi_x - lo_x, .h = hi_y - lo_y };
+}
+
 // `through_box`, and `through_region` per piece entering a live region of a state the
-// descent reaches or of a detached one, where neither end lies in the region.
+// descent reaches or of a detached one, where neither end lies in the region: its
+// `region_cell`, or its rect where an end is the region's owner.
 void through(Chart const &c,
              SizedLayout const &z,
              Ancestry const &an,
@@ -2234,7 +2307,9 @@ void through(Chart const &c,
       Span const subs{ c.states[st].submachines };
       for (uint32_t i = 0; i < subs.len; ++i) {
         uint32_t const m{ c.submachine_ids[subs.off + i].v };
-        if ((c.submachines[m].live != 0) && enters(piece.a, piece.b, z.sub[m]) &&
+        bool const own{ (tr.src.v == st) || (tr.dst.v == st) };
+        scav_rect const cell{ own ? z.sub[m] : region_cell(c, z, m) };
+        if ((c.submachines[m].live != 0) && enters(piece.a, piece.b, cell) &&
             !within(c, tr.src, m) && !within(c, tr.dst, m)) {
           foreign = true;
         }

@@ -127,10 +127,39 @@ void slide_slots(Chart const &c,
     return ((slots[i].side < 2) ? slots[i].x : slots[i].y) ==
            face_coord(z.state[st], slots[i].side);
   };
+  // True when `v` along slot `i`'s face is `clear` inside the dividers between region `m`,
+  // its inner frame, and the state's other live regions; true for a frame the state does
+  // not own.
+  auto const in_region = [&](uint32_t i, uint32_t m, int32_t v) {
+    uint32_t const st{ state_of(i) };
+    if ((m >= c.submachines.size()) || (c.submachines[m].owner.v != st)) { return true; }
+    bool const y_axis{ slots[i].side < 2 };
+    scav_rect const &r{ z.sub[m] };
+    int32_t const r_lo{ y_axis ? r.y : r.x };
+    int32_t const r_hi{ r_lo + (y_axis ? r.h : r.w) };
+    Span const subs{ c.states[st].submachines };
+    for (uint32_t k = 0; k < subs.len; ++k) {
+      uint32_t const o{ c.submachine_ids[subs.off + k].v };
+      if ((o == m) || (o >= c.submachines.size()) || (c.submachines[o].live == 0)) {
+        continue;
+      }
+      scav_rect const &q{ z.sub[o] };
+      int32_t const q_lo{ y_axis ? q.y : q.x };
+      int32_t const q_hi{ q_lo + (y_axis ? q.h : q.w) };
+      if ((q_hi <= r_lo) && (v < (q_hi + floor_div(r_lo - q_hi, 2) + clear))) {
+        return false;
+      }
+      if ((q_lo >= r_hi) && (v > ((r_hi + floor_div(q_lo - r_hi, 2)) - clear))) {
+        return false;
+      }
+    }
+    return true;
+  };
   // True when `v` along slot `i`'s face is inside the corner insets, off its occupied
-  // spans, `clear` off the bands lining the face, and more than `clear` short of its
-  // neighbour slots.
-  auto const free_at = [&](uint32_t i, int32_t v) {
+  // spans, `clear` off the bands lining the face, inside its inner frame `m`'s share of
+  // the face, and more than `clear` short of its neighbour slots.
+  auto const free_at = [&](uint32_t i, uint32_t m, int32_t v) {
+    if (!in_region(i, m, v)) { return false; }
     uint32_t const side{ slots[i].side };
     uint32_t const st{ state_of(i) };
     scav_rect const &box{ z.state[st] };
@@ -169,12 +198,13 @@ void slide_slots(Chart const &c,
   // Slides slot `i`, its transition's `k`th, level with the point on the net beside it.
   auto const slide = [&](Span nets, uint32_t i, uint32_t k, bool next) {
     Planned const &pn{ planned[nets.off + k + (next ? 1U : 0U)] };
+    uint32_t const inner{ planned[nets.off + k + (next ? 0U : 1U)].frame };
     std::vector<uint32_t> const &bends{ seg_bends[pn.seg] };
     if (bends.empty() && ((next ? pn.dst_state : pn.src_state) != INVALID)) { return; }
     scav_point to{ next ? pn.dst : pn.src };
     if (!bends.empty()) { to = z.node[next ? bends.front() : bends.back()]; }
     int32_t const v{ (slots[i].side < 2) ? to.y : to.x };
-    if ((v == along(i)) || !free_at(i, v)) { return; }
+    if ((v == along(i)) || !free_at(i, inner, v)) { return; }
     ((slots[i].side < 2) ? slots[i].y : slots[i].x) = v;
     scav_point const at{ .x = slots[i].x, .y = slots[i].y };
     planned[nets.off + k].dst = at;

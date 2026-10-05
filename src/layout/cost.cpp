@@ -519,6 +519,51 @@ bool within(Chart const &c, StateId state, uint32_t m) {
   return false;
 }
 
+// Region `m`'s share of its owner: its rect grown across to the owner's box and along to
+// the dividers with its live sibling regions; its rect where it has no live sibling.
+scav_rect region_cell(Chart const &c, SizedLayout const &z, uint32_t m) {
+  scav_rect const &r{ z.sub[m] };
+  uint32_t const owner{ c.submachines[m].owner.v };
+  if (owner >= z.state.size()) { return r; }
+  scav_rect const &b{ z.state[owner] };
+  int32_t x0{ r.x };
+  int32_t y0{ r.y };
+  int32_t x1{ r.x + r.w };
+  int32_t y1{ r.y + r.h };
+  bool stacked{ false };  // a sibling above or below
+  bool beside{ false };   // a sibling left or right
+  Span const subs{ c.states[owner].submachines };
+  for (uint32_t k = 0; k < subs.len; ++k) {
+    uint32_t const o{ c.submachine_ids[subs.off + k].v };
+    if ((o == m) || (o >= c.submachines.size()) || (c.submachines[o].live == 0)) {
+      continue;
+    }
+    scav_rect const &q{ z.sub[o] };
+    if ((q.y + q.h) <= r.y) {
+      y0 = imin(y0, (q.y + q.h) + floor_div(r.y - (q.y + q.h), 2));
+      stacked = true;
+    } else if (q.y >= (r.y + r.h)) {
+      y1 = imax(y1, (r.y + r.h) + floor_div(q.y - (r.y + r.h), 2));
+      stacked = true;
+    } else if ((q.x + q.w) <= r.x) {
+      x0 = imin(x0, (q.x + q.w) + floor_div(r.x - (q.x + q.w), 2));
+      beside = true;
+    } else if (q.x >= (r.x + r.w)) {
+      x1 = imax(x1, (r.x + r.w) + floor_div(q.x - (r.x + r.w), 2));
+      beside = true;
+    }
+  }
+  if (stacked) {
+    x0 = imin(x0, b.x);
+    x1 = imax(x1, b.x + b.w);
+  }
+  if (beside) {
+    y0 = imin(y0, b.y);
+    y1 = imax(y1, b.y + b.h);
+  }
+  return { .x = x0, .y = y0, .w = x1 - x0, .h = y1 - y0 };
+}
+
 // Whether bend `at` lies in a state `tr` only passes through. Each end climbs to `top`;
 // the first state holding `at` is transit unless it is the end or its enclosing state.
 bool in_transit(Chart const &c,
@@ -645,7 +690,8 @@ struct Descent {
 };
 
 // `cost_through_boxes` over `kid`, as `box_overlaps_over` takes it. `*regions` counts each
-// piece entering a live region of a reached or detached state that neither end lies in.
+// piece entering a live region of a reached or detached state that neither end lies in:
+// its `region_cell`, or its rect for a transition with an end at the region's owner.
 int32_t through_boxes_over(Chart const &c,
                            SizedLayout const &z,
                            Ancestry const &an,
@@ -686,11 +732,13 @@ int32_t through_boxes_over(Chart const &c,
         uint32_t const m{ c.submachine_ids[subs.off + i].v };
         if (descend) { vec_push_back(d.stack, m); }
         if ((regions == nullptr) || foreign || (m >= c.submachines.size()) ||
-            (c.submachines[m].live == 0) || !overlaps(reach, z.sub[m])) {
+            (c.submachines[m].live == 0)) {
           continue;
         }
-        foreign = enters(piece.a, piece.b, z.sub[m]) && !within(c, tr.src, m) &&
-                  !within(c, tr.dst, m);
+        bool const own{ (tr.src.v == st) || (tr.dst.v == st) };
+        scav_rect const cell{ own ? z.sub[m] : region_cell(c, z, m) };
+        foreign = overlaps(reach, cell) && enters(piece.a, piece.b, cell) &&
+                  !within(c, tr.src, m) && !within(c, tr.dst, m);
       }
     };
     for (uint32_t const st : an.detached) {
