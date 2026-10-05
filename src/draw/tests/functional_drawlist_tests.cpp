@@ -428,7 +428,7 @@ TEST_CASE("drawlist corpus: the strips the labels landed on, and what fell back"
           ", within the leader: ",
           anchored);
   CHECK(anchored == boxes);
-  if (!scav::test::corpus_skipped("mill.scav")) { CHECK(boxes == 265); }
+  if (!scav::test::corpus_skipped("mill.scav")) { CHECK(boxes == 267); }
   CHECK(fell == 0);
 }
 

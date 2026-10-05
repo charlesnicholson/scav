@@ -66,7 +66,7 @@ geometry structural 63b93200 coordinate f54e3f20
   chart 0,0 14262x8566
   rests on --portfolio-row 1 --rank 10:1 --rank 19:3 --rank 7:1 --rank 1:1 --rank 4:1 --rank 17:0 --rank 14:3 --end 19:0:1:3 --end 13:0:0:2 --orient 5
   cost t0 0 t2 6601
-    tier0 through_box 0 through_band 0 box_overlap 0 vanished 0 flush 0 through_region 0 retrace 0 shared_run 0 label_over_box 0 label_over_route 0 label_far 0 loop_unanchored 0
+    tier0 through_box 0 through_band 0 box_overlap 0 vanished 0 flush 0 through_region 0 retrace 0 self_crossing 0 shared_run 0 label_over_box 0 label_over_route 0 label_far 0 loop_unanchored 0
     bends 4 em_power 0 share 3102bp
     corridor 0 em_power 1 share 0bp
     crossings 0 em_power 0 share 0bp
