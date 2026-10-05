@@ -319,12 +319,22 @@ declares `scav_stable_sort` — so a call site names its header without a grep.
 layout's processor time (`cpu_ms`, from `std::clock`, wall time on Windows), the
 searches run, the candidate memo's peak bytes, the answers found by drawing rather than
 by laid ordering (`drawn`), and per Level 1 move kind the candidates offered, those the
-memo answered (`deduped`), those taken, and the moves culled unoffered as changing
-nothing (`culled`). `tools/trace.py --stats [chart...]` runs it over the corpus, or the
-charts given, at both text scales and tabulates it, with `scored` as offered less
+memo answered (`deduped`), those taken, the moves culled unoffered as changing nothing
+(`culled`), and those the culled search's don't-look bits left unscored in a round that
+took a move (`skipped`). `tools/trace.py --stats [chart...]` runs it over the corpus, or
+the charts given, at both text scales and tabulates it, with `scored` as offered less
 deduped. `deduped` varies by a few tenths
 of a percent between runs, since two threads can compute one key at once; the drawing
 does not.
+
+`--search culled` runs the culled search (PRD §11.10c) in place of the full one, and
+`--jitter-seed N` breaks near-equal moves and kicks by a hash of `N`. `tools/jitter.py
+--runs DIR` runs the corpus at both scales, for both searches, unperturbed and under
+three seeds, keeps each run in DIR, and reports per chart whether one search is worse
+than the other: worse only when every one of its runs is more than 2% above every run of
+the other. `tools/shootout.py --runs DIR --out FILE --shots PNGDIR` draws every chart
+under real text by both searches side by side, from the same runs, with each panel's
+Tier 2, Tier 0, bends, crossings, candidates evaluated and search CPU.
 
 ## The Unicode tables
 
