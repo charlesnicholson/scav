@@ -20,6 +20,7 @@ constexpr int32_t TAG_NOT_VIABLE{ -2 };
 constexpr int32_t TAG_INFLATED{ -3 };
 constexpr int32_t TAG_RETRIED{ -4 };
 constexpr int32_t TAG_DEGRADED{ -5 };
+constexpr int32_t TAG_CLAIMED{ -6 };
 constexpr uint32_t SHAPE_WORDS{ 3 + (5 * 4) };  // the most words a state's shape takes
 
 // `v` less `from` as a word; clears `fits` where the difference leaves `int32_t`.
@@ -618,7 +619,7 @@ void CandidateMemo::answer(ScoreRecord const &r, bool labelled, Recalled &out) {
     out.entry = INVALID;
     return;
   }
-  out.labelled = labelled || (r.t0[0] == TAG_UNSET);
+  out.labelled = labelled || (r.t0[0] == TAG_UNSET) || (r.t0[0] == TAG_CLAIMED);
   out.found = read(r, out.labelled ? 1U : 0U, out.score);
   if (r.bound_hi >= 0) {
     out.route_bound = static_cast<int64_t>(
@@ -720,7 +721,7 @@ bool CandidateMemo::score(uint32_t e, bool labelled, MemoScore &out) {
 
 bool CandidateMemo::read(ScoreRecord const &r, uint32_t k, MemoScore &out) {
   int32_t const t0{ r.t0[k] };
-  if ((t0 == TAG_UNSET) || (t0 == TAG_RETRIED)) { return false; }
+  if ((t0 == TAG_UNSET) || (t0 == TAG_RETRIED) || (t0 == TAG_CLAIMED)) { return false; }
   out = MemoScore{};
   out.viable = t0 != TAG_NOT_VIABLE;
   out.inflated = t0 == TAG_INFLATED;
@@ -766,6 +767,22 @@ void CandidateMemo::set_route_bound(uint32_t e, int64_t t2) {
   auto const bits{ static_cast<uint64_t>(t2) };
   sh.records[index].bound_hi = static_cast<int32_t>(bits >> 32U);
   sh.records[index].bound_lo = static_cast<uint32_t>(bits);
+}
+
+Claim CandidateMemo::claim(uint32_t e, bool labelled, MemoScore &out) {
+  if (e == INVALID) { return Claim::Taken; }
+  ScoreShard &sh{ scores[e & (SHARDS - 1)] };
+  ScopedLock const held{ sh.lock };
+  uint32_t const index{ index_of(e, sh.base, sh.records.size()) };
+  if ((index == INVALID) || (sh.records[index].t0[0] == TAG_RETRIED)) {
+    return Claim::Taken;
+  }
+  ScoreRecord &r{ sh.records[index] };
+  uint32_t const k{ labelled ? 1U : 0U };
+  if (read(r, k, out)) { return Claim::Scored; }
+  if (r.t0[k] == TAG_CLAIMED) { return Claim::Busy; }
+  r.t0[k] = TAG_CLAIMED;
+  return Claim::Taken;
 }
 
 void CandidateMemo::set_retried(uint32_t e) {

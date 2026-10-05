@@ -1036,6 +1036,7 @@ struct MemoAccess {
   CandidateMemo::Blocks const *drawing{ nullptr };
   Cost incumbent{};     // the round's incumbent
   bool prune{ false };  // a move whose route bound reaches `incumbent` is not routed
+  bool defer{ false };  // a move whose drawing another thread is routing is left unscored
 };
 
 // How one scored move met the memo.
@@ -1046,6 +1047,7 @@ struct MemoUse {
   bool labelled{ false };     // the answer is the labelled score
   bool faced{ false };        // the facing memo answered its facing pass
   bool pruned{ false };       // its route bound reached the incumbent
+  bool deferred{ false };     // another thread was routing its drawing; it is unscored
 };
 
 MemoScore memo_score(Scored const &s) {
@@ -1282,6 +1284,21 @@ Scored score_memoized(Chart const &c,
     table.link(key, use.entry);
     if (drawn || pruned_by(sc.bends, cand.sized)) { return out; }
   }
+  MemoScore known;
+  switch (table.claim(use.entry, labels, known)) {
+    case Claim::Scored:
+      use.deduped = true;
+      use.labelled = labels;
+      out = scored_from(known);
+      return out;
+    case Claim::Busy:
+      if (memo.defer) {
+        use.deferred = true;
+        return out;
+      }
+      break;
+    case Claim::Taken: break;
+  }
   lay_routes(cand, c, g, *laid, s, row, router, 1, &pins, { .reuse = reuse }, labels);
   out = scored_of(c, g, scoring, s, objective, cand, labels);
 #ifdef SCAV_TESTING
@@ -1398,7 +1415,8 @@ Scored score_move(Chart const &c,
       ++test_route_bound_checked;
       test_route_bound_mismatches += holds ? 0U : 1U;
     }
-    if (test_candidate_memo_verify && !use.pruned && (use.deduped || use.faced)) {
+    if (test_candidate_memo_verify && !use.pruned && !use.deferred &&
+        (use.deduped || use.faced)) {
       SubmachineOrders const moved{ order_submachines(c, g, s, objective, 1, pins) };
       std::vector<Diagnostic> spilled;
       Candidate fresh;
@@ -1627,19 +1645,35 @@ bool ranks_before(Cost const &a,
   return cost_less(x, y) || ((i < pick) && !cost_less(y, x));
 }
 
+// Scores each of `n` moves by `score(i, defer)` in parallel, deferring a move whose
+// drawing another thread is routing; then scores those `deferred(i)` names without
+// deferring.
+template <typename Score, typename Deferred>
+void score_round(uint32_t n,
+                 uint32_t threads,
+                 std::vector<uint32_t> &again,
+                 Score const &score,
+                 Deferred const &deferred) {
+  parallel_for(n, threads, [&](uint32_t i) { score(i, true); });
+  again.clear();
+  for (uint32_t i = 0; i < n; ++i) {
+    if (deferred(i)) { vec_push_back(again, i); }
+  }
+  parallel_for(static_cast<uint32_t>(again.size()), threads, [&](uint32_t k) {
+    score(again[k], false);
+  });
+}
+
 // The improving candidate of least exact cost plus `jit` (lowest index among equals), else
 // INVALID; `jit` is empty or parallel to the candidates. Scores `exact(i)` least bound
-// first, while `bound(i)` can still win.
-template <typename Bound, typename Exact>
+// first, while `bound(i)` can still win; `got` holds each bound.
+template <typename Exact>
 uint32_t least_by_bound(uint32_t n,
-                        uint32_t threads,
                         Cost const &incumbent,
                         std::vector<int64_t> const &jit,
                         std::vector<Scored> &got,
                         std::vector<uint32_t> &order,
-                        Bound const &bound,
                         Exact const &exact) {
-  parallel_for(n, threads, [&](uint32_t i) { got[i] = bound(i); });
   order.clear();
   uint32_t open{ 0 };
   for (uint32_t i = 0; i < n; ++i) {
@@ -1846,6 +1880,7 @@ Improved run_search(Chart const &c,
   std::vector<Scored> got;
   std::vector<MemoUse> uses;  // parallel to `round`: how each move's first scoring went
   std::vector<uint32_t> order;
+  std::vector<uint32_t> again;  // a round's deferred moves
   // A labelled round's least-bound candidates, routed unlabelled; the first `kept_n` are
   // in use.
   std::vector<KeptCandidate> kept;
@@ -2164,23 +2199,35 @@ Improved run_search(Chart const &c,
 
     access.incumbent = out.cost;
     // Each candidate runs its phases on one thread; `fresh` scores it without the memo.
-    auto const score =
-        [&](uint32_t i, bool labels, MemoUse &use, Routed *routed, bool fresh = false) {
-          return score_move(c,
-                            g,
-                            scoring,
-                            s,
-                            objective,
-                            row,
-                            router,
-                            with_here(held, round[i]),
-                            &base,
-                            (round[i].kind == MoveKind::Face) ? &incumbent : nullptr,
-                            labels,
-                            routed,
-                            fresh ? MemoAccess{} : access,
-                            use);
-        };
+    // `fresh` scores without the memo; `defer` leaves a move unscored while another thread
+    // routes its drawing.
+    auto const score = [&](uint32_t i,
+                           bool labels,
+                           MemoUse &use,
+                           Routed *routed,
+                           bool fresh = false,
+                           bool defer = false) {
+      MemoAccess met{ fresh ? MemoAccess{} : access };
+      met.defer = defer;
+      return score_move(c,
+                        g,
+                        scoring,
+                        s,
+                        objective,
+                        row,
+                        router,
+                        with_here(held, round[i]),
+                        &base,
+                        (round[i].kind == MoveKind::Face) ? &incumbent : nullptr,
+                        labels,
+                        routed,
+                        met,
+                        use);
+    };
+    auto const deferred = [&](uint32_t i) {
+      counted.deferred += uses[i].deferred ? 1U : 0U;
+      return uses[i].deferred;
+    };
     // 1 when move `i`'s unlabelled bound cannot beat the incumbent. `known` is that bound,
     // or its labelled score where `labelled`; a labelled score that cannot win lays it
     // out.
@@ -2213,9 +2260,11 @@ Improved run_search(Chart const &c,
 #ifdef SCAV_TESTING
       uint32_t calls{ 0 };
 #endif
-      auto const bound = [&](uint32_t i) {
+      auto const bound = [&](uint32_t i, bool defer) {
         Routed routed;
-        Scored const scored{ score(i, false, uses[i], &routed) };
+        got[i] = score(i, false, uses[i], &routed, false, defer);
+        Scored const &scored{ got[i] };
+        if (uses[i].deferred) { return; }
         if (culled_search) {
           bool const labelled{ uses[i].deduped && uses[i].labelled };
           dont_look_now[i] = bound_idle(i, scored, labelled, uses[i]);
@@ -2224,7 +2273,6 @@ Improved run_search(Chart const &c,
           ScopedLock const lock{ kept_lock };
           keep_least(kept, kept_n, i, uses[i].entry, scored.cost, routed);
         }
-        return scored;
       };
       auto const exact = [&](uint32_t i) {
 #ifdef SCAV_TESTING
@@ -2271,7 +2319,8 @@ Improved run_search(Chart const &c,
 #endif
         return scored;
       };
-      win = least_by_bound(n, threads, out.cost, jit, got, order, bound, exact);
+      score_round(n, threads, again, bound, deferred);
+      win = least_by_bound(n, out.cost, jit, got, order, exact);
       kept_n = 0;
 #ifdef SCAV_TESTING
       if (test_label_bound_verify) {
@@ -2288,12 +2337,13 @@ Improved run_search(Chart const &c,
       }
 #endif
     } else {
-      parallel_for(n, threads, [&](uint32_t i) {
-        got[i] = score(i, true, uses[i], nullptr);
-        if (culled_search) {
+      auto const labelled = [&](uint32_t i, bool defer) {
+        got[i] = score(i, true, uses[i], nullptr, false, defer);
+        if (culled_search && !uses[i].deferred) {
           dont_look_now[i] = bound_idle(i, got[i], has_labels, uses[i]);
         }
-      });
+      };
+      score_round(n, threads, again, labelled, deferred);
     }
     for (uint32_t i = 0; i < n; ++i) {
       auto const kind{ static_cast<uint32_t>(round[i].kind) };

@@ -416,6 +416,53 @@ TEST_CASE("candidate memo: an ordering key reads the score entry linked to it") 
   CHECK(got.score.cost.t2 == 3);
 }
 
+TEST_CASE("candidate memo: one claim per score kind, until that score is set") {
+  Fixture const f;
+  CandidateMemo memo{ f.c, f.g };
+  SubmachineOrders const plain{ f.order() };
+  uint32_t const drawn{ memo.drawing(plain, f.size(plain), memo.profile_word(f.p)) };
+  REQUIRE(drawn != INVALID);
+  std::vector<uint32_t> const none;
+  uint32_t const e{ memo.find_score(drawn, none, false).entry };
+  REQUIRE(e != INVALID);
+  MemoScore got;
+  CHECK(memo.claim(e, false, got) == Claim::Taken);
+  CHECK(memo.claim(e, false, got) == Claim::Busy);
+  CHECK(memo.claim(e, true, got) == Claim::Taken);  // the other kind is apart
+  // A claimed score reads as unset.
+  CHECK_FALSE(memo.score(e, false, got));
+  CHECK_FALSE(memo.find_score(drawn, none, false).found);
+  MemoScore const s{ .cost = { .t0_violations = 0, .t1_hints = 0, .t2 = 9 },
+                     .viable = true };
+  memo.set_score(e, false, s);
+  REQUIRE(memo.claim(e, false, got) == Claim::Scored);
+  CHECK(got.cost.t2 == 9);
+  // An entry the memo cannot hold, and a retried one, hold no claim.
+  CHECK(memo.claim(INVALID, false, got) == Claim::Taken);
+  CHECK(memo.claim(INVALID, false, got) == Claim::Taken);
+  memo.set_retried(e);
+  CHECK(memo.claim(e, true, got) == Claim::Taken);
+  CHECK(memo.claim(e, true, got) == Claim::Taken);
+}
+
+TEST_CASE("candidate memo: a route bound comes back beside a score it does not answer") {
+  Fixture const f;
+  CandidateMemo memo{ f.c, f.g };
+  SubmachineOrders const plain{ f.order() };
+  uint32_t const drawn{ memo.drawing(plain, f.size(plain), memo.profile_word(f.p)) };
+  REQUIRE(drawn != INVALID);
+  std::vector<uint32_t> const none;
+  CandidateMemo::Recalled const fresh{ memo.find_score(drawn, none, true) };
+  REQUIRE(fresh.entry != INVALID);
+  CHECK(fresh.route_bound == -1);
+  int64_t const t2{ (int64_t{ 1 } << 40) + 3 };
+  memo.set_route_bound(fresh.entry, t2);
+  CandidateMemo::Recalled const again{ memo.find_score(drawn, none, true) };
+  CHECK_FALSE(again.found);
+  CHECK(again.route_bound == t2);
+  CHECK(memo.recall(fresh.entry, false).route_bound == t2);
+}
+
 TEST_CASE("candidate memo: a retried entry never answers and takes no score") {
   Fixture const f;
   CandidateMemo memo{ f.c, f.g };

@@ -287,6 +287,7 @@ struct SearchStats {
   uint64_t recalled{ 0 };    // Level 1 searches the search memo answered
   uint64_t memo_bytes{ 0 };  // the most a layout's candidate memo held
   uint64_t aliased{ 0 };     // rows laid out and searched as an earlier row
+  uint64_t deferred{ 0 };    // moves rescored after another thread routed their drawing
 };
 
 // The process-wide counts sink, shared by every thread; null when nothing counts.

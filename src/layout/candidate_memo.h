@@ -36,6 +36,10 @@ struct MemoScore {
 // What `find_facing` found.
 enum class FacingFound : uint32_t { Absent, Failed, Turned };
 
+// What `CandidateMemo::claim` found: the score set, another thread setting it, or the
+// claim taken by the caller.
+enum class Claim : uint32_t { Scored, Busy, Taken };
+
 // One memo serves one layout: one chart, split graph, spaces, router and objective.
 class CandidateMemo {
  public:
@@ -142,6 +146,10 @@ class CandidateMemo {
   // Stores the Tier 2 of entry `e`'s `cost_bound`, whose Tier 0 is zero.
   void set_route_bound(uint32_t e, int64_t t2);
 
+  // Claims entry `e`'s labelled or unlabelled score for the caller to set; `Scored` fills
+  // `out`. An entry the memo cannot hold, or a retried one, is `Taken` and holds no claim.
+  Claim claim(uint32_t e, bool labelled, MemoScore &out);
+
   // Marks entry `e` retried: it then never answers and takes no score.
   void set_retried(uint32_t e);
 
@@ -149,8 +157,9 @@ class CandidateMemo {
   [[nodiscard]] uint64_t peak_bytes() const;
 
  private:
-  // An entry's unlabelled then labelled score, `t0` a Tier-0 count or a negative tag, and
-  // its route bound's Tier 2, `bound_hi` negative while unset.
+  // An entry's unlabelled then labelled score, `t0` a Tier-0 count or a negative tag (one
+  // marks a score being set), and its route bound's Tier 2, `bound_hi` negative while
+  // unset.
   struct ScoreRecord {
     std::array<int32_t, 2> t0;
     std::array<uint32_t, 2> t2_hi;
