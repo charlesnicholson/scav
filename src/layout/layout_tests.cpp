@@ -1253,8 +1253,8 @@ TEST_CASE("layout: no corpus chart runs a route flush along a box" *
       }
     }
   }
-  // One net routes only after giving up its clearance.
-  CHECK(reseated == 1);
+  // Three nets, one on kiln and two on vac, route only after giving up their clearance.
+  CHECK(reseated == 3);
   MESSAGE("routes flush against a box:\n", report);
   // One report line per flush run; at most ten across the corpus.
   uint32_t lines{ 0 };
