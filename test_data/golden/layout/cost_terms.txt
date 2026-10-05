@@ -46,6 +46,7 @@ readable orthogonal gauntlet/header.scav 0 0 0 0 0 0 0 0 66944 11363328 0 6112 0
 readable orthogonal gauntlet/inloop.scav 0 8 0 0 2048 0 0 0 32176 8823104 0 5428 0 1510304
 readable orthogonal gauntlet/inside.scav 0 0 0 0 0 0 0 0 21056 9163776 0 2560 0 2193408
 readable orthogonal gauntlet/inward.scav 0 0 0 0 0 0 0 0 2240 5118720 0 2624 0 1523328
+readable orthogonal gauntlet/kicked.scav 0 8 0 1 2520 0 0 0 50118 17721792 0 15469 0 3225600
 readable orthogonal gauntlet/lane.scav 0 10 0 1 2809 0 0 0 57928 18377408 26 15762 0 1914368
 readable orthogonal gauntlet/level.scav 0 0 0 0 0 0 0 0 36224 7382016 0 4704 0 1793536
 readable orthogonal gauntlet/long.scav 0 4 0 0 160 0 0 0 46016 5769728 0 5984 0 0
@@ -93,6 +94,7 @@ readable straight gauntlet/header.scav 0 1 0 0 7 0 0 0 66944 11363328 0 10860 0 
 readable straight gauntlet/inloop.scav 0 8 0 1 2560 0 0 0 32176 8823104 409 8868 0 1510304
 readable straight gauntlet/inside.scav 0 0 0 0 0 0 0 0 21056 9163776 0 5950 0 2193408
 readable straight gauntlet/inward.scav 0 0 0 0 0 0 0 0 2240 5118720 0 5830 0 1523328
+readable straight gauntlet/kicked.scav 3 3 0 1 196 0 0 0 50118 17721792 0 22140 0 3225600
 readable straight gauntlet/lane.scav 0 5 0 1 512 0 0 0 57928 18377408 0 20896 0 1914368
 readable straight gauntlet/level.scav 0 1 0 0 7 0 0 0 36224 7382016 0 7660 0 1793536
 readable straight gauntlet/long.scav 0 2 0 0 67 0 0 0 46016 5769728 0 10097 0 0
@@ -140,6 +142,7 @@ compact orthogonal gauntlet/header.scav 0 0 0 0 0 0 0 0 14376 4839936 0 3840 0 1
 compact orthogonal gauntlet/inloop.scav 0 8 0 0 1024 0 0 0 7600 3763200 35 3200 0 685952
 compact orthogonal gauntlet/inside.scav 0 0 0 0 0 0 0 0 5536 3816960 0 1536 0 910848
 compact orthogonal gauntlet/inward.scav 0 0 0 0 0 0 0 0 864 2182656 0 1616 0 671488
+compact orthogonal gauntlet/kicked.scav 0 8 0 1 1504 0 0 0 11936 7515136 0 10048 0 1377280
 compact orthogonal gauntlet/lane.scav 0 10 0 1 1746 0 0 0 13224 7811136 21 10238 0 792576
 compact orthogonal gauntlet/level.scav 0 0 0 0 0 0 0 0 8232 3156480 0 3008 0 753664
 compact orthogonal gauntlet/long.scav 0 4 0 0 84 0 0 0 10048 2529280 0 3828 0 0
@@ -187,6 +190,7 @@ compact straight gauntlet/header.scav 0 1 0 0 4 0 0 0 14376 4839936 0 7258 0 112
 compact straight gauntlet/inloop.scav 0 8 0 1 1280 0 0 0 7600 3763200 300 5648 0 685952
 compact straight gauntlet/inside.scav 0 0 0 0 0 0 0 0 5536 3816960 0 3958 0 910848
 compact straight gauntlet/inward.scav 0 0 0 0 0 0 0 0 864 2182656 0 3854 0 671488
+compact straight gauntlet/kicked.scav 3 3 0 1 115 0 0 0 11936 7515136 0 14879 0 1377280
 compact straight gauntlet/lane.scav 1 5 0 1 303 0 0 0 13224 7811136 0 14054 0 792576
 compact straight gauntlet/level.scav 0 1 0 0 4 0 0 0 8232 3156480 0 5146 0 753664
 compact straight gauntlet/long.scav 0 2 0 0 39 0 0 0 10048 2529280 0 6795 0 0
