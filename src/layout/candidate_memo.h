@@ -157,9 +157,8 @@ class CandidateMemo {
   [[nodiscard]] uint64_t peak_bytes() const;
 
  private:
-  // An entry's unlabelled then labelled score, `t0` a Tier-0 count or a negative tag (one
-  // marks a score being set), and its route bound's Tier 2, `bound_hi` negative while
-  // unset.
+  // An entry's unlabelled then labelled score, `t0` a Tier-0 count or a negative tag, and
+  // its route bound's Tier 2, `bound_hi` negative while unset.
   struct ScoreRecord {
     std::array<int32_t, 2> t0;
     std::array<uint32_t, 2> t2_hi;

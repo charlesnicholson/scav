@@ -1034,8 +1034,10 @@ struct MemoAccess {
   CandidateMemo::Blocks const *ordered{ nullptr };
   CandidateMemo::Blocks const *laid{ nullptr };
   CandidateMemo::Blocks const *drawing{ nullptr };
-  Cost incumbent{};     // the round's incumbent
-  bool prune{ false };  // a move whose route bound reaches `incumbent` is not routed
+  Cost incumbent{};  // the round's incumbent
+  bool prune{
+    false
+  };  // a move whose route bound reaches `incumbent` scores as that bound
   bool defer{ false };  // a move whose drawing another thread is routing is left unscored
 };
 
@@ -1047,7 +1049,7 @@ struct MemoUse {
   bool labelled{ false };     // the answer is the labelled score
   bool faced{ false };        // the facing memo answered its facing pass
   bool pruned{ false };       // its route bound reached the incumbent
-  bool deferred{ false };     // another thread was routing its drawing; it is unscored
+  bool deferred{ false };     // left unscored while another thread routed its drawing
 };
 
 MemoScore memo_score(Scored const &s) {
@@ -1645,9 +1647,8 @@ bool ranks_before(Cost const &a,
   return cost_less(x, y) || ((i < pick) && !cost_less(y, x));
 }
 
-// Scores each of `n` moves by `score(i, defer)` in parallel, deferring a move whose
-// drawing another thread is routing; then scores those `deferred(i)` names without
-// deferring.
+// Scores `n` moves by `score(i, defer)` in parallel, deferring any whose drawing another
+// thread is routing, then scores those `deferred(i)` names undeferred.
 template <typename Score, typename Deferred>
 void score_round(uint32_t n,
                  uint32_t threads,
@@ -1665,8 +1666,7 @@ void score_round(uint32_t n,
 }
 
 // The improving candidate of least exact cost plus `jit` (lowest index among equals), else
-// INVALID; `jit` is empty or parallel to the candidates. Scores `exact(i)` least bound
-// first, while `bound(i)` can still win; `got` holds each bound.
+// INVALID; `got` holds each bound, and `exact(i)` runs in bound order while one can win.
 template <typename Exact>
 uint32_t least_by_bound(uint32_t n,
                         Cost const &incumbent,
@@ -2911,9 +2911,8 @@ bool layout_run(Chart &c,
   test_search_memo_hits = 0;
   test_search_memo_mismatches = 0;
 #endif
-  // Searches each viable row `which` flags from its `held` pins; a viable result replaces
-  // the row's candidate, cost and pins. A row repeating an earlier one's alias and pins
-  // takes that search's result.
+  // Searches each viable row `which` flags from its `held` pins, once per alias and pins;
+  // a viable result replaces the row's candidate, cost and pins.
   auto const search_rows = [&](std::vector<uint8_t> const &which, bool refold) {
     std::vector<uint32_t> active;
     std::vector<uint32_t> twin(rows, INVALID);  // per row, the `active` slot it repeats

@@ -87,9 +87,8 @@ CostTerms cost_terms(Chart const &c,
                      scav_spaces const &s,
                      scav_profile const &p);
 
-// Per term, the least a routing of `z` with no degraded net and Tier 0 zero scores;
-// `bends` per `segment_bends`, `faces` per `CandidateMemo::box_faces`, `clear` the seat
-// inset.
+// Per term, the least any routing of `z` with Tier 0 zero and no degraded net scores;
+// `bends` per `segment_bends`, `faces` per `CandidateMemo::box_faces`.
 CostTerms cost_bound(Chart const &c,
                      SplitGraph const &g,
                      std::vector<std::vector<uint32_t>> const &bends,
