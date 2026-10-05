@@ -1683,7 +1683,14 @@ TEST_CASE("gauntlet: with every state headed, no route enters a band" *
       for (scav_port_slot const &slot : l.r.slots) {
         CAPTURE(slot.x);
         CAPTURE(slot.y);
-        CHECK(slot.side != 2);  // a header lines every composite's top
+        bool headed_top{ false };  // on a headed state's top border; a region's is free
+        for (uint32_t st = 0; st < l.c.states.size(); ++st) {
+          scav_rect const r{ l.z.state[st] };
+          headed_top =
+              headed_top || ((rows[st].h_before > 0) && (slot.side == 2) &&
+                             (slot.y == r.y) && (slot.x > r.x) && (slot.x < (r.x + r.w)));
+        }
+        CHECK_FALSE(headed_top);
       }
     }
   }

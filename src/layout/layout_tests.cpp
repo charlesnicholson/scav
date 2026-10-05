@@ -1048,20 +1048,7 @@ void check_geometry(Chart const &c) {
       continue;
     }
     Transition const &tr{ c.transitions[t] };
-    // A route has at least one point per endpoint and crossing; `served`
-    // subtracts crossings on the endpoints' own borders.
-    if (tr.src == tr.dst) {
-      CHECK(route.len >= 3);  // out and back at the least
-    } else {
-      // A crossing on the source's or destination's own border coincides with
-      // that endpoint and adds no point.
-      uint32_t served{ 0 };
-      for (uint32_t k = 0; (k + 1) < segs.len; ++k) {
-        StateId const on{ g.ports[g.segments[segs.off + k].dst_port].state };
-        served += ((on.v == tr.src.v) || (on.v == tr.dst.v)) ? 1U : 0U;
-      }
-      CHECK(route.len + served >= segs.len + 1);
-    }
+    CHECK(route.len >= ((tr.src == tr.dst) ? 3U : 2U));  // a loop runs out and back
     CHECK(ports.len == segs.len - 1);
     for (uint32_t k = 0; k < ports.len; ++k) {
       scav_port_slot const slot{
@@ -1072,6 +1059,18 @@ void check_geometry(Chart const &c) {
                                                           : sub_rect(c, port.sub) };
       CHECK(on_border({ .x = slot.x, .y = slot.y }, boundary));
       CHECK(slot.side <= 3);
+      bool on_route{
+        false
+      };  // a crossing lies on the polyline, at a vertex or between two
+      for (uint32_t i = 0; (i + 1) < route.len; ++i) {
+        scav_point const a{ row_of<scav_point>(c, "scav.geom.point", route.off + i) };
+        scav_point const b{ row_of<scav_point>(c, "scav.geom.point", route.off + i + 1) };
+        on_route = on_route || ((slot.x >= imin(a.x, b.x)) && (slot.x <= imax(a.x, b.x)) &&
+                                (slot.y >= imin(a.y, b.y)) && (slot.y <= imax(a.y, b.y)));
+      }
+      // A separator's middle segment ends a clearance short of its slot.
+      bool const separated{ g.segments[segs.off + k].separator != 0 };
+      CHECK((on_route || separated));
     }
   }
 }
