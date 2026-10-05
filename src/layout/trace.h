@@ -46,6 +46,10 @@ enum class TraceKind : uint16_t {
   LabelCentred,   // a label found no seat beside its route and was centred on it
   RouteReseated,  // a net routed only on the grid without clearance bumpers
   RouteCrossed,   // a net found no way clear of its `RouteNet::apart` net
+  RowSearched,    // a Level 2 row's Level 1 search converged; `pass` is its `RowPass`
+  RowRepeated,    // a row drew an earlier row's drawing, so it is not kicked
+  KickScored,     // a kick was searched to convergence; `pass` is its `KickVerdict`
+  KickTaken,      // a row took a kick search's result; `pass` is its `KickHow`
 };
 
 // What a rank boundary's charge is for; `GapCharged.pass`. `Held` adds nothing: the
@@ -69,6 +73,17 @@ enum class SeatPass : uint16_t {
 
 // A Level 1 move's outcome; `CandidateScored.pass`.
 enum class MoveVerdict : uint16_t { Taken, NotViable, Inflated, NotBetter };
+
+// Which of a row's searches converged; `RowSearched.pass`. `Refold` adds fold moves.
+enum class RowPass : uint16_t { First, Refold };
+
+// A kick's converged cost against its row's incumbent; `KickScored.pass`.
+enum class KickVerdict : uint16_t { Improves, NotBetter, NotViable };
+
+// What a row took; `KickTaken.pass`. `Together` is each frame's best kick at once,
+// `Stacked` one more frame's best on the round's pick, `Settled` the unscoped search
+// after.
+enum class KickHow : uint16_t { Single, Together, Stacked, Settled };
 
 // Payloads are POD and name entities by id, never by frame node index.
 struct TraceRank {
@@ -160,13 +175,24 @@ struct TraceScore {
 inline constexpr uint16_t TRACE_MOVE_RANK{ 0 };
 inline constexpr uint16_t TRACE_MOVE_CUT{ 1 };
 inline constexpr uint16_t TRACE_MOVE_REVERSE{ 2 };
-inline constexpr uint16_t TRACE_MOVE_FACE{ 3 };  // `face` holds the face
-inline constexpr uint16_t TRACE_MOVE_SIDE{ 4 };  // `face` holds the side
-inline constexpr uint16_t TRACE_MOVE_FOLD{ 5 };  // `rank` holds the cut's layer
-inline constexpr uint16_t TRACE_MOVE_LOOP{ 7 };  // `face` and `end` hold the placement
+inline constexpr uint16_t TRACE_MOVE_FACE{ 3 };    // `face` holds the face
+inline constexpr uint16_t TRACE_MOVE_SIDE{ 4 };    // `face` holds the side
+inline constexpr uint16_t TRACE_MOVE_FOLD{ 5 };    // `rank` holds the cut's layer
+inline constexpr uint16_t TRACE_MOVE_ORIENT{ 6 };  // a kick only
+inline constexpr uint16_t TRACE_MOVE_LOOP{ 7 };    // `face` and `end` hold the placement
 // Each Tier-2 term's share of the scored sum in basis points, in CostTerms order.
 struct TraceTerms {
   std::array<int32_t, TIER2_TERMS> share;
+};
+// A whole search's result for Level 2 row `row`. A kick names its `TRACE_MOVE_*` in
+// `move`, a reversal its segment in `trans` and `leg`; `framed_t0` and `framed` are the
+// cost its frame's own search reached. `of` is the earlier row a repeated row draws.
+struct TraceSearch {
+  uint32_t row, of;
+  uint16_t move;
+  uint32_t trans, leg;
+  int32_t t0, framed_t0;
+  int64_t t2, framed;
 };
 
 struct TraceEvent {
@@ -187,6 +213,7 @@ struct TraceEvent {
     TraceBundle bundle;
     TraceScore score;
     TraceTerms terms;
+    TraceSearch search;
     TraceFold fold;
     TracePort port;
     TraceShift shift;
@@ -210,6 +237,21 @@ inline void trace_emit(TraceEvent e) {
   LayoutTrace *const t{ trace_sink() };
   if (t == nullptr) { return; }
   if (e.frame == INVALID) { e.frame = t->frame; }
+  vec_push_back(t->events, e);
+}
+
+// This thread's sink for the search outline alone: the row and kick events, recorded with
+// no other sink set, so every phase runs as untraced.
+LayoutTrace *trace_outline();
+void trace_outline_set(LayoutTrace *t);
+
+// Emits a row or kick event to the outline sink, else to `trace_sink()`.
+inline void trace_outline_emit(TraceEvent const &e) {
+  LayoutTrace *const t{ trace_outline() };
+  if (t == nullptr) {
+    trace_emit(e);
+    return;
+  }
   vec_push_back(t->events, e);
 }
 

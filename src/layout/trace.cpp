@@ -11,6 +11,7 @@ namespace scav {
 namespace {
 
 thread_local LayoutTrace *g_sink{ nullptr };
+thread_local LayoutTrace *g_outline{ nullptr };
 
 char const *kind_name(TraceKind k) {
   switch (k) {
@@ -44,6 +45,10 @@ char const *kind_name(TraceKind k) {
     case TraceKind::LabelCentred: return "label_centred";
     case TraceKind::RouteReseated: return "route_reseated";
     case TraceKind::RouteCrossed: return "route_crossed";
+    case TraceKind::RowSearched: return "row_searched";
+    case TraceKind::RowRepeated: return "row_repeated";
+    case TraceKind::KickScored: return "kick_scored";
+    case TraceKind::KickTaken: return "kick_taken";
     case TraceKind::None: break;
   }
   return "none";
@@ -69,6 +74,25 @@ char const *verdict_name(uint16_t v) {
     case MoveVerdict::NotViable: return "not_viable";
     case MoveVerdict::Inflated: return "inflated";
     case MoveVerdict::NotBetter: return "not_better";
+  }
+  return "?";
+}
+
+char const *kick_verdict_name(uint16_t v) {
+  switch (static_cast<KickVerdict>(v)) {
+    case KickVerdict::Improves: return "improves";
+    case KickVerdict::NotBetter: return "not_better";
+    case KickVerdict::NotViable: return "not_viable";
+  }
+  return "?";
+}
+
+char const *kick_how_name(uint16_t v) {
+  switch (static_cast<KickHow>(v)) {
+    case KickHow::Single: return "single";
+    case KickHow::Together: return "together";
+    case KickHow::Stacked: return "stacked";
+    case KickHow::Settled: return "settled";
   }
   return "?";
 }
@@ -142,6 +166,8 @@ struct Json {
 
 LayoutTrace *trace_sink() { return g_sink; }
 void trace_sink_set(LayoutTrace *t) { g_sink = t; }
+LayoutTrace *trace_outline() { return g_outline; }
+void trace_outline_set(LayoutTrace *t) { g_outline = t; }
 
 void trace_to_json(LayoutTrace const &t, Chart const &c, std::vector<char> &out) {
   Json j{ out };
@@ -319,6 +345,41 @@ void trace_to_json(LayoutTrace const &t, Chart const &c, std::vector<char> &out)
       case TraceKind::BoundaryCarried:
         j.kv("seg", e.carry.seg);
         j.kv("rank", e.carry.rank);
+        break;
+      case TraceKind::RowSearched:
+        j.ks("pass",
+             (e.pass == static_cast<uint16_t>(RowPass::Refold)) ? "refold" : "first");
+        j.kv("row", e.search.row);
+        j.kv("t0", e.search.t0);
+        j.kv("t2", e.search.t2);
+        break;
+      case TraceKind::RowRepeated:
+        j.kv("row", e.search.row);
+        j.kv("of", e.search.of);
+        break;
+      case TraceKind::KickScored: {
+        uint16_t const m{ e.search.move };
+        char const *kick{ "orient" };
+        if (m == TRACE_MOVE_REVERSE) { kick = "reverse"; }
+        if (m == TRACE_MOVE_FOLD) { kick = "fold"; }
+        j.ks("verdict", kick_verdict_name(e.pass));
+        j.kv("row", e.search.row);
+        j.ks("move", kick);
+        if (m == TRACE_MOVE_REVERSE) {
+          j.kv("trans", e.search.trans);
+          j.kv("leg", e.search.leg);
+        }
+        j.kv("t0", e.search.t0);
+        j.kv("t2", e.search.t2);
+        j.kv("framed_t0", e.search.framed_t0);
+        j.kv("framed", e.search.framed);
+        break;
+      }
+      case TraceKind::KickTaken:
+        j.ks("how", kick_how_name(e.pass));
+        j.kv("row", e.search.row);
+        j.kv("t0", e.search.t0);
+        j.kv("t2", e.search.t2);
         break;
       case TraceKind::None: break;
     }

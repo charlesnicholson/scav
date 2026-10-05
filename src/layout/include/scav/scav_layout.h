@@ -198,11 +198,12 @@ bool layout_run(Chart &c,
 
 enum class TraceScope : uint32_t {
   Shipped,  // a single-threaded re-run of the winning row and pins, searching nothing
-  Search    // the whole search on one thread, every candidate included
+  Search,   // the whole search on one thread, every candidate included
+  Outline   // the whole search on one thread, its row and kick events only
 };
 
-// Runs `layout_run` and writes its decision trace as JSON to `out`. Debug output,
-// unhashed.
+// Runs `layout_run` from `pins` and writes its decision trace as JSON to `out`. Debug
+// output, unhashed.
 bool layout_trace_json(Chart &c,
                        scav_spaces const &s,
                        scav_layout_opts const &o,
@@ -210,7 +211,8 @@ bool layout_trace_json(Chart &c,
                        std::vector<Diagnostic> &diags,
                        std::vector<char> &out,
                        uint32_t row = INVALID,
-                       TraceScope scope = TraceScope::Shipped);
+                       TraceScope scope = TraceScope::Shipped,
+                       SearchPins const *pins = nullptr);
 
 // Structural: route lengths, turn directions, port sides and depths, seeded with the
 // model's structural digest. Coordinate: the rest; a translation moves only this one.

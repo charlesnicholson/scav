@@ -6,6 +6,9 @@ transition's route.
   tools/trace.py estop.scav --trans 3     the decision chain for one of them
   tools/trace.py estop.scav --kinks       only the ones that bend
   tools/trace.py estop.scav --raw         the events, unsummarized
+  tools/trace.py bottler.scav --search    each row's searches, kicks and takes
+
+Any other flag is a layout flag passed to `scav dump`, such as `--no-text` or a pin.
 """
 
 import argparse
@@ -29,9 +32,11 @@ def find_scav(explicit=None):
     return found[0] if found else None
 
 
-def run(scav, chart, row):
+def run(scav, chart, row, layout=(), outline=False):
     """Runs `scav dump --json --layout --trace`; returns (trace, model dump)."""
-    argv = [str(scav), "dump", "--json", "--layout", "--trace", str(chart)]
+    argv = [str(scav), "dump", "--json", "--layout", "--trace", *layout, str(chart)]
+    if outline:
+        argv[5:5] = ["--trace-outline"]
     if row is not None:
         argv[4:4] = ["--portfolio-row", str(row)]
     out = subprocess.run(argv, capture_output=True, text=True, check=True).stdout
@@ -98,6 +103,30 @@ def describe(e, model):
     return f"  {k}"
 
 
+def print_outline(events):
+    """Each row's first search, repeats, kick rounds and takes, then each refold."""
+    kicked = None
+    for e in events:
+        k = e["kind"]
+        if k == "row_searched":
+            kicked = None
+            print(f"row {e['row']:2} {e['pass']:6} t2 {e['t2']} t0 {e['t0']}")
+        elif k == "row_repeated":
+            print(f"row {e['row']:2} repeats row {e['of']}, not kicked")
+        elif k == "kick_scored":
+            if kicked != e["row"]:
+                kicked = e["row"]
+                print(f"row {e['row']:2} kicks")
+            what = e["move"]
+            if what == "reverse":
+                what += f" t{e['trans']}:{e['leg']}"
+            print(f"    {what:16} frame {e['frame']:3}  framed {e['framed']:7} "
+                  f"t0 {e['framed_t0']}  -> {e['t2']:7} t0 {e['t0']}  {e['verdict']}")
+        elif k == "kick_taken":
+            kicked = None
+            print(f"  took {e['how']:8} t2 {e['t2']} t0 {e['t0']}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("chart")
@@ -106,7 +135,8 @@ def main():
     ap.add_argument("--raw", action="store_true")
     ap.add_argument("--portfolio-row", dest="row", type=int, default=None)
     ap.add_argument("--scav", default=None)
-    args = ap.parse_args()
+    ap.add_argument("--search", action="store_true")
+    args, layout = ap.parse_known_args()
 
     scav = find_scav(args.scav)
     if scav is None:
@@ -116,7 +146,10 @@ def main():
     if not chart.exists():
         chart = CORPUS / args.chart
 
-    events, model = run(scav, chart, args.row)
+    events, model = run(scav, chart, args.row, layout, args.search)
+    if args.search and not args.raw:
+        print_outline(events)
+        return 0
     if args.raw:
         for e in events:
             print(json.dumps(e))

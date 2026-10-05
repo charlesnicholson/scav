@@ -1017,7 +1017,7 @@ int run_dump(char const *path,
              bool as_json,
              bool with_layout,
              bool trace,
-             bool trace_search,
+             TraceScope scope,
              LayoutArgs const &args) {
   Loaded net;
   load_and_report(path, true, net);
@@ -1045,15 +1045,15 @@ int run_dump(char const *path,
     }
     std::vector<Diagnostic> diags;
     std::vector<char> events;
-    bool const laid{ trace ? layout_trace_json(
-                                 net.chart,
-                                 as_spaces(spaces),
-                                 opts,
-                                 placed,
-                                 diags,
-                                 events,
-                                 args.row,
-                                 trace_search ? TraceScope::Search : TraceScope::Shipped)
+    bool const laid{ trace ? layout_trace_json(net.chart,
+                                               as_spaces(spaces),
+                                               opts,
+                                               placed,
+                                               diags,
+                                               events,
+                                               args.row,
+                                               scope,
+                                               &args.pins)
                            : layout_run(net.chart,
                                         as_spaces(spaces),
                                         opts,

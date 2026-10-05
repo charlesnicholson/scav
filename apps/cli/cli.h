@@ -82,7 +82,7 @@ int run_dump(char const *path,
              bool as_json,
              bool with_layout,
              bool trace,
-             bool trace_search,
+             TraceScope scope,
              LayoutArgs const &args);
 int run_render(char const *path,
                char const *out_path,

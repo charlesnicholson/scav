@@ -191,6 +191,28 @@ TEST_CASE("trace: every payload shape serializes its own fields") {
   t.events.push_back({ .kind = TraceKind::GapCharged,
                        .pass = static_cast<uint16_t>(GapCause::Lanes),
                        .gap = { .boundary = 2, .seg = 7, .width = 538 } });
+  t.events.push_back({ .kind = TraceKind::RowSearched,
+                       .pass = static_cast<uint16_t>(RowPass::Refold),
+                       .search = { .row = 3, .of = INVALID, .t0 = 1, .t2 = 2461 } });
+  t.events.push_back({ .kind = TraceKind::RowRepeated, .search = { .row = 5, .of = 1 } });
+  t.events.push_back({ .kind = TraceKind::KickScored,
+                       .pass = static_cast<uint16_t>(KickVerdict::Improves),
+                       .frame = 2,
+                       .search = { .row = 1,
+                                   .of = INVALID,
+                                   .move = TRACE_MOVE_REVERSE,
+                                   .trans = 6,
+                                   .leg = 1,
+                                   .t0 = 0,
+                                   .framed_t0 = 2,
+                                   .t2 = 1495,
+                                   .framed = 3715 } });
+  t.events.push_back({ .kind = TraceKind::KickScored,
+                       .pass = static_cast<uint16_t>(KickVerdict::NotBetter),
+                       .search = { .row = 0, .move = TRACE_MOVE_ORIENT, .t2 = 7 } });
+  t.events.push_back({ .kind = TraceKind::KickTaken,
+                       .pass = static_cast<uint16_t>(KickHow::Stacked),
+                       .search = { .row = 1, .t0 = 0, .t2 = 1441 } });
 
   std::string const out{ json_of(t, c) };
   CHECK(out.find("\"seg\":3,\"rank\":2,\"index\":1,\"count\":1") != std::string::npos);
@@ -212,6 +234,17 @@ TEST_CASE("trace: every payload shape serializes its own fields") {
   CHECK(out.find("\"verdict\":\"not_better\",\"row\":4294967295") != std::string::npos);
   CHECK(out.find("\"cause\":\"lanes\",\"boundary\":2,\"seg\":7,\"width\":538") !=
         std::string::npos);
+  CHECK(out.find("\"kind\":\"row_searched\",\"pass\":\"refold\",\"row\":3,\"t0\":1,"
+                 "\"t2\":2461") != std::string::npos);
+  CHECK(out.find("\"kind\":\"row_repeated\",\"row\":5,\"of\":1") != std::string::npos);
+  CHECK(out.find("\"kind\":\"kick_scored\",\"frame\":2,\"verdict\":\"improves\",\"row\":1,"
+                 "\"move\":\"reverse\",\"trans\":6,\"leg\":1,\"t0\":0,\"t2\":1495,"
+                 "\"framed_t0\":2,\"framed\":3715") != std::string::npos);
+  // An orientation names no transition.
+  CHECK(out.find("\"verdict\":\"not_better\",\"row\":0,\"move\":\"orient\",\"t0\":0,"
+                 "\"t2\":7") != std::string::npos);
+  CHECK(out.find("\"kind\":\"kick_taken\",\"how\":\"stacked\",\"row\":1,\"t0\":0,"
+                 "\"t2\":1441") != std::string::npos);
   // No comma after the last object.
   CHECK(out.find("},\n]") == std::string::npos);
 }
@@ -644,4 +677,94 @@ TEST_CASE("trace: what a run reports as taken re-derives the run") {
 
   CHECK(layout_structural_hash(searched) == layout_structural_hash(rederived));
   CHECK(layout_coordinate_hash(searched) == layout_coordinate_hash(rederived));
+}
+
+TEST_CASE("trace: the outline names each row's searches, every kick and what a row took") {
+  // `gauntlet/kicked.scav` built in its loader's order: Open's two regions, each a run
+  // whose last state leaves for Wait.
+  auto const kicked = [](Chart &c) {
+    SubmachineId const root{ build_chart(c, "kicked", {}) };
+    StateId const closed{ build_state(c, root, "Closed", StateKind::Normal, {}) };
+    StateId const open{ build_state(c, root, "Open", StateKind::Normal, {}) };
+    SubmachineId const in{ build_submachine(c, open, "inbound", {}) };
+    StateId const a{ build_state(c, in, "A", StateKind::Normal, {}) };
+    StateId const b{ build_state(c, in, "B", StateKind::Normal, {}) };
+    SubmachineId const out{ build_submachine(c, open, "outbound", {}) };
+    StateId const d{ build_state(c, out, "C", StateKind::Normal, {}) };
+    StateId const e{ build_state(c, out, "D", StateKind::Normal, {}) };
+    StateId const wait{ build_state(c, root, "Wait", StateKind::Normal, {}) };
+    StateId const in_start{ build_state(c, in, "", StateKind::Initial, {}) };
+    StateId const out_start{ build_state(c, out, "", StateKind::Initial, {}) };
+    StateId const start{ build_state(c, root, "", StateKind::Initial, {}) };
+    build_trans(c, in_start, a, TransKind::Default, {});
+    build_trans(c, a, b, TransKind::Default, {});
+    build_trans(c, out_start, d, TransKind::Default, {});
+    build_trans(c, d, e, TransKind::Default, {});
+    build_trans(c, start, closed, TransKind::Default, {});
+    build_trans(c, closed, open, TransKind::Default, {});
+    build_trans(c, b, wait, TransKind::Default, {});
+    build_trans(c, e, wait, TransKind::Default, {});
+    build_trans(c, wait, closed, TransKind::Default, {});
+  };
+  Chart traced;
+  Chart plain;
+  kicked(traced);
+  kicked(plain);
+  scav_layout_opts opts{};
+  REQUIRE(profile_named("readable", opts.profile));
+  std::vector<scav_placed> placed;
+  std::vector<Diagnostic> diags;
+  REQUIRE(layout_run(plain, {}, opts, placed, diags));
+  opts.threads = 1;
+  LayoutTrace t;
+  trace_outline_set(&t);
+  bool const ran{ layout_run(traced, {}, opts, placed, diags) };
+  trace_outline_set(nullptr);
+  REQUIRE(ran);
+  CHECK(layout_coordinate_hash(traced) == layout_coordinate_hash(plain));
+
+  // Each row's first search in row order, a repeat naming an earlier row, each kick's own
+  // frame's cost no lower than its converged one, a verdict against the row's drawing,
+  // each take below it, then each row's refold.
+  std::vector<Cost> drawn(LAYOUT_SEARCH_ROWS);
+  uint32_t firsts{ 0 };
+  uint32_t refolds{ 0 };
+  uint32_t outward{ 0 };  // kicks dearer in their own frame that improve once it re-ranks
+  for (TraceEvent const &ev : t.events) {
+    CAPTURE(static_cast<uint32_t>(ev.kind));
+    uint32_t const row{ ev.search.row };
+    REQUIRE(row < LAYOUT_SEARCH_ROWS);
+    Cost const reached{ .t0_violations = ev.search.t0, .t2 = ev.search.t2 };
+    if (ev.kind == TraceKind::RowSearched) {
+      if (ev.pass == static_cast<uint16_t>(RowPass::First)) {
+        CHECK(row == firsts);
+        CHECK(refolds == 0);
+        ++firsts;
+        drawn[row] = reached;
+      } else {
+        ++refolds;
+      }
+      continue;
+    }
+    CHECK(firsts == LAYOUT_SEARCH_ROWS);
+    if (ev.kind == TraceKind::RowRepeated) {
+      CHECK(ev.search.of < row);
+      continue;
+    }
+    if (ev.kind == TraceKind::KickTaken) {
+      CHECK(cost_less(reached, drawn[row]));
+      drawn[row] = reached;
+      continue;
+    }
+    REQUIRE(ev.kind == TraceKind::KickScored);
+    if (ev.pass == static_cast<uint16_t>(KickVerdict::NotViable)) { continue; }
+    Cost const framed{ .t0_violations = ev.search.framed_t0, .t2 = ev.search.framed };
+    CHECK_FALSE(cost_less(framed, reached));
+    bool const improves{ ev.pass == static_cast<uint16_t>(KickVerdict::Improves) };
+    CHECK(improves == cost_less(reached, drawn[row]));
+    outward += (improves && !cost_less(framed, drawn[row])) ? 1U : 0U;
+  }
+  CHECK(firsts == LAYOUT_SEARCH_ROWS);
+  CHECK(refolds == LAYOUT_SEARCH_ROWS);
+  CHECK(outward > 0);
 }

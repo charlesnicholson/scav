@@ -760,6 +760,7 @@ static_assert((static_cast<uint16_t>(MoveKind::Rank) == TRACE_MOVE_RANK) &&
                   (static_cast<uint16_t>(MoveKind::Face) == TRACE_MOVE_FACE) &&
                   (static_cast<uint16_t>(MoveKind::Side) == TRACE_MOVE_SIDE) &&
                   (static_cast<uint16_t>(MoveKind::Fold) == TRACE_MOVE_FOLD) &&
+                  (static_cast<uint16_t>(MoveKind::Orient) == TRACE_MOVE_ORIENT) &&
                   (static_cast<uint16_t>(MoveKind::Loop) == TRACE_MOVE_LOOP),
               "the trace names a move by this enum's ordinal");
 // One Level 1 move or kick; `kind` names which of its pins is set. `Face` is an end pin
@@ -1662,6 +1663,21 @@ Improved search_moves(Chart const &c,
   return out;
 }
 
+// A search event for Level 2 row `row` reaching `cost`, naming no kick.
+TraceEvent search_event(TraceKind kind, uint16_t pass, uint32_t row, Cost const &cost) {
+  return { .kind = kind,
+           .pass = pass,
+           .search = { .row = row,
+                       .of = INVALID,
+                       .move = 0,
+                       .trans = INVALID,
+                       .leg = 0,
+                       .t0 = cost.t0_violations,
+                       .framed_t0 = 0,
+                       .t2 = cost.t2,
+                       .framed = 0 } };
+}
+
 // Flags each frame that encloses a frame `frames` flags and is not flagged itself.
 std::vector<uint8_t> enclosing_frames(Chart const &c, std::vector<uint8_t> const &frames) {
   std::vector<uint8_t> out(frames.size(), 0);
@@ -1866,6 +1882,11 @@ bool layout_run(Chart &c,
     for (uint32_t k = 0; k < n; ++k) {
       if (!done[k].viable) { continue; }
       uint32_t const i{ active[k] };
+      RowPass const pass{ refold ? RowPass::Refold : RowPass::First };
+      trace_outline_emit(search_event(TraceKind::RowSearched,
+                                      static_cast<uint16_t>(pass),
+                                      i,
+                                      done[k].cost));
       candidates[i] = std::move(done[k].best);
       cost[i] = done[k].cost;
       held[i] = std::move(done[k].held);
@@ -1897,20 +1918,22 @@ bool layout_run(Chart &c,
                           memo_at);
     };
     // Searches `start` in the `redo` frames, then in turn in the frames enclosing them and
-    // in the `redo` frames again, until a search improves nothing.
-    auto const search_kicked = [&](SearchPins const &start,
-                                   std::vector<uint8_t> const &redo) {
-      std::vector<uint8_t> const around{ enclosing_frames(c, redo) };
-      Improved out{ search_from(start, &redo) };
-      bool outward{ true };
-      while (out.viable) {
-        Improved next{ search_from(out.held, outward ? &around : &redo) };
-        if (!next.viable || !cost_less(next.cost, out.cost)) { break; }
-        out = std::move(next);
-        outward = !outward;
-      }
-      return out;
-    };
+    // in the `redo` frames again, until a search improves nothing. `framed` gets the first
+    // search's cost.
+    auto const search_kicked =
+        [&](SearchPins const &start, std::vector<uint8_t> const &redo, Cost &framed) {
+          std::vector<uint8_t> const around{ enclosing_frames(c, redo) };
+          Improved out{ search_from(start, &redo) };
+          framed = out.cost;
+          bool outward{ true };
+          while (out.viable) {
+            Improved next{ search_from(out.held, outward ? &around : &redo) };
+            if (!next.viable || !cost_less(next.cost, out.cost)) { break; }
+            out = std::move(next);
+            outward = !outward;
+          }
+          return out;
+        };
     auto const frame_of_leg = [&](TransId t, uint32_t leg) {
       if (t.v >= g.trans_segments.size()) { return INVALID; }
       Span const segs{ g.trans_segments[t.v] };
@@ -1946,7 +1969,9 @@ bool layout_run(Chart &c,
       }
       return out;
     };
-    auto const take = [&](Improved &&won) {
+    auto const take = [&](Improved &&won, KickHow how) {
+      trace_outline_emit(
+          search_event(TraceKind::KickTaken, static_cast<uint16_t>(how), best, won.cost));
       candidates[best] = std::move(won.best);
       cost[best] = won.cost;
       held[best] = std::move(won.held);
@@ -2012,13 +2037,33 @@ bool layout_run(Chart &c,
       if (kicks.empty()) { break; }
 
       std::vector<Improved> tried(kicks.size());
+      std::vector<Cost> framed(kicks.size());
       parallel_for(static_cast<uint32_t>(kicks.size()), o.threads, [&](uint32_t j) {
         std::vector<uint8_t> redo(c.submachines.size(), 0);
         if (kick_frame[j] < redo.size()) { redo[kick_frame[j]] = 1; }
         SearchPins start{ warm(held[best], redo) };
         add_move(start, kicks[j]);
-        tried[j] = search_kicked(start, redo);
+        tried[j] = search_kicked(start, redo, framed[j]);
       });
+      for (uint32_t j = 0; j < tried.size(); ++j) {
+        KickVerdict verdict{ KickVerdict::NotViable };
+        if (tried[j].viable) {
+          verdict = cost_less(tried[j].cost, cost[best]) ? KickVerdict::Improves
+                                                         : KickVerdict::NotBetter;
+        }
+        TraceEvent e{ search_event(TraceKind::KickScored,
+                                   static_cast<uint16_t>(verdict),
+                                   best,
+                                   tried[j].cost) };
+        e.frame = kick_frame[j];
+        e.search.move = static_cast<uint16_t>(kicks[j].kind);
+        e.search.trans =
+            (kicks[j].kind == MoveKind::Reverse) ? kicks[j].leg.trans.v : INVALID;
+        e.search.leg = kicks[j].leg.leg;
+        e.search.framed_t0 = framed[j].t0_violations;
+        e.search.framed = framed[j].t2;
+        trace_outline_emit(e);
+      }
 
       // Each frame's best improving kick, and the best overall; ties go to enumeration
       // order.
@@ -2048,14 +2093,15 @@ bool layout_run(Chart &c,
         }
         SearchPins start{ warm(held[best], redo) };
         for (uint32_t const j : winners) { add_move(start, kicks[j]); }
-        Improved together{ search_kicked(start, redo) };
+        Cost together_framed;
+        Improved together{ search_kicked(start, redo, together_framed) };
         if (together.viable && cost_less(together.cost, tried[single].cost)) {
-          take(std::move(together));
+          take(std::move(together), KickHow::Together);
           kicked = true;
           continue;
         }
       }
-      take(std::move(tried[single]));
+      take(std::move(tried[single]), KickHow::Single);
       kicked = true;
       // The other frames' best kicks, cheapest first, each searched on top of the
       // round's taken pins and kept where it still improves.
@@ -2072,15 +2118,18 @@ bool layout_run(Chart &c,
         if (kick_frame[j] < redo.size()) { redo[kick_frame[j]] = 1; }
         SearchPins start{ warm(held[best], redo) };
         add_move(start, kicks[j]);
-        Improved more{ search_kicked(start, redo) };
-        if (more.viable && cost_less(more.cost, cost[best])) { take(std::move(more)); }
+        Cost more_framed;
+        Improved more{ search_kicked(start, redo, more_framed) };
+        if (more.viable && cost_less(more.cost, cost[best])) {
+          take(std::move(more), KickHow::Stacked);
+        }
       }
     }
     // After any kick, one unscoped search from the kicked pins, kept where it improves.
     if (kicked) {
       Improved settled{ search_from(held[best], nullptr) };
       if (settled.viable && cost_less(settled.cost, cost[best])) {
-        take(std::move(settled));
+        take(std::move(settled), KickHow::Settled);
       }
     }
   };
@@ -2095,7 +2144,12 @@ bool layout_run(Chart &c,
     std::vector<uint8_t> repeat(rows, 0);
     for (uint32_t i = 0; i < rows; ++i) {
       for (uint32_t j = 0; (j < i) && (viable[i] != 0) && (repeat[i] == 0); ++j) {
-        if ((viable[j] != 0) && (repeat[j] == 0) && same_drawing(i, j)) { repeat[i] = 1; }
+        if ((viable[j] != 0) && (repeat[j] == 0) && same_drawing(i, j)) {
+          repeat[i] = 1;
+          TraceEvent e{ search_event(TraceKind::RowRepeated, 0, i, cost[i]) };
+          e.search.of = j;
+          trace_outline_emit(e);
+        }
       }
     }
     std::vector<uint32_t> kicking;
@@ -2267,13 +2321,30 @@ bool layout_trace_json(Chart &c,
                        std::vector<Diagnostic> &diags,
                        std::vector<char> &out,
                        uint32_t row,
-                       TraceScope scope) {
-  if (scope == TraceScope::Search) {
+                       TraceScope scope,
+                       SearchPins const *pins) {
+  if (scope != TraceScope::Shipped) {
     LayoutTrace t;
     scav_layout_opts serial{ o };
     serial.threads = 1;
-    trace_sink_set(&t);
-    bool const ran{ layout_run(c, s, serial, placed, diags, nullptr, nullptr, row) };
+    bool const outline{ scope == TraceScope::Outline };
+    if (outline) {
+      trace_outline_set(&t);
+    } else {
+      trace_sink_set(&t);
+    }
+    bool const ran{ layout_run(c,
+                               s,
+                               serial,
+                               placed,
+                               diags,
+                               nullptr,
+                               nullptr,
+                               row,
+                               nullptr,
+                               nullptr,
+                               pins) };
+    trace_outline_set(nullptr);
     trace_sink_set(nullptr);
     trace_to_json(t, c, out);
     return ran;
@@ -2281,22 +2352,30 @@ bool layout_trace_json(Chart &c,
 
   // Searches first for the winning row and pins; the trace below re-lays only those.
   uint32_t won{ 0 };
-  SearchPins pins;
-  if (!layout_run(c, s, o, placed, diags, nullptr, &won, row, nullptr, &pins)) {
+  SearchPins taken;
+  if (!layout_run(c, s, o, placed, diags, nullptr, &won, row, nullptr, &taken, pins)) {
     trace_to_json({}, c, out);
     return false;
   }
 
-  // Re-lays the won row from `pins` on one thread with a zero move budget.
+  // Re-lays the won row from `taken` on one thread with a zero move budget.
   scav_layout_opts serial{ o };
   serial.threads = 1;
   serial.profile.portfolio_k = 0;
   LayoutTrace t;
   trace_sink_set(&t);
   std::vector<Diagnostic> again;
-  bool const laid{
-    layout_run(c, s, serial, placed, again, nullptr, nullptr, won, nullptr, nullptr, &pins)
-  };
+  bool const laid{ layout_run(c,
+                              s,
+                              serial,
+                              placed,
+                              again,
+                              nullptr,
+                              nullptr,
+                              won,
+                              nullptr,
+                              nullptr,
+                              &taken) };
   trace_sink_set(nullptr);
   trace_to_json(t, c, out);
   return laid;
