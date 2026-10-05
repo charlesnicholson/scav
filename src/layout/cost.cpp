@@ -715,8 +715,7 @@ struct Descent {
 
 // `cost_through_boxes` over `kid`, as `box_overlaps_over` takes it. `*regions` counts each
 // piece entering a live region of a reached or detached state that neither end lies in:
-// its `region_cell`, or its rect for a transition with an end at the region's owner; and
-// each piece of an external transition entering both its source's and its target's region.
+// its `region_cell`, or its rect for a transition with an end at the region's owner.
 int32_t through_boxes_over(Chart const &c,
                            SizedLayout const &z,
                            Ancestry const &an,

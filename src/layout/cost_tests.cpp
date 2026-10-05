@@ -2438,8 +2438,7 @@ scav_rect region_cell(Chart const &c, SizedLayout const &z, uint32_t m) {
 
 // `through_box`, and `through_region` per piece entering a live region of a state the
 // descent reaches or of a detached one, where neither end lies in the region: its
-// `region_cell`, or its rect where an end is the region's owner; or, for an external
-// transition, entering both its source's region and its target's.
+// `region_cell`, or its rect where an end is the region's owner.
 void through(Chart const &c,
              SizedLayout const &z,
              Ancestry const &an,
@@ -2468,6 +2467,7 @@ void through(Chart const &c,
         src_side = src_side || (has_src && !has_dst);
         dst_side = dst_side || (has_dst && !has_src);
       }
+      // An external route's piece entering both its ends' regions crosses their divider.
       foreign = foreign || ((tr.kind == TransKind::External) && src_side && dst_side);
     };
     for (uint32_t const st : an.detached) { charge(st); }

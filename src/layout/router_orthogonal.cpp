@@ -1204,9 +1204,8 @@ RouteScratch &route_scratch() {
   return s;
 }
 
-// Clears every open pass of `g` that crosses, touches or runs along an axis-aligned piece
-// of the `len` points at `pts`, recording each as `2 * i` in `pass_h`, `2 * i + 1` in
-// `pass_v`.
+// Clears each open pass of `g` crossing, touching or along an axis-aligned piece of the
+// `len` points at `pts`, recorded in `closed` as `2 * i`, or `2 * i + 1` in `pass_v`.
 void close_route(OrthoGrid &g,
                  scav_point const *pts,
                  uint32_t len,
@@ -1606,9 +1605,8 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
     if ((net.loop > 0) && ((net.src_obstacle < in.obstacles.size()) ||
                            (net.dst_obstacle < in.obstacles.size()) ||
                            (net.loop_box < in.obstacles.size()))) {
-      // A loop's corridor runs `loop_reach` out from each box end's seat and each point
-      // end, off the end's box, else the other end's, else `loop_box`; clamped into the
-      // region and the enclosure's band.
+      // A loop's corridor runs `loop_reach` out from each box end's seat and point end,
+      // off its box, else the other end's, else `loop_box`; clamped to region and band.
       std::array<scav_point, 2> at{};
       std::array<uint32_t, 2> box{};
       std::array<uint32_t, 2> face{};

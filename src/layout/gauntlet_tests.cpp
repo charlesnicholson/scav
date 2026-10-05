@@ -2675,9 +2675,8 @@ std::vector<scav_box_space> headers_on(char const *name, scav_profile const &p) 
 
 TEST_CASE(
     "gauntlet: an external route out of a machine leaves its composite and returns") {
-  // Out across the composite's border, outside it, and back in; with the inside kind it
-  // stays in. Headed, no route enters a band. Tier 0 is zero throughout, no route crosses
-  // a region divider or itself, and a loop off one face reaches out `2 * pad`.
+  // Out across the border and back; the inside kind stays in. Tier 0 is zero; no band,
+  // divider or own leg is crossed; a loop off one face reaches `2 * pad`.
   for (OutAndBack const &shape : OUT_AND_BACK) {
     for (scav_profile const &p : { readable(), compact() }) {
       std::string const chart{ shape.chart };
