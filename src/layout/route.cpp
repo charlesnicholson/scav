@@ -689,6 +689,34 @@ void reset_lists(std::vector<std::vector<uint32_t>> &v, size_t n) {
 
 }  // namespace
 
+void segment_bends(SubmachineOrders const &o,
+                   uint32_t segments,
+                   std::vector<uint32_t> &reversed,
+                   std::vector<std::vector<uint32_t>> &bends) {
+  vec_assign(reversed, segments, 0);
+  for (OrderEdge const &e : o.edges) { reversed[e.segment] = e.reversed; }
+  reset_lists(bends, segments);
+  for (uint32_t node = 0; node < o.nodes.size(); ++node) {
+    if (o.nodes[node].kind == OrderKind::Bend) {
+      vec_push_back(bends[o.nodes[node].subject], node);
+    }
+  }
+  for (uint32_t seg = 0; seg < bends.size(); ++seg) {
+    std::vector<uint32_t> &chain{ bends[seg] };
+    scav_stable_sort(chain, [&](uint32_t a, uint32_t b) {
+      return o.nodes[a].rank < o.nodes[b].rank;
+    });
+    // Ranks climb in the acyclic direction; reversed edges flip to authored order.
+    if (reversed[seg] != 0) {
+      for (uint32_t i = 0; i < (chain.size() / 2); ++i) {
+        uint32_t const other{ chain[i] };
+        chain[i] = chain[chain.size() - 1 - i];
+        chain[chain.size() - 1 - i] = other;
+      }
+    }
+  }
+}
+
 Routes route_transitions(Chart const &c,
                          SplitGraph const &g,
                          SubmachineOrders const &o,
@@ -771,30 +799,8 @@ void route_transitions(Routes &out,
   for (uint32_t seg = 0; seg < g.segments.size(); ++seg) {
     if (o.seg_port[seg] != INVALID) { port_seg[o.seg_port[seg]] = seg; }
   }
-  std::vector<uint32_t> &seg_reversed{ cs.seg_reversed };
-  vec_assign(seg_reversed, g.segments.size(), 0);
-  for (OrderEdge const &e : o.edges) { seg_reversed[e.segment] = e.reversed; }
   std::vector<std::vector<uint32_t>> &seg_bends{ cs.seg_bends };
-  reset_lists(seg_bends, g.segments.size());
-  for (uint32_t node = 0; node < o.nodes.size(); ++node) {
-    if (o.nodes[node].kind == OrderKind::Bend) {
-      vec_push_back(seg_bends[o.nodes[node].subject], node);
-    }
-  }
-  for (uint32_t seg = 0; seg < seg_bends.size(); ++seg) {
-    std::vector<uint32_t> &chain{ seg_bends[seg] };
-    scav_stable_sort(chain, [&](uint32_t a, uint32_t b) {
-      return o.nodes[a].rank < o.nodes[b].rank;
-    });
-    // Ranks climb in the acyclic direction; reversed edges flip to authored order.
-    if (seg_reversed[seg] != 0) {
-      for (uint32_t i = 0; i < (chain.size() / 2); ++i) {
-        uint32_t const other{ chain[i] };
-        chain[i] = chain[chain.size() - 1 - i];
-        chain[chain.size() - 1 - i] = other;
-      }
-    }
-  }
+  segment_bends(o, static_cast<uint32_t>(g.segments.size()), cs.seg_reversed, seg_bends);
 
   // Each inner loop's four points out of its state's border and back, in its row of the
   // state's loop room; `occupied` gets its ends' run on each face they touch, padded.

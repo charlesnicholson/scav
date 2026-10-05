@@ -60,6 +60,13 @@ struct RouteCache {
 // span, else any face of the slot's box; a divider port's box is its divider line.
 void reseat_slots(SplitGraph const &g, SizedLayout const &z, Routes &out);
 
+// Per segment, its bend nodes from source to destination as routing reads them; `reversed`
+// gets each segment's `OrderEdge::reversed`.
+void segment_bends(SubmachineOrders const &o,
+                   uint32_t segments,
+                   std::vector<uint32_t> &reversed,
+                   std::vector<std::vector<uint32_t>> &bends);
+
 // One net per segment, routed in its frame, laid end to end; the result is the same at
 // every `threads`. With `labels` false, `placed` is empty.
 Routes route_transitions(Chart const &c,
