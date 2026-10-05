@@ -3297,27 +3297,27 @@ TEST_CASE("cost bound: area, length and bends of two boxes, and a named face") {
   z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 400 };
   z.state[b.v] = { .x = 300, .y = 600, .w = 100, .h = 400 };
   z.chart = { .x = 0, .y = 0, .w = 400, .h = 1000 };
-  SubmachineOrders const o;
+  std::vector<std::vector<uint32_t>> const bends(g.segments.size());
   scav_profile const p{ profile() };
   int32_t const clear{ route_clearance(p) };
 
-  CostTerms const t{ cost_bound(c, g, o, z, {}, p, clear, true) };
+  CostTerms const t{ cost_bound(c, g, bends, z, {}, p, clear, true) };
   CHECK(t.area == 400LL * 1000);
   CHECK(t.length == 200 + 200);
   CHECK(t.bends == 1);
   CHECK(cost_of(t, p).t0_violations == 0);
 
   // A router that is not rectilinear: the larger axis gap, and no bends.
-  CostTerms const any{ cost_bound(c, g, o, z, {}, p, clear, false) };
+  CostTerms const any{ cost_bound(c, g, bends, z, {}, p, clear, false) };
   CHECK(any.length == 200);
   CHECK(any.bends == 0);
 
   // Leaving A by its left face, away from B, turns twice.
   std::vector<uint32_t> const left{ (0U << 3U) | (0U << 2U) | 0U };
-  CHECK(cost_bound(c, g, o, z, left, p, clear, true).bends == 2);
+  CHECK(cost_bound(c, g, bends, z, left, p, clear, true).bends == 2);
   // A face too short to seat on is declined, and so takes no constraint.
   z.state[a.v].h = 2 * clear;
-  CHECK(cost_bound(c, g, o, z, left, p, clear, true).bends == 1);
+  CHECK(cost_bound(c, g, bends, z, left, p, clear, true).bends == 1);
 }
 
 TEST_CASE("cost bound: an inner loop takes two bends, a self-transition none") {

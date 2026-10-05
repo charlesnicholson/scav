@@ -513,6 +513,7 @@ void facing_flips(Facing &out,
 // facing pass read no box-end pin; candidates differing only in those share them.
 struct Prefix {
   SubmachineOrders laid;
+  std::vector<std::vector<uint32_t>> bends;  // `laid`'s, as `segment_bends` writes them
   SizedLayout sized;
   Facing flips;
   Routes routes;  // as phase 3 first routes it, over `sized`
@@ -764,6 +765,11 @@ void search_candidate(Candidate &out,
     }
     if (prefix != nullptr) {
       prefix->laid = *use;
+      std::vector<uint32_t> reversed;
+      segment_bends(*use,
+                    static_cast<uint32_t>(g.segments.size()),
+                    reversed,
+                    prefix->bends);
       prefix->sized = out.sized;
       prefix->flips = sc.flips;
       prefix->ok = true;
@@ -1006,6 +1012,8 @@ struct MoveScratch {
   Candidate whole, face;
   CandidateScratch keep;
   std::vector<uint32_t> faces;  // the move's box-end faces
+  std::vector<uint32_t> reversed;
+  std::vector<std::vector<uint32_t>> bends;  // the laid ordering's, per segment
 };
 
 // A search's view of the candidate memo; a null `table` scores every move in full.
@@ -1053,11 +1061,11 @@ MoveScratch &move_scratch() {
   return s;
 }
 
-// `cost_bound` of laid ordering `o` sized as `z` under the move's faces, routed by
-// `router`.
+// `cost_bound` of a laid ordering with `bends` sized as `z` under the move's faces, routed
+// by `router`.
 CostTerms route_bound(Chart const &c,
                       SplitGraph const &g,
-                      SubmachineOrders const &o,
+                      std::vector<std::vector<uint32_t>> const &bends,
                       SizedLayout const &z,
                       std::vector<uint32_t> const &faces,
                       scav_profile const &objective,
@@ -1065,7 +1073,7 @@ CostTerms route_bound(Chart const &c,
                       Router const &router) {
   return cost_bound(c,
                     g,
-                    o,
+                    bends,
                     z,
                     faces,
                     objective,
@@ -1145,15 +1153,18 @@ Scored score_memoized(Chart const &c,
   };
   CostTerms bound{};  // the move's route bound where `bounded`
   bool bounded{ false };
-  // Prunes by the stored route bound, else by that of `o` sized as `z`, which it stores.
-  auto const pruned_by = [&](SubmachineOrders const &o, SizedLayout const &z) {
+  // Prunes by the stored route bound, else by that of `bends` sized as `z`, which it
+  // stores.
+  auto const pruned_by = [&](std::vector<std::vector<uint32_t>> const &bends,
+                             SizedLayout const &z) {
     if (prune_at(stored_bound)) { return true; }
-    bool compute{ memo.prune && (stored_bound < 0) };
+    bool compute{ memo.prune && (stored_bound < 0) &&
+                  (memo.incumbent.t0_violations == 0) };
 #ifdef SCAV_TESTING
     compute = compute || test_route_bound_verify;
 #endif
     if (!compute) { return false; }
-    bound = route_bound(c, g, o, z, sc.faces, objective, row, router);
+    bound = route_bound(c, g, bends, z, sc.faces, objective, row, router);
     bounded = true;
     int64_t const t2{ cost_of(bound, objective).t2 };
     table.set_route_bound(use.entry, t2);
@@ -1175,7 +1186,7 @@ Scored score_memoized(Chart const &c,
       cand = Candidate{};
       return out;
     }
-    if (recall_drawn(memo.drawn) || pruned_by(from->laid, from->sized)) { return out; }
+    if (recall_drawn(memo.drawn) || pruned_by(from->bends, from->sized)) { return out; }
     cand.sized = from->sized;
     cand.laid = pins;
     turn_pins(cand.laid, from->flips);
@@ -1257,10 +1268,11 @@ Scored score_memoized(Chart const &c,
       cand.laid = SearchPins{};
       return out;
     }
+    segment_bends(*laid, static_cast<uint32_t>(g.segments.size()), sc.reversed, sc.bends);
     bool const drawn{ recall_drawn(
-        table.drawing(*laid, cand.sized, memo.profile, memo.drawing)) };
+        table.drawing(*laid, cand.sized, sc.bends, memo.profile, memo.drawing)) };
     table.link(key, use.entry);
-    if (drawn || pruned_by(*laid, cand.sized)) { return out; }
+    if (drawn || pruned_by(sc.bends, cand.sized)) { return out; }
   }
   lay_routes(cand, c, g, *laid, s, row, router, 1, &pins, { .reuse = reuse }, labels);
   out = scored_of(c, g, scoring, s, objective, cand, labels);

@@ -909,6 +909,8 @@ bool axis_reaches(Wide a0,
 
 constexpr int32_t FAR_TURNS{ 1 << 20 };  // exceeds any count of turns
 
+std::vector<uint32_t> const NO_BENDS;
+
 // Per arrival axis (0 horizontal, 1 vertical), the fewest axis changes from `a` to `b`
 // after arriving at `a` along `in` (2 for none); `first`, `last` constrain the end pieces.
 std::array<int32_t, 2> leg_turns(Region const &a,
@@ -1472,7 +1474,7 @@ CostTerms cost_terms(Chart const &c,
 
 CostTerms cost_bound(Chart const &c,
                      SplitGraph const &g,
-                     SubmachineOrders const &o,
+                     std::vector<std::vector<uint32_t>> const &bends,
                      SizedLayout const &z,
                      std::vector<uint32_t> const &faces,
                      scav_profile const &p,
@@ -1480,14 +1482,9 @@ CostTerms cost_bound(Chart const &c,
                      bool rectilinear) {
   CostTerms t;
   t.area = area_of(z.chart);
-  t.whitespace = whitespace_of(c, z, t.area);
+  t.whitespace = (p.w_whitespace != 0) ? whitespace_of(c, z, t.area) : 0;
   t.adjacency = adjacency_of(c, g, z, p);
-  thread_local std::vector<uint32_t> reversed;
-  thread_local std::vector<std::vector<uint32_t>> bends;
   thread_local std::vector<scav_point> via;
-  if (rectilinear) {
-    segment_bends(o, static_cast<uint32_t>(g.segments.size()), reversed, bends);
-  }
   // The face `faces` names at end `end` of segment `seg`, else INVALID.
   auto const named = [&faces](uint32_t seg, uint32_t end) {
     uint32_t const at{ (seg << 3U) | (end << 2U) };
@@ -1523,7 +1520,9 @@ CostTerms cost_bound(Chart const &c,
     std::array<Region, 2> end_at{ box };
     std::array<uint32_t, 2> face{ INVALID, INVALID };
     if (direct) {
-      for (uint32_t const bend : bends[segs.off]) { vec_push_back(via, z.node[bend]); }
+      for (uint32_t const bend : (segs.off < bends.size()) ? bends[segs.off] : NO_BENDS) {
+        vec_push_back(via, z.node[bend]);
+      }
       for (uint32_t end = 0; end < 2; ++end) {
         uint32_t const st{ (end == 0) ? trans.src.v : trans.dst.v };
         uint32_t const f{ named(segs.off, end) };
@@ -1547,7 +1546,11 @@ CostTerms cost_bound(Chart const &c,
         face[end] = f;
       }
     }
-    t.bends += path_turns(end_at[0], face[0], via, end_at[1], face[1]);
+    if (via.empty() && (face[0] == INVALID) && (face[1] == INVALID)) {
+      t.bends += ((gap_x > 0) && (gap_y > 0)) ? 1 : 0;
+    } else {
+      t.bends += path_turns(end_at[0], face[0], via, end_at[1], face[1]);
+    }
   }
   return t;
 }

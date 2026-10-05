@@ -81,6 +81,14 @@ class CandidateMemo {
                    Blocks const *like = nullptr,
                    Blocks *keep = nullptr);
 
+  // `drawing` with `o`'s bend nodes per segment, as `segment_bends` writes them.
+  uint32_t drawing(SubmachineOrders const &o,
+                   SizedLayout const &z,
+                   std::vector<std::vector<uint32_t>> const &bends,
+                   uint32_t profile,
+                   Blocks const *like = nullptr,
+                   Blocks *keep = nullptr);
+
   // The router's box-end faces under `pins`, as `route_transitions` reads them: the last
   // pin naming an end decides it; one word per end, sorted.
   void box_faces(SearchPins const *pins, std::vector<uint32_t> &faces) const;

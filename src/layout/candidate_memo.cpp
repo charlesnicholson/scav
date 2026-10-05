@@ -436,6 +436,18 @@ uint32_t CandidateMemo::drawing(SubmachineOrders const &o,
                                 uint32_t profile,
                                 Blocks const *like,
                                 Blocks *keep) {
+  thread_local std::vector<uint32_t> reversed;
+  thread_local std::vector<std::vector<uint32_t>> bends;
+  segment_bends(o, static_cast<uint32_t>(graph.segments.size()), reversed, bends);
+  return drawing(o, z, bends, profile, like, keep);
+}
+
+uint32_t CandidateMemo::drawing(SubmachineOrders const &o,
+                                SizedLayout const &z,
+                                std::vector<std::vector<uint32_t>> const &bends,
+                                uint32_t profile,
+                                Blocks const *like,
+                                Blocks *keep) {
   size_t const states{ chart.states.size() };
   size_t const segments{ graph.segments.size() };
   if (!usable || (z.state.size() != states) || (z.before.size() != states) ||
@@ -443,20 +455,18 @@ uint32_t CandidateMemo::drawing(SubmachineOrders const &o,
       (z.trail.size() != states) || (z.loop.size() != states) ||
       (z.loop_place.size() != states) || (z.sub.size() != chart.submachines.size()) ||
       (z.lean.size() != segments) || (o.seg_port.size() != segments) ||
-      (o.seg_side.size() != segments) || (o.seg_node.size() != segments)) {
+      (o.seg_side.size() != segments) || (o.seg_node.size() != segments) ||
+      (bends.size() != segments)) {
     return INVALID;
   }
   // `now` encodes the geometry and `blocks` the thread's previous one; `tuple` is the
   // drawing's key, and `last_tuple` and `last` the thread's previous key and number.
   thread_local Blocks now;
   thread_local Blocks blocks;
-  thread_local std::vector<uint32_t> reversed;
-  thread_local std::vector<std::vector<uint32_t>> bends;
   thread_local std::vector<uint32_t> tuple;
   thread_local std::vector<uint32_t> last_tuple;
   thread_local uint32_t last_serial{ 0 };
   thread_local uint32_t last{ INVALID };
-  segment_bends(o, static_cast<uint32_t>(segments), reversed, bends);
   now.words.clear();
   now.ends.clear();
   auto const count{ static_cast<uint32_t>(chart.submachines.size()) + 1 };
