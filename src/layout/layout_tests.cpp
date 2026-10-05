@@ -1253,8 +1253,9 @@ TEST_CASE("layout: no corpus chart runs a route flush along a box" *
       }
     }
   }
-  // Three nets, one on kiln and two on vac, route only after giving up their clearance.
-  CHECK(reseated == 3);
+  // Four nets, one on kiln, one on printer and two on vac, route only after giving up their
+  // clearance.
+  CHECK(reseated == 4);
   MESSAGE("routes flush against a box:\n", report);
   // One report line per flush run; at most ten across the corpus.
   uint32_t lines{ 0 };
@@ -1328,13 +1329,13 @@ constexpr std::array<char const *, 2> SCALE_ROUTERS{ "orthogonal", "straight" };
 // One row per cell, chart-major then profile then router: through_box, box_overlap,
 // bends, corridor, crossings, excess_len, adjacency, label, label_near, aspect, area.
 constexpr std::array<std::array<int64_t, 11>, 8> SCALE_PINNED{
-  { { 0, 0, 2528, 0, 0, 1990112, 0, 0, 0, 2760164, 36376973376 },
-    { 21616, 0, 3072, 46675760, 52856, 95493944, 0, 0, 0, 2760164, 36376973376 },
-    { 0, 0, 2528, 0, 0, 1224016, 0, 0, 0, 640498, 14443223840 },
-    { 22224, 0, 3072, 31614112, 52456, 57418576, 0, 0, 0, 640498, 14443223840 },
-    { 0, 0, 1220, 0, 80, 2591782, 0, 0, 0, 73344, 3667557376 },
+  { { 0, 0, 2528, 0, 0, 1990112, 0, 0, 0, 2764964, 36418952256 },
+    { 21608, 0, 3072, 46749232, 52856, 95492256, 0, 0, 0, 2764964, 36418952256 },
+    { 0, 0, 2528, 0, 0, 1224016, 0, 0, 0, 640768, 14447836160 },
+    { 22248, 0, 3072, 31627520, 52552, 57525032, 0, 0, 0, 640768, 14447836160 },
+    { 0, 0, 1220, 0, 80, 2581702, 0, 0, 0, 73344, 3667557376 },
     { 2088, 0, 319, 0, 265, 7295646, 0, 0, 0, 73344, 3667557376 },
-    { 0, 0, 1176, 162960, 91, 2319881, 0, 0, 0, 13056, 1615626240 },
+    { 0, 0, 1176, 162652, 91, 2313439, 0, 0, 0, 13056, 1615626240 },
     { 1986, 0, 324, 0, 266, 5555577, 0, 0, 0, 13056, 1615626240 } }
 };
 
