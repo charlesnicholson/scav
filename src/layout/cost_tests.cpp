@@ -726,6 +726,45 @@ TEST_CASE("cost: a route that crosses itself is a Tier-0 violation") {
   CHECK(cost_terms(c, decompose(c), z, square, {}, profile()).self_crossing == 0);
 }
 
+TEST_CASE("cost: an external route between two regions that crosses their divider") {
+  // `On` holds regions `main` and `aux` side by side; `A` in `main` goes to `B` in `aux`.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const on{ build_state(c, root, "On", StateKind::Normal, {}) };
+  SubmachineId const main_sub{ build_submachine(c, on, "main", {}) };
+  SubmachineId const aux_sub{ build_submachine(c, on, "aux", {}) };
+  StateId const a{ build_state(c, main_sub, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, aux_sub, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+
+  SizedLayout z{ blank(c) };
+  z.state[on.v] = { .x = 0, .y = 0, .w = 400, .h = 200 };
+  z.sub[main_sub.v] = { .x = 10, .y = 10, .w = 180, .h = 180 };
+  z.sub[aux_sub.v] = { .x = 210, .y = 10, .w = 180, .h = 180 };
+  z.state[a.v] = { .x = 40, .y = 60, .w = 100, .h = 40 };
+  z.state[b.v] = { .x = 240, .y = 140, .w = 100, .h = 40 };
+  auto const regions = [&](Routes const &r) {
+    return cost_terms(c, decompose(c), z, r, {}, profile()).through_region;
+  };
+
+  // Out of `On` on the left, back in on the left, then across `main` and the divider.
+  Routes const across{ routes_of(c,
+                                 { { { .x = 40, .y = 80 },
+                                     { .x = -50, .y = 80 },
+                                     { .x = -50, .y = 160 },
+                                     { .x = 240, .y = 160 } } }) };
+  CHECK(regions(across) == 1);
+  // Out of `main` downward, round below `On` and up into `aux`.
+  CHECK(regions(routes_of(c,
+                          { { { .x = 90, .y = 100 },
+                              { .x = 90, .y = 260 },
+                              { .x = 290, .y = 260 },
+                              { .x = 290, .y = 180 } } })) == 0);
+  // A transition of the default kind crosses the divider by design.
+  c.transitions[0].kind = TransKind::Default;
+  CHECK(regions(across) == 0);
+}
+
 TEST_CASE("cost: a route through a region neither end is in is a Tier-0 violation") {
   // `On` holds regions `main` and `aux`; `Ready` in `main` goes to `X` outside.
   // Crossing `aux` is a `through_region` violation; `through_box` skips ancestor `On`.
@@ -2399,7 +2438,8 @@ scav_rect region_cell(Chart const &c, SizedLayout const &z, uint32_t m) {
 
 // `through_box`, and `through_region` per piece entering a live region of a state the
 // descent reaches or of a detached one, where neither end lies in the region: its
-// `region_cell`, or its rect where an end is the region's owner.
+// `region_cell`, or its rect where an end is the region's owner; or, for an external
+// transition, entering both its source's region and its target's.
 void through(Chart const &c,
              SizedLayout const &z,
              Ancestry const &an,
@@ -2415,15 +2455,20 @@ void through(Chart const &c,
         ++t.through_box;
       }
       Span const subs{ c.states[st].submachines };
+      bool src_side{ false };
+      bool dst_side{ false };
       for (uint32_t i = 0; i < subs.len; ++i) {
         uint32_t const m{ c.submachine_ids[subs.off + i].v };
         bool const own{ (tr.src.v == st) || (tr.dst.v == st) };
         scav_rect const cell{ own ? z.sub[m] : region_cell(c, z, m) };
-        if ((c.submachines[m].live != 0) && enters(piece.a, piece.b, cell) &&
-            !within(c, tr.src, m) && !within(c, tr.dst, m)) {
-          foreign = true;
-        }
+        if ((c.submachines[m].live == 0) || !enters(piece.a, piece.b, cell)) { continue; }
+        bool const has_src{ within(c, tr.src, m) };
+        bool const has_dst{ within(c, tr.dst, m) };
+        foreign = foreign || (!has_src && !has_dst);
+        src_side = src_side || (has_src && !has_dst);
+        dst_side = dst_side || (has_dst && !has_src);
       }
+      foreign = foreign || ((tr.kind == TransKind::External) && src_side && dst_side);
     };
     for (uint32_t const st : an.detached) { charge(st); }
     std::vector<uint32_t> stack;

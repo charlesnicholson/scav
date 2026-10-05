@@ -52,15 +52,15 @@ scav_profile compact() {
 
 // Every chart in test_data/charts/gauntlet, by file name.
 constexpr std::array GAUNTLET{
-  "above.scav",     "bypass.scav",  "carried.scav", "chain.scav",     "corner.scav",
-  "crossing.scav",  "crowd.scav",   "detour.scav",  "enclosing.scav", "entered.scav",
-  "fanin.scav",     "folded.scav",  "fork.scav",    "header.scav",    "headed.scav",
-  "inloop.scav",    "inward.scav",  "lane.scav",    "level.scav",     "long.scav",
-  "loop.scav",      "marks.scav",   "mixed.scav",   "mutual.scav",    "ported.scav",
-  "pulled.scav",    "rebound.scav", "reentry.scav", "regions.scav",   "resumed.scav",
-  "ring.scav",      "room.scav",    "rooms.scav",   "roundtrip.scav", "seated.scav",
-  "separator.scav", "side.scav",    "stretch.scav", "through.scav",   "tight.scav",
-  "transit.scav",   "under.scav",   "unfolded.scav"
+  "above.scav",    "bypass.scav",    "carried.scav", "chain.scav",     "corner.scav",
+  "crossing.scav", "crowd.scav",     "detour.scav",  "enclosing.scav", "entered.scav",
+  "fanin.scav",    "flank.scav",     "folded.scav",  "fork.scav",      "header.scav",
+  "headed.scav",   "inloop.scav",    "inward.scav",  "lane.scav",      "level.scav",
+  "long.scav",     "loop.scav",      "marks.scav",   "mixed.scav",     "mutual.scav",
+  "ported.scav",   "pulled.scav",    "rebound.scav", "reentry.scav",   "regions.scav",
+  "resumed.scav",  "ring.scav",      "room.scav",    "rooms.scav",     "roundtrip.scav",
+  "seated.scav",   "separator.scav", "side.scav",    "stretch.scav",   "through.scav",
+  "tight.scav",    "transit.scav",   "under.scav",   "unfolded.scav"
 };
 
 // One chart, laid out: the pieces every property below reads.
@@ -2559,6 +2559,41 @@ std::string runs_against(Laid const &l, uint32_t t, uint32_t st) {
   return out;
 }
 
+// True when transition `t`'s route enters the gap between two live regions of state `st`.
+bool crosses_divider(Laid const &l, uint32_t t, uint32_t st) {
+  scav_rect const &box{ l.z.state[st] };
+  scav_span const route{ l.r.route[t] };
+  Span const subs{ l.c.states[st].submachines };
+  for (uint32_t i = 0; i < subs.len; ++i) {
+    for (uint32_t j = 0; j < subs.len; ++j) {
+      uint32_t const m{ l.c.submachine_ids[subs.off + i].v };
+      uint32_t const o{ l.c.submachine_ids[subs.off + j].v };
+      if ((m == o) || (l.c.submachines[m].live == 0) || (l.c.submachines[o].live == 0)) {
+        continue;
+      }
+      scav_rect const &a{ l.z.sub[m] };
+      scav_rect const &b{ l.z.sub[o] };
+      scav_rect gap{};
+      if (b.x >= (a.x + a.w)) {
+        gap = { .x = a.x + a.w, .y = box.y, .w = b.x - (a.x + a.w), .h = box.h };
+      } else if (b.y >= (a.y + a.h)) {
+        gap = { .x = box.x, .y = a.y + a.h, .w = box.w, .h = b.y - (a.y + a.h) };
+      } else {
+        continue;
+      }
+      for (uint32_t k = 0; (k + 1) < route.len; ++k) {
+        scav_point const p{ l.r.points[route.off + k] };
+        scav_point const q{ l.r.points[route.off + k + 1] };
+        if ((imin(p.x, q.x) < (gap.x + gap.w)) && (imax(p.x, q.x) > gap.x) &&
+            (imin(p.y, q.y) < (gap.y + gap.h)) && (imax(p.y, q.y) > gap.y)) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
 struct OutAndBack {
   char const *chart;
   char const *state;  // the composite the external route leaves and re-enters
@@ -2613,7 +2648,7 @@ TEST_CASE(
     "gauntlet: an external route out of a machine leaves its composite and returns") {
   // Out across the composite's border, outside it, and back in; with the inside kind it
   // stays in. Headed, no route enters a band. Tier 0 is zero throughout and no route
-  // crosses itself.
+  // crosses a region divider or itself.
   for (OutAndBack const &shape : OUT_AND_BACK) {
     for (scav_profile const &p : { readable(), compact() }) {
       std::string const chart{ shape.chart };
@@ -2630,6 +2665,7 @@ TEST_CASE(
       CostTerms const terms{ cost_columns(out.c, out.g, p) };
       CHECK(cost_of(terms, p).t0_violations == 0);
       CHECK(terms.self_crossing == 0);
+      CHECK_FALSE(crosses_divider(out, t, st));
 
       Laid in;
       lay(shape.chart, p, in, {}, nullptr, shape.inside);
@@ -2644,7 +2680,46 @@ TEST_CASE(
       CHECK(runs_against(headed, t, st) == "IOI");
       CHECK(cost_of(cost_terms(headed.c, headed.g, headed.z, headed.r, s, p), p)
                 .t0_violations == 0);
+      CHECK_FALSE(crosses_divider(headed, t, st));
     }
+  }
+}
+
+TEST_CASE(
+    "gauntlet: unsearched, an external route enters a region through its own share") {
+  // Row 0 unsearched lays `detour`'s regions side by side; the facing pass keeps each port
+  // off a face toward the sibling region.
+  for (scav_profile const &p : { readable(), compact() }) {
+    CAPTURE(p.profile_id);
+    Laid l;
+    lay("detour.scav", one_row(p), l, {}, nullptr);
+    uint32_t const st{ state_named(l.c, "Outer") };
+    uint32_t const t{ between(l.c, "A", "B") };
+    REQUIRE(st != INVALID);
+    REQUIRE(t != INVALID);
+    CHECK_FALSE(crosses_divider(l, t, st));
+    CHECK(runs_against(l, t, st) == "IOI");
+    CHECK(cost_of(cost_columns(l.c, l.g, one_row(p)), p).t0_violations == 0);
+  }
+}
+
+TEST_CASE(
+    "gauntlet: unsearched, a route from outside enters a region through its own share") {
+  // The root turned to run down puts `X` over `Outer`, whose regions stack; `B`'s region
+  // lies under `A`'s, so its port keeps off its top border.
+  for (scav_profile const &p : { readable(), compact() }) {
+    CAPTURE(p.profile_id);
+    SearchPins const seed{ .orients = { { .frame = SubmachineId{ 0 } } } };
+    Laid l;
+    lay("flank.scav", one_row(p), l, {}, &seed);
+    uint32_t const st{ state_named(l.c, "Outer") };
+    uint32_t const t{ between(l.c, "X", "B") };
+    REQUIRE(st != INVALID);
+    REQUIRE(t != INVALID);
+    CHECK_FALSE(crosses_divider(l, t, st));
+    CostTerms const terms{ cost_columns(l.c, l.g, one_row(p)) };
+    CHECK(terms.through_region == 0);
+    CHECK(cost_of(terms, p).t0_violations == 0);
   }
 }
 

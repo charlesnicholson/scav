@@ -260,8 +260,8 @@ struct CostTerms {
   int32_t vanished{ 0 };
   // Route segments running along a state's border.
   int32_t flush{ 0 };
-  // Route segments entering a region neither end lies in: a concurrent sibling of an
-  // endpoint's own region, or any region of a state the route only leaves or reaches.
+  // Route segments entering a region neither end lies in, or an external route's segments
+  // entering both its ends' regions.
   int32_t through_region{ 0 };
   // Route vertices where an axis-aligned segment turns straight back along the one
   // before it.

@@ -715,7 +715,8 @@ struct Descent {
 
 // `cost_through_boxes` over `kid`, as `box_overlaps_over` takes it. `*regions` counts each
 // piece entering a live region of a reached or detached state that neither end lies in:
-// its `region_cell`, or its rect for a transition with an end at the region's owner.
+// its `region_cell`, or its rect for a transition with an end at the region's owner; and
+// each piece of an external transition entering both its source's and its target's region.
 int32_t through_boxes_over(Chart const &c,
                            SizedLayout const &z,
                            Ancestry const &an,
@@ -751,6 +752,8 @@ int32_t through_boxes_over(Chart const &c,
     bool foreign{ false };  // the piece entered a region neither end lies in
     // Tests `st`'s regions and, with `descend`, queues them as frames.
     auto const open = [&](uint32_t st, bool descend) {
+      bool src_side{ false };  // entered a region holding the source alone
+      bool dst_side{ false };  // entered a region holding the target alone
       Span const subs{ c.states[st].submachines };
       for (uint32_t i = 0; i < subs.len; ++i) {
         uint32_t const m{ c.submachine_ids[subs.off + i].v };
@@ -761,9 +764,15 @@ int32_t through_boxes_over(Chart const &c,
         }
         bool const own{ (tr.src.v == st) || (tr.dst.v == st) };
         scav_rect const cell{ own ? z.sub[m] : region_cell(c, z, m) };
-        foreign = overlaps(reach, cell) && enters(piece.a, piece.b, cell) &&
-                  !within(c, tr.src, m) && !within(c, tr.dst, m);
+        bool const in{ overlaps(reach, cell) && enters(piece.a, piece.b, cell) };
+        bool const has_src{ within(c, tr.src, m) };
+        bool const has_dst{ within(c, tr.dst, m) };
+        foreign = in && !has_src && !has_dst;
+        src_side = src_side || (in && has_src && !has_dst);
+        dst_side = dst_side || (in && has_dst && !has_src);
       }
+      // An external route's piece entering both its ends' regions crosses their divider.
+      foreign = foreign || ((tr.kind == TransKind::External) && src_side && dst_side);
     };
     for (uint32_t const st : an.detached) {
       charge(st, z.state[st]);

@@ -292,7 +292,7 @@ struct FacingTaken {
   uint32_t node, side;
 };
 
-// Fills `out` for legs whose port faces away from its far end or is on a lined face: the
+// Fills `out` for legs whose port faces away from its far end or is on a walled face: the
 // port takes a cross border its state sees, else its edge reverses. `taken` is scratch.
 void facing_flips(Facing &out,
                   std::vector<FacingTaken> &taken,
@@ -314,6 +314,28 @@ void facing_flips(Facing &out,
     uint32_t const owner{ c.submachines[m].owner.v };
     auto const lined = [&](uint32_t face) {
       return (owner < c.states.size()) && face_lined(s, owner, face);
+    };
+    // True when `face` of the frame is lined or faces a live sibling region.
+    auto const walled = [&](uint32_t face) {
+      if (lined(face)) { return true; }
+      if (owner >= c.states.size()) { return false; }
+      Span const subs{ c.states[owner].submachines };
+      for (uint32_t k = 0; k < subs.len; ++k) {
+        uint32_t const sib{ c.submachine_ids[subs.off + k].v };
+        if ((sib == m) || (sib >= z.sub.size()) || (c.submachines[sib].live == 0)) {
+          continue;
+        }
+        scav_rect const &q{ z.sub[sib] };
+        bool const beside{ (q.y < (frame.y + frame.h)) && (frame.y < (q.y + q.h)) };
+        bool const stacked{ (q.x < (frame.x + frame.w)) && (frame.x < (q.x + q.w)) };
+        if (((face == 0) && beside && ((q.x + q.w) <= frame.x)) ||
+            ((face == 1) && beside && (q.x >= (frame.x + frame.w))) ||
+            ((face == 2) && stacked && ((q.y + q.h) <= frame.y)) ||
+            ((face == 3) && stacked && (q.y >= (frame.y + frame.h)))) {
+          return true;
+        }
+      }
+      return false;
     };
     // The state node `seg` reaches in this frame, past any bends; INVALID if none.
     auto const joined = [&](uint32_t seg) {
@@ -351,7 +373,7 @@ void facing_flips(Facing &out,
         if (between && (rhi > lo) && (rlo < hi)) { return INVALID; }
       }
       uint32_t const side{ (down ? 0U : 2U) + (first ? 0U : 1U) };
-      if (lined(side)) { return INVALID; }
+      if (walled(side)) { return INVALID; }
       for (FacingTaken const &had : taken) {
         if ((had.node == node) && (had.side == side)) { return INVALID; }
       }
@@ -425,15 +447,15 @@ void facing_flips(Facing &out,
         continue;
       }
       bool wants_leading{ far_at < mid_at };
-      if (on_state && lined(rank_face + (on_leading ? 0U : 1U))) {
-        // A port on a lined face moves to the other rank border, else to a cross border
+      if (on_state && walled(rank_face + (on_leading ? 0U : 1U))) {
+        // A port on a walled face moves to the other rank border, else to a cross border
         // the joined state sees, else stays.
         uint32_t const j{ joined(seg) };
         uint32_t cross{ INVALID };
         for (bool const first : { true, false }) {
           if ((cross == INVALID) && (j != INVALID)) { cross = seen(j, first); }
         }
-        if (lined(rank_face + (on_leading ? 1U : 0U)) && (cross == INVALID)) {
+        if (walled(rank_face + (on_leading ? 1U : 0U)) && (cross == INVALID)) {
           trace_emit({ .kind = TraceKind::PortWalled,
                        .frame = m,
                        .port = { .seg = seg,
@@ -441,7 +463,7 @@ void facing_flips(Facing &out,
                                  .leg = leg,
                                  .side = rank_face + (on_leading ? 0U : 1U) } });
         }
-        if (lined(rank_face + (on_leading ? 1U : 0U)) && (cross != INVALID)) {
+        if (walled(rank_face + (on_leading ? 1U : 0U)) && (cross != INVALID)) {
           vec_push_back(taken, { .node = j, .side = cross });
           vec_push_back(
               out.sides,
@@ -454,7 +476,7 @@ void facing_flips(Facing &out,
         wants_leading = !on_leading;
       }
       if (on_leading == wants_leading) { continue; }
-      if (on_state && lined(rank_face + (wants_leading ? 0U : 1U))) { continue; }
+      if (on_state && walled(rank_face + (wants_leading ? 0U : 1U))) { continue; }
       vec_push_back(out.reverses, { .trans = t, .leg = leg });
       uint32_t const along{ (down ? 2U : 0U) + (wants_leading ? 0U : 1U) };
       trace_emit({ .kind = TraceKind::PortTurned,

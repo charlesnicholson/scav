@@ -1,0 +1,12 @@
+// A transition from outside into the far one of two regions side by side: the route
+// enters through that region's share of the border.
+chart flank "a transition into a region beside its sibling" {
+  state X,
+  state Outer {
+    submachine Left { state A, trans * -> A },
+    submachine Right { state B, trans * -> B },
+  },
+
+  trans * -> X,
+  trans X -> Outer:Right/B "go",
+}
