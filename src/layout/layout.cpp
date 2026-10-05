@@ -63,6 +63,7 @@ void layout_test_route_bound(bool on, bool verify);
 uint64_t layout_test_route_bound_pruned();
 uint64_t layout_test_route_bound_checked();
 uint64_t layout_test_route_bound_mismatches();
+void layout_test_row_alias(bool on);
 std::vector<Cost> const &layout_test_schedule_first();
 std::vector<Cost> const &layout_test_schedule_second();
 std::vector<Cost> const &layout_test_schedule_kept();
@@ -889,7 +890,6 @@ void put_pins(SearchPins const &p, std::vector<uint32_t> &w) {
   }
 }
 
-#ifdef SCAV_TESTING
 bool same_pins(SearchPins const &a, SearchPins const &b) {
   std::vector<uint32_t> wa;
   std::vector<uint32_t> wb;
@@ -897,6 +897,14 @@ bool same_pins(SearchPins const &a, SearchPins const &b) {
   put_pins(b, wb);
   return wa == wb;
 }
+
+// Whether two rows size every ordering alike by construction: the same knobs and tuple.
+bool same_row(Row const &a, Row const &b) {
+  return (std::memcmp(&a.knobs, &b.knobs, sizeof(scav_profile)) == 0) &&
+         (a.dar == b.dar) && (a.pack == b.pack) && (a.fold == b.fold);
+}
+
+#ifdef SCAV_TESTING
 
 // Whether two candidates are one drawing.
 bool same_drawing(Candidate const &a, Candidate const &b) {
@@ -2460,6 +2468,7 @@ struct SearchMemo {
 bool test_search_memo{ true };
 bool test_search_memo_verify{ false };
 bool test_no_search{ false };               // forces a zero move budget
+bool test_row_alias{ true };                // rows whose canonical rows match search once
 uint32_t test_search_memo_hits{ 0 };        // under the layout's memo lock
 uint32_t test_search_memo_mismatches{ 0 };  // under the layout's memo lock
 // Per row of the last searched layout: each schedule's cost, and the one kept.
@@ -2773,7 +2782,27 @@ bool layout_run(Chart &c,
     search_table(p, table);
   }
   auto const rows{ static_cast<uint32_t>(table.size()) };
-  auto const row_of = [&](uint32_t i) { return search_row(p, table[i]); };
+  // Each row with the knobs sizing never reads at row 0's values; a row whose canonical
+  // row matches an earlier one's lays out and searches as that row, its `alias`.
+  RowReads reads{ size_row_reads(c, orders) };
+#ifdef SCAV_TESTING
+  if (!test_row_alias) {
+    reads = { .trybox = true, .pack = true, .dar = true, .fold = true };
+  }
+#endif
+  std::vector<Row> canonical(rows);
+  std::vector<uint32_t> alias(rows);
+  SearchStats aliased;
+  for (uint32_t i = 0; i < rows; ++i) {
+    canonical[i] = size_row_canonical(search_row(p, table[i]), reads, p);
+    alias[i] = i;
+    for (uint32_t j = 0; (j < i) && (alias[i] == i); ++j) {
+      if (same_row(canonical[j], canonical[i])) { alias[i] = j; }
+    }
+    aliased.aliased += (alias[i] != i) ? 1U : 0U;
+  }
+  search_stats_add(aliased);
+  auto const row_of = [&](uint32_t i) { return canonical[i]; };
   bool const culled_search{ p.search_cull != 0 };
   std::vector<Candidate> candidates(rows);
   std::vector<Cost> cost(rows);
@@ -2782,6 +2811,7 @@ bool layout_run(Chart &c,
   std::vector<std::vector<Diagnostic>> spilled(rows);
   CostContext const scoring{ cost_context(c, g) };
   parallel_for(rows, (rows > 1) ? o.threads : 1U, [&](uint32_t i) {
+    if (alias[i] != i) { return; }
     candidates[i] = search_candidate(c,
                                      g,
                                      orders,
@@ -2800,6 +2830,12 @@ bool layout_run(Chart &c,
       cost[i] = cost_of(t, p);
     }
   });
+  for (uint32_t i = 0; i < rows; ++i) {
+    if (alias[i] == i) { continue; }
+    candidates[i] = candidates[alias[i]];
+    cost[i] = cost[alias[i]];
+    viable[i] = viable[alias[i]];
+  }
   // Only row 0's findings reach `diags`; row 0 is `p`'s own tuple or the pinned row.
   vec_insert(diags, diags.end(), spilled[0].begin(), spilled[0].end());
   // A row leaving the coordinate domain is unviable; an unviable row 0 fails the run.
@@ -2826,11 +2862,21 @@ bool layout_run(Chart &c,
   test_search_memo_mismatches = 0;
 #endif
   // Searches each viable row `which` flags from its `held` pins; a viable result replaces
-  // the row's candidate, cost and pins.
+  // the row's candidate, cost and pins. A row repeating an earlier one's alias and pins
+  // takes that search's result.
   auto const search_rows = [&](std::vector<uint8_t> const &which, bool refold) {
     std::vector<uint32_t> active;
+    std::vector<uint32_t> twin(rows, INVALID);  // per row, the `active` slot it repeats
     for (uint32_t i = 0; i < rows; ++i) {
-      if ((viable[i] != 0) && (which[i] != 0)) { vec_push_back(active, i); }
+      if ((viable[i] == 0) || (which[i] == 0)) { continue; }
+      for (uint32_t k = 0; (k < active.size()) && (twin[i] == INVALID); ++k) {
+        uint32_t const j{ active[k] };
+        if ((alias[j] == alias[i]) && same_pins(held[j], held[i])) { twin[i] = k; }
+      }
+      if (twin[i] == INVALID) {
+        twin[i] = static_cast<uint32_t>(active.size());
+        vec_push_back(active, i);
+      }
     }
     std::vector<Improved> done(active.size());
     uint32_t const n{ static_cast<uint32_t>(active.size()) };
@@ -2849,17 +2895,17 @@ bool layout_run(Chart &c,
                              memo_at,
                              move_memo_at);
     });
-    for (uint32_t k = 0; k < n; ++k) {
-      if (!done[k].viable) { continue; }
-      uint32_t const i{ active[k] };
+    for (uint32_t i = 0; i < rows; ++i) {
+      if ((twin[i] == INVALID) || !done[twin[i]].viable) { continue; }
+      Improved const &got{ done[twin[i]] };
       RowPass const pass{ refold ? RowPass::Refold : RowPass::First };
       trace_outline_emit(search_event(TraceKind::RowSearched,
                                       static_cast<uint16_t>(pass),
                                       table[i],
-                                      done[k].cost));
-      candidates[i] = std::move(done[k].best);
-      cost[i] = done[k].cost;
-      held[i] = std::move(done[k].held);
+                                      got.cost));
+      candidates[i] = got.best;
+      cost[i] = got.cost;
+      held[i] = got.held;
     }
   };
 
@@ -3526,6 +3572,7 @@ uint64_t layout_test_route_bound_mismatches() {
 }
 void layout_test_search_memo_verify(bool on) { test_search_memo_verify = on; }
 void layout_test_no_search(bool on) { test_no_search = on; }
+void layout_test_row_alias(bool on) { test_row_alias = on; }
 uint32_t layout_test_search_memo_hits() { return test_search_memo_hits; }
 uint32_t layout_test_search_memo_mismatches() { return test_search_memo_mismatches; }
 std::vector<Cost> const &layout_test_schedule_first() { return test_schedule_first; }

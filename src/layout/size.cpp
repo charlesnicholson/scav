@@ -2605,6 +2605,64 @@ void loop_rows(Chart const &c,
   }
 }
 
+RowReads size_row_reads(Chart const &c, SubmachineOrders const &o) {
+  RowReads out;
+  std::vector<uint32_t> root;  // union-find over one frame's nodes
+  auto const find = [&root](uint32_t v) {
+    while (root[v] != v) {
+      root[v] = root[root[v]];
+      v = root[v];
+    }
+    return v;
+  };
+  for (uint32_t m = 0; (m < c.submachines.size()) && (m < o.sub_nodes.size()); ++m) {
+    Span const ns{ o.sub_nodes[m] };
+    Span const es{ o.sub_edges[m] };
+    if ((c.submachines[m].live == 0) || (ns.len == 0)) { continue; }
+    // An edge lets a component take two layers, and so fold into packed pieces.
+    bool const edged{ es.len != 0 };
+    vec_resize(root, ns.len);
+    for (uint32_t k = 0; k < ns.len; ++k) { root[k] = k; }
+    uint32_t parts{ ns.len };
+    for (uint32_t k = 0; k < es.len; ++k) {
+      OrderEdge const &e{ o.edges[es.off + k] };
+      uint32_t const a{ find(e.src - ns.off) };
+      uint32_t const b{ find(e.dst - ns.off) };
+      if (a != b) {
+        root[a] = b;
+        --parts;
+      }
+    }
+    bool const packs{ edged || (parts >= 2) };
+    out.fold = out.fold || edged;
+    out.trybox = out.trybox || packs;
+    out.pack = out.pack || packs;
+    out.dar = out.dar || (packs && (c.submachines[m].owner.v != INVALID));
+  }
+  for (State const &st : c.states) {
+    if (st.live == 0) { continue; }
+    uint32_t regions{ 0 };
+    for (uint32_t k = 0; k < st.submachines.len; ++k) {
+      regions +=
+          (c.submachines[c.submachine_ids[st.submachines.off + k].v].live != 0) ? 1U : 0U;
+    }
+    bool const packs{ regions >= 2 };
+    out.trybox = out.trybox || packs;
+    out.pack = out.pack || packs;
+    out.dar = out.dar || packs;
+  }
+  return out;
+}
+
+Row size_row_canonical(Row const &row, RowReads const &reads, scav_profile const &base) {
+  Row out{ row };
+  if (!reads.trybox) { out.knobs.trybox = base.trybox; }
+  if (!reads.pack) { out.pack = Compaction::Off; }
+  if (!reads.dar) { out.dar = DarSource::Profile; }
+  if (!reads.fold) { out.fold = Fold::Scale; }
+  return out;
+}
+
 bool size_layout(Chart const &c,
                  SplitGraph const &g,
                  SubmachineOrders const &o,

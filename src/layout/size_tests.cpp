@@ -2304,3 +2304,85 @@ TEST_CASE("size: a sizing is the same whatever its thread sized before") {
     CHECK(same(small_after, small_fresh));
   }
 }
+
+namespace {
+
+// What sizing `c` reads of a row's knobs, ordered with no pins.
+RowReads reads_of(Chart const &c) {
+  SplitGraph const g{ decompose(c) };
+  return size_row_reads(c, order_submachines(c, g, {}, profile()));
+}
+
+}  // namespace
+
+TEST_CASE("size: a lone state reads no row knob, and an edge reads all but the hole") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  RowReads const lone{ reads_of(c) };
+  CHECK(!lone.trybox);
+  CHECK(!lone.pack);
+  CHECK(!lone.dar);
+  CHECK(!lone.fold);
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::Default, {});
+  RowReads const edged{ reads_of(c) };
+  CHECK(edged.trybox);
+  CHECK(edged.pack);
+  CHECK(!edged.dar);  // no composite owns a frame
+  CHECK(edged.fold);
+}
+
+TEST_CASE("size: two unjoined states pack, and so read the packer and compaction") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  build_state(c, root, "A", StateKind::Normal, {});
+  build_state(c, root, "B", StateKind::Normal, {});
+  RowReads const r{ reads_of(c) };
+  CHECK(r.trybox);
+  CHECK(r.pack);
+  CHECK(!r.dar);
+  CHECK(!r.fold);
+}
+
+TEST_CASE("size: a composite reads its hole only where its packings can hold two rects") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const owner{ build_state(c, root, "O", StateKind::Normal, {}) };
+  SubmachineId const inner{ build_submachine(c, owner, "r", {}) };
+  StateId const x{ build_state(c, inner, "X", StateKind::Normal, {}) };
+  CHECK(!reads_of(c).dar);  // one region of one state
+  StateId const y{ build_state(c, inner, "Y", StateKind::Normal, {}) };
+  build_trans(c, x, y, TransKind::Default, {});
+  CHECK(reads_of(c).dar);  // its region can fold
+  Chart two;
+  SubmachineId const top{ build_chart(two, "t", {}) };
+  StateId const both{ build_state(two, top, "O", StateKind::Normal, {}) };
+  build_state(two, build_submachine(two, both, "r1", {}), "X", StateKind::Normal, {});
+  build_state(two, build_submachine(two, both, "r2", {}), "Y", StateKind::Normal, {});
+  RowReads const regions{ reads_of(two) };
+  CHECK(regions.dar);  // two regions pack in its hole
+  CHECK(regions.pack);
+  CHECK(!regions.fold);
+}
+
+TEST_CASE(
+    "size: a knob no sizing reads takes row 0's value, one that is read keeps its own") {
+  scav_profile const p{ profile() };
+  Row flipped{ .knobs = p,
+               .dar = DarSource::OwnerHole,
+               .pack = Compaction::On,
+               .fold = Fold::Always };
+  flipped.knobs.trybox = 1 - p.trybox;
+  Row const none{ size_row_canonical(flipped, {}, p) };
+  CHECK(none.knobs.trybox == p.trybox);
+  CHECK(none.dar == DarSource::Profile);
+  CHECK(none.pack == Compaction::Off);
+  CHECK(none.fold == Fold::Scale);
+  RowReads const all{ .trybox = true, .pack = true, .dar = true, .fold = true };
+  Row const kept{ size_row_canonical(flipped, all, p) };
+  CHECK(kept.knobs.trybox == flipped.knobs.trybox);
+  CHECK(kept.dar == DarSource::OwnerHole);
+  CHECK(kept.pack == Compaction::On);
+  CHECK(kept.fold == Fold::Always);
+}

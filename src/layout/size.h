@@ -113,6 +113,21 @@ void loop_rows(Chart const &c,
                std::vector<scav_extent> &label,
                std::vector<scav_rect> &row);
 
+// Which row knobs can change a sizing of `c` under some pins: `trybox` and compaction
+// where a packing may hold two rects, the owner's hole inside a composite, the fold rule.
+struct RowReads {
+  bool trybox{ false };
+  bool pack{ false };
+  bool dar{ false };
+  bool fold{ false };
+};
+
+// The knobs sizing reads of `c`, from ordering `o`'s frames: their components and edges.
+RowReads size_row_reads(Chart const &c, SubmachineOrders const &o);
+
+// `row` with each knob `reads` leaves unread at its value in `base`'s row 0.
+Row size_row_canonical(Row const &row, RowReads const &reads, scav_profile const &base);
+
 // False when an extent would leave the coordinate domain: one diagnostic per entity and
 // `out` partly written. The defaults are row 0's tuple.
 bool size_layout(Chart const &c,

@@ -317,7 +317,9 @@ declares `scav_stable_sort` — so a call site names its header without a grep.
 
 `scav dump --layout --search-stats <chart>` prints one JSON line ahead of the model: the
 layout's processor time (`cpu_ms`, from `std::clock`, wall time on Windows), the
-searches run, the candidate memo's peak bytes, the answers found by drawing rather than
+searches run, the rows laid out and searched as an earlier row because they differ only
+in knobs no sizing of the chart reads (`aliased`), the candidate memo's peak bytes, the
+answers found by drawing rather than
 by laid ordering (`drawn`), and per Level 1 move kind the candidates offered, those the
 memo answered (`deduped`), those left unrouted because their route bound reached the
 incumbent (`pruned`), those taken, the moves culled unoffered as changing nothing

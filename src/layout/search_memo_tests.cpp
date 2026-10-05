@@ -56,6 +56,7 @@ void layout_test_route_bound(bool on, bool verify);
 uint64_t layout_test_route_bound_pruned();
 uint64_t layout_test_route_bound_checked();
 uint64_t layout_test_route_bound_mismatches();
+void layout_test_row_alias(bool on);
 std::vector<Cost> const &layout_test_schedule_first();
 std::vector<Cost> const &layout_test_schedule_second();
 std::vector<Cost> const &layout_test_schedule_kept();
@@ -777,4 +778,71 @@ TEST_CASE("search: on the corpus, every route bound lies at or below its move's 
                                                  "ota.scav",
                                                  "tcp.scav",
                                                  "vac.scav" });
+}
+
+namespace {
+
+bool same_costs(std::vector<Cost> const &a, std::vector<Cost> const &b) {
+  if (a.size() != b.size()) { return false; }
+  for (size_t i = 0; i < a.size(); ++i) {
+    if ((a[i].t0_violations != b[i].t0_violations) || (a[i].t2 != b[i].t2)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Each row's cost after its first search, its refold, and the one kept.
+struct Schedules {
+  std::vector<Cost> first, second, kept;
+};
+
+Schedules schedules() {
+  return { .first = layout_test_schedule_first(),
+           .second = layout_test_schedule_second(),
+           .kept = layout_test_schedule_kept() };
+}
+
+}  // namespace
+
+TEST_CASE("search: rows differing only in knobs no sizing reads search as one, alike") {
+  // No state of estop or led owns a submachine, so no row reads the owner's hole.
+  struct Guard {
+    Guard() = default;
+    Guard(Guard const &) = delete;
+    Guard &operator=(Guard const &) = delete;
+    ~Guard() { layout_test_row_alias(true); }
+  } const guard;
+  for (bool const culled : { false, true }) {
+    for (bool const labelled : { false, true }) {
+      for (char const *name : { "estop.scav", "led.scav" }) {
+        CAPTURE(culled);
+        CAPTURE(labelled);
+        CAPTURE(name);
+        layout_test_row_alias(true);
+        SearchStats on;
+        search_stats_set(&on);
+        Laid const with{ lay_out(name, labelled, culled) };
+        search_stats_set(nullptr);
+        Schedules const aliased{ schedules() };
+        layout_test_row_alias(false);
+        SearchStats off;
+        search_stats_set(&off);
+        Laid const without{ lay_out(name, labelled, culled) };
+        search_stats_set(nullptr);
+        CHECK(on.aliased > 0);
+        CHECK(off.aliased == 0);
+        CHECK(on.searches < off.searches);
+        REQUIRE(with.ok);
+        REQUIRE(without.ok);
+        CHECK(with.structural == without.structural);
+        CHECK(with.coordinate == without.coordinate);
+        // Each row reaches the same cost at every stage of its search.
+        Schedules const apart{ schedules() };
+        CHECK(same_costs(aliased.first, apart.first));
+        CHECK(same_costs(aliased.second, apart.second));
+        CHECK(same_costs(aliased.kept, apart.kept));
+      }
+    }
+  }
 }
