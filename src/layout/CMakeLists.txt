@@ -26,6 +26,7 @@ scav_static_library(scavlayout
   "../scav_thread_${scav_thread_backend_file}.cpp"
   c_api.cpp
   candidate_memo.cpp
+  chunk_queue.cpp
   layout.cpp
   profile.cpp
   router.cpp
@@ -49,6 +50,7 @@ scav_install_library(scavlayout layout)
 scav_optimize_for_size(scavlayout SOURCES
   "../scav_thread_${scav_thread_backend_file}.cpp"
   c_api.cpp
+  chunk_queue.cpp
   layout.cpp
   profile.cpp
   router.cpp
@@ -75,6 +77,7 @@ if(SCAV_BUILD_TESTS)
   scav_tests(scav_layout_tests
     c_api_tests.cpp
     candidate_memo_tests.cpp
+    chunk_queue_tests.cpp
     layout_tests.cpp
     bench_tests.cpp
     gauntlet_tests.cpp
