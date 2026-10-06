@@ -204,7 +204,7 @@ int64_t timed(Chart &c, uint32_t threads) {
 }  // namespace
 
 TEST_CASE("determinism: the corpus lays out to one answer at every thread count") {
-  // Four Level 2 rows: both box packers, each with and without compaction.
+  // Rows 0-3; the culled search lays out rows 0 and 1, which compact nothing.
   scav_profile p{ readable() };
   p.portfolio_m = 4;
   // A move budget of 24, below the shipped 1024; the next case runs the shipped depth.
@@ -234,9 +234,8 @@ TEST_CASE("determinism: the corpus lays out to one answer at every thread count"
 
 TEST_CASE("determinism: a searched drawing is the same drawing at every thread count" *
           doctest::test_suite("full")) {
-  // The shipped search depth on small charts: parallel candidates, rows, finishes and
-  // kicks reduce in enumeration order at every thread count, in the full and culled
-  // searches.
+  // The shipped depth on small charts: candidates, rows, finishes and kicks reduce in
+  // enumeration order at every thread count, in both searches.
   for (int32_t const cull : { 0, 1 }) {
     CAPTURE(cull);
     scav_profile p{ readable() };
