@@ -89,6 +89,7 @@ struct Laid {
   uint64_t offered{ 0 };
   uint64_t taken{ 0 };
   uint64_t skipped{ 0 };
+  uint64_t relaid{ 0 };
 };
 
 // Every pin as words, in `SearchPins` order.
@@ -167,6 +168,7 @@ Laid lay(char const *name, scav_profile const &p, bool labelled, uint32_t thread
     out.taken += counted.taken[k];
     out.skipped += counted.skipped[k];
   }
+  out.relaid = counted.relaid;
   return out;
 }
 
@@ -464,6 +466,15 @@ TEST_CASE("search: a bound pass scored again after its labelling sets the same b
       CHECK(layout_test_bound_replay_mismatches() == 0);
     }
   }
+}
+
+TEST_CASE("search: the bounds laid out afresh for the bits are counted") {
+  // Only a labelled score the culled search's bits cannot read is laid out again.
+  SwitchGuard const guard;
+  layout_test_search_memo(false);
+  CHECK(lay("brew.scav", culled(), true, 1).relaid > 0);
+  CHECK(lay("brew.scav", culled(), false, 1).relaid == 0);
+  CHECK(lay("brew.scav", readable(), true, 1).relaid == 0);
 }
 
 TEST_CASE("search: a traced culled search draws what the untraced one ships") {

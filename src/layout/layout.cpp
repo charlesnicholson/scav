@@ -1129,6 +1129,7 @@ struct MemoUse {
   bool pruned{ false };       // its route bound reached the incumbent
   bool deferred{ false };     // left unscored while another thread routed its drawing
   bool stopped{ false };      // routed, its Tier 2 then reached the incumbent
+  bool relaid{ false };       // its bound laid out afresh for its don't-look bit
 };
 
 MemoScore memo_score(Scored const &s) {
@@ -1955,6 +1956,7 @@ void stats_add(RunStats *run, SearchStats const &add) {
   to.recalled += add.recalled;
   to.aliased += add.aliased;
   to.deferred += add.deferred;
+  to.relaid += add.relaid;
   to.memo_bytes = imax(to.memo_bytes, add.memo_bytes);
 }
 
@@ -2451,6 +2453,7 @@ Improved run_search(Chart const &c,
         access.table->set_score(use.entry, false, memo_score(bound));
       }
       use.deduped = false;
+      use.relaid = true;
       return may_win(bound, out.cost) ? 0U : 1U;
     };
     uint32_t const n{ static_cast<uint32_t>(round.size()) };
@@ -2580,6 +2583,7 @@ Improved run_search(Chart const &c,
       counted.stopped[kind] += uses[i].stopped ? 1U : 0U;
       counted.drawn += uses[i].drawn ? 1U : 0U;
       counted.faced += uses[i].faced ? 1U : 0U;
+      counted.relaid += uses[i].relaid ? 1U : 0U;
     }
 
     // Reduces in enumeration order and emits the trace in that order.
