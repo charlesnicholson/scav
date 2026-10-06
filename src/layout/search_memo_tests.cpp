@@ -48,6 +48,7 @@ uint32_t layout_test_search_memo_hits();
 uint32_t layout_test_search_memo_mismatches();
 void layout_test_candidate_memo(bool on, bool verify);
 void layout_test_candidate_memo_budget(uint64_t bytes);
+uint32_t layout_test_candidate_memos_built();
 uint64_t layout_test_candidate_memo_deduped();
 uint64_t layout_test_candidate_memo_drawn();
 uint64_t layout_test_candidate_memo_faced();
@@ -665,6 +666,24 @@ SearchStats counted(char const *name, uint32_t rows) {
 }
 
 }  // namespace
+
+TEST_CASE("search: a layout builds a candidate memo only when it searches") {
+  std::string path{ SCAV_TEST_DATA_DIR "/charts/estop.scav" };
+  Loader loader;
+  Chart c;
+  std::vector<Diagnostic> diags;
+  std::string failed;
+  REQUIRE(load_file(path.c_str(), loader, c, diags, failed));
+  scav_profile p{ readable() };
+  std::vector<scav_placed> placed;
+  (void)layout_test_candidate_memos_built();
+  for (int32_t const k : { 0, 4 }) {
+    CAPTURE(k);
+    p.portfolio_k = k;
+    REQUIRE(layout_run(c, {}, { .profile = p, .router = 0, .threads = 1 }, placed, diags));
+    CHECK(layout_test_candidate_memos_built() == ((k == 0) ? 0U : 1U));
+  }
+}
 
 TEST_CASE("search: two rows that draw every candidate alike lay each out once") {
   // Rows 0 and 1 differ only in `trybox`, and no frame of these charts packs by box. On

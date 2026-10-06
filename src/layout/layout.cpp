@@ -56,6 +56,7 @@ uint32_t layout_test_search_memo_hits();
 uint32_t layout_test_search_memo_mismatches();
 void layout_test_candidate_memo(bool on, bool verify);
 void layout_test_candidate_memo_budget(uint64_t bytes);
+uint32_t layout_test_candidate_memos_built();
 void layout_test_candidate_memo_empty(uint32_t every);
 uint64_t layout_test_candidate_memo_deduped();
 uint64_t layout_test_candidate_memo_drawn();
@@ -1001,6 +1002,7 @@ bool test_candidate_memo_verify{ false };
 uint32_t test_candidate_memo_empty{ 0 };  // empty it before every this-many labellings
 uint32_t test_candidate_memo_labellings{ 0 };
 uint64_t test_candidate_memo_budget{ CandidateMemo::BUDGET };
+uint32_t test_candidate_memos_built{ 0 };  // memos layouts built
 Mutex test_candidate_memo_lock;
 uint64_t test_candidate_memo_deduped{ 0 };
 uint64_t test_candidate_memo_drawn{ 0 };
@@ -2707,6 +2709,15 @@ SearchPins get_pins(int32_t const *w, uint32_t &at) {
   return p;
 }
 
+// Deletes the candidate memo it holds on scope exit.
+struct HeldMemo {
+  CandidateMemo *const memo;
+  explicit HeldMemo(CandidateMemo *m) : memo(m) {}
+  HeldMemo(HeldMemo const &) = delete;
+  HeldMemo &operator=(HeldMemo const &) = delete;
+  ~HeldMemo() { delete memo; }
+};
+
 // A layout's search results by `search_key`, shared across threads; `lock` guards each
 // lookup or insert.
 struct SearchMemo {
@@ -3108,16 +3119,21 @@ bool layout_run(Chart &c,
   std::vector<SearchPins> held(rows, seed);
   SearchMemo memo;
   SearchMemo *memo_at{ &memo };
-  // Every search of this layout scores its moves through one candidate memo.
+  // Every search of this layout scores its moves through one candidate memo, on the heap.
   uint64_t memo_budget{ CandidateMemo::BUDGET };
+  bool memoized{ budget != 0 };
 #ifdef SCAV_TESTING
   memo_budget = test_candidate_memo_budget;
-#endif
-  CandidateMemo move_memo{ c, g, memo_budget };
-  CandidateMemo *move_memo_at{ &move_memo };
-#ifdef SCAV_TESTING
+  memoized = memoized && test_candidate_memo;
   if (!test_search_memo) { memo_at = nullptr; }
-  if (!test_candidate_memo) { move_memo_at = nullptr; }
+#endif
+  HeldMemo const move_memo{ memoized ? new CandidateMemo{ c, g, memo_budget } : nullptr };
+  CandidateMemo *const move_memo_at{ move_memo.memo };
+#ifdef SCAV_TESTING
+  if (memoized) {
+    ScopedLock const held_lock{ test_candidate_memo_lock };
+    ++test_candidate_memos_built;
+  }
   test_search_memo_hits = 0;
   test_search_memo_mismatches = 0;
 #endif
@@ -3531,7 +3547,7 @@ bool layout_run(Chart &c,
 
   write_columns(c, sized, routes, inputs_digest(s, o));
   SearchStats held_bytes;
-  held_bytes.memo_bytes = move_memo.peak_bytes();
+  held_bytes.memo_bytes = (move_memo_at != nullptr) ? move_memo_at->peak_bytes() : 0;
   search_stats_add(held_bytes);
   return true;
 }
@@ -3786,6 +3802,12 @@ uint64_t layout_test_label_bound_mismatches() {
 void layout_test_search_memo(bool on) { test_search_memo = on; }
 void layout_test_candidate_memo_budget(uint64_t bytes) {
   test_candidate_memo_budget = bytes;
+}
+uint32_t layout_test_candidate_memos_built() {
+  ScopedLock const held{ test_candidate_memo_lock };
+  uint32_t const out{ test_candidate_memos_built };
+  test_candidate_memos_built = 0;
+  return out;
 }
 void layout_test_candidate_memo_empty(uint32_t every) {
   ScopedLock const held{ test_candidate_memo_lock };
