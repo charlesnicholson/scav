@@ -1,18 +1,15 @@
 #!/usr/bin/env python3
-"""Runs the corpus unperturbed and under jitter seeds for two searches, and reports per
-chart and scale whether one search is worse than the other.
+"""Runs the corpus for two searches, unperturbed and under jitter seeds, and reports per
+chart and scale whether one search is worse.
 
   tools/jitter.py --runs DIR                         run what DIR lacks, then report
   tools/jitter.py --runs DIR --seeds 3               seeds 1..3 beside the unperturbed run
   tools/jitter.py --runs DIR --report                report only
   tools/jitter.py --runs DIR kiln.scav               one chart
-  tools/jitter.py --runs DIR --searches full,culled  the two searches compared
+  tools/jitter.py --runs DIR --searches full,culled  the two searches compared, baseline first
 
-Each run is `scav dump --layout --json --search-stats` with `--search` and `--jitter-seed`,
-kept in DIR as <chart>.<scale>.<search>.<seed>.json, with the instructions it retired where
-`/usr/bin/time -l` reports them. The first search named is the baseline. A search is worse
-on a chart and scale when every one of its runs is more than 2% above every run of the
-other.
+Runs are kept in DIR as <chart>.<scale>.<search>.<seed>.json. A search is worse on a chart
+and scale when every one of its runs is more than 2% above every run of the other.
 """
 
 import argparse
@@ -69,7 +66,7 @@ def run_one(scav: Path, chart: Path, scale: str, search: str, seed: int,
         argv.append("--no-text")
     if seed:
         argv += ["--jitter-seed", str(seed)]
-    timed = TIME.exists()
+    timed = sys.platform == "darwin" and TIME.exists()  # BSD time reports instructions
     if timed:
         argv = [str(TIME), "-l", *argv]
     done = subprocess.run([*argv, str(chart)], capture_output=True, text=True, check=True,
@@ -187,8 +184,7 @@ def main() -> int:
     args.runs.mkdir(parents=True, exist_ok=True)
     if not args.report:
         scav = args.scav or find_scav()
-        # Smallest first, so a capped run finishes the most charts.
-        order = sorted(charts, key=lambda c: (CORPUS / c).stat().st_size)
+        order = sorted(charts, key=lambda c: (CORPUS / c).stat().st_size)  # smallest first
         for seed in range(args.seeds + 1):
             for chart in order:
                 for scale in args.scales.split(","):

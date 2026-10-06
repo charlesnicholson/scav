@@ -175,10 +175,7 @@ def search_stats(scav, chart, layout):
 
 
 def print_stats(scav, charts, layout):
-    """One row per chart and scale: moves culled, skipped by the don't-look bits, offered,
-    answered by the memo and of those by drawing, pruned by their route bound, laid out in
-    full and of those stopped at the incumbent, taken; searches; the memo's peak; the
-    layout's CPU. Then the same by move kind."""
+    """Prints `--search-stats` per chart and scale, then summed per move kind."""
     scales = [[]] if "--no-text" in layout else [[], ["--no-text"]]
     kinds = {m: [0, 0, 0, 0, 0, 0, 0] for m in MOVES}
     print(f"{'chart':14} {'scale':6} {'culled':>8} {'skipped':>8} "
@@ -257,8 +254,7 @@ def main():
         traced.model()
         return 0
 
-    # Only the per-transition chain reads events, and only these kinds of them.
-    shipped = [e for e in traced.events()
+    shipped = [e for e in traced.events()  # the chain's events, read only for `--trans`
                if args.trans is not None and e["kind"] in CHAIN_KINDS]
     model = traced.model()
     states = model["states"]

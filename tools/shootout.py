@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
-"""Every corpus chart under real text, drawn by two searches side by side, each panel with
-its cost, counts and search CPU, and the corpus totals on top.
+"""Every corpus chart drawn by two searches side by side, each panel with its cost, counts
+and search CPU, and the corpus totals on top.
 
   tools/shootout.py --runs DIR --out FILE.html
   tools/shootout.py --runs DIR --out FILE.html --shots DIR    also one PNG per chart row
   tools/shootout.py --runs DIR --out FILE.html --scale none   with no space requests
   tools/shootout.py --runs DIR --out FILE.html --searches full,culled --prefix PFX
 
-Reads the runs `tools/jitter.py` keeps in DIR, running the unperturbed ones it lacks, and
-draws each from its pins with `scav render --no-search`. The first search named is the
-baseline the second's deltas are taken against. The seed verdicts need the seeded runs;
-without them a chart reads "unseeded". PNGs are named <prefix>_<chart>.png.
+Reads and completes the unperturbed runs `tools/jitter.py` keeps in DIR, and draws each
+from its pins. A chart without every seeded run of both searches reads "unseeded".
 """
 
 import argparse
@@ -19,9 +17,11 @@ import html
 import json
 import math
 import os
+import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -31,7 +31,7 @@ import jitter  # noqa: E402
 
 REPO_ROOT = jitter.REPO_ROOT
 CORPUS = jitter.CORPUS
-CHROME = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"  # `--chrome` default
 LOOK = {"full": ("Full search", "#2a78d6"), "culled": ("Culled search", "#eb6834")}
 # What each search does beyond the one before it, for the page's heading.
 WHAT = {
@@ -233,11 +233,9 @@ def page(head: str, body: str, names: tuple[str, str]) -> str:
             f'<body>{head}{body}</body></html>')
 
 
-def shoot(chrome: Path, html_file: Path, png: Path, height: int) -> None:
+def shoot(chrome: Path, profile: Path, html_file: Path, png: Path, height: int) -> None:
     """One headless Chrome screenshot of `html_file`, 1800 wide; ends Chrome's process
     group once the file stops growing."""
-    profile = Path("/tmp/perf/chrome-shootout")
-    profile.mkdir(parents=True, exist_ok=True)
     for lock in profile.glob("Singleton*"):
         lock.unlink(missing_ok=True)
     png.unlink(missing_ok=True)
@@ -280,6 +278,7 @@ def main() -> int:
     ap.add_argument("--searches", default=",".join(jitter.SEARCHES),
                     help="the baseline and the search judged against it")
     ap.add_argument("--prefix", default="shootout", help="the PNG file names' prefix")
+    ap.add_argument("--chrome", type=Path, default=Path(CHROME))
     args = ap.parse_args()
 
     names = tuple(args.searches.split(","))
@@ -329,10 +328,11 @@ def main() -> int:
     print(f"wrote {args.out} ({args.out.stat().st_size / 1024:.0f} KB)")
 
     if args.shots is not None:
-        if not CHROME.exists():
-            print(f"no Chrome at {CHROME}", file=sys.stderr)
+        if not args.chrome.exists():
+            print(f"no Chrome at {args.chrome}", file=sys.stderr)
             return 1
         args.shots.mkdir(parents=True, exist_ok=True)
+        profile = Path(tempfile.mkdtemp(prefix="shootout-chrome-"))  # Chrome's user data
         suffix = "" if args.scale == "text" else f"_{args.scale}"
         rows = args.runs / f"rows{suffix}"
         rows.mkdir(parents=True, exist_ok=True)
@@ -341,13 +341,14 @@ def main() -> int:
             one = rows / f"{stem}.html"
             one.write_text(page("", body, names), encoding="utf-8")
             png = args.shots / f"{args.prefix}_{stem}{suffix}.png"
-            shoot(CHROME, one, png, 1040)
+            shoot(args.chrome, profile, one, png, 1040)
             print(f"wrote {png}")
         top = rows / "header.html"
         top.write_text(page(head, "", names), encoding="utf-8")
         png = args.shots / f"{args.prefix}_header{suffix}.png"
-        shoot(CHROME, top, png, 560)
+        shoot(args.chrome, profile, top, png, 560)
         print(f"wrote {png}")
+        shutil.rmtree(profile, ignore_errors=True)
     return 0
 
 
