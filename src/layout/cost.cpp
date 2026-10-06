@@ -166,15 +166,6 @@ bool trunk_piece(Trunk const &t, uint32_t len, uint32_t k) {
          ((k + 1) < t.head) || (t.merged_head && ((k + 1) == t.head));
 }
 
-// Direction code `3 * x + y`, each axis 0 falling, 1 still, 2 rising; a bend changes it.
-uint32_t direction(scav_point a, scav_point b) {
-  auto const axis = [](int32_t from, int32_t to) {
-    if (to > from) { return 2U; }
-    return (to < from) ? 0U : 1U;
-  };
-  return (axis(a.x, b.x) * 3U) + axis(a.y, b.y);
-}
-
 // Cells per axis for `n` children, about one child per cell.
 uint32_t grid_side(uint32_t n) {
   return imin(static_cast<uint32_t>(isqrt(n)) + 1U, GRID_SIDE_MAX);

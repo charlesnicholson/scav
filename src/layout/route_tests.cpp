@@ -1370,6 +1370,152 @@ TEST_CASE("route: a cache filled by a run that reused one answers like routing a
   }
 }
 
+namespace {
+
+// Turns of transition `t`'s route in `r`, as `cost_terms` counts bends.
+int64_t route_turns(Routes const &r, uint32_t t) {
+  scav_span const at{ r.route[t] };
+  int64_t out{ 0 };
+  for (uint32_t k = 0; (k + 2) < at.len; ++k) {
+    scav_point const *q{ r.points.data() + at.off + k };
+    out += (direction(q[0], q[1]) != direction(q[1], q[2])) ? 1 : 0;
+  }
+  return out;
+}
+
+}  // namespace
+
+TEST_CASE("route: the turns a stop counts frame by frame never pass the routes'") {
+  // Laid end to end and nudged, a transition's nets turn at least as often as alone.
+  scav_profile p{};
+  REQUIRE(profile_named("readable", p));
+  Router const *const router{ router_at(0) };
+  REQUIRE(router != nullptr);
+  for (char const *name : CORPUS) {
+    if (scav::test::corpus_skipped(name)) { continue; }
+    CAPTURE(name);
+    Chart c;
+    load_corpus_chart(name, c);
+    SplitGraph const g{ decompose(c) };
+    for (uint32_t moved = 0; moved < 4; ++moved) {
+      CAPTURE(moved);
+      SearchPins pins;
+      uint32_t const st{ moved * 3 };
+      if ((moved > 0) && (st < c.states.size()) && (c.states[st].live != 0)) {
+        pins.ranks.push_back({ .state = StateId{ st }, .rank = 0 });
+      }
+      SubmachineOrders const o{ order_submachines(c, g, {}, p, 1, pins) };
+      SizedLayout z;
+      std::vector<Diagnostic> diags;
+      if (!size_layout(c, g, o, {}, p, z, diags)) { continue; }
+      Routes const whole{ route_transitions(c, g, o, z, {}, p, *router, 1) };
+      std::vector<int32_t> const none(c.transitions.size(), 0);
+      RouteStop stop{ .bends = &none, .floor = 0, .per_bend = 1, .at = INT64_MAX };
+      Routes counted;
+      route_transitions(counted,
+                        c,
+                        g,
+                        o,
+                        z,
+                        {},
+                        p,
+                        *router,
+                        1,
+                        nullptr,
+                        nullptr,
+                        nullptr,
+                        true,
+                        &stop);
+      CHECK_FALSE(stop.stopped);
+      CHECK(same_routes(whole, counted));
+      int64_t turns{ 0 };
+      for (uint32_t t = 0; t < c.transitions.size(); ++t) {
+        turns += route_turns(whole, t);
+      }
+      CHECK(stop.reached <= turns);
+      CHECK(stop.reached > 0);
+    }
+  }
+}
+
+TEST_CASE("route: a stop ends routing once routed turns lift its bound to it") {
+  scav_profile p{};
+  REQUIRE(profile_named("readable", p));
+  Router const *const router{ router_at(0) };
+  REQUIRE(router != nullptr);
+  Chart c;
+  load_corpus_chart("estop.scav", c);  // one frame, every transition one net
+  SplitGraph const g{ decompose(c) };
+  SubmachineOrders const o{ order_submachines(c, g, {}, p, 1, {}) };
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  REQUIRE(size_layout(c, g, o, {}, p, z, diags));
+  Routes const whole{ route_transitions(c, g, o, z, {}, p, *router, 1) };
+  int64_t turns{ 0 };
+  for (uint32_t t = 0; t < c.transitions.size(); ++t) { turns += route_turns(whole, t); }
+  REQUIRE(turns > 0);
+  std::vector<int32_t> const none(c.transitions.size(), 0);
+  int64_t const reach{ 100 + (7 * turns) };
+  RouteStop at{ .bends = &none, .floor = 100, .per_bend = 7, .at = reach };
+  Routes stopped;
+  route_transitions(stopped,
+                    c,
+                    g,
+                    o,
+                    z,
+                    {},
+                    p,
+                    *router,
+                    1,
+                    nullptr,
+                    nullptr,
+                    nullptr,
+                    true,
+                    &at);
+  CHECK(at.stopped);
+  CHECK(at.reached == reach);
+  RouteStop past{ .bends = &none, .floor = 100, .per_bend = 7, .at = reach + 1 };
+  Routes all;
+  route_transitions(all,
+                    c,
+                    g,
+                    o,
+                    z,
+                    {},
+                    p,
+                    *router,
+                    1,
+                    nullptr,
+                    nullptr,
+                    nullptr,
+                    true,
+                    &past);
+  CHECK_FALSE(past.stopped);
+  CHECK(same_routes(whole, all));
+  // A bound above the routed turns stands in for them.
+  std::vector<int32_t> const high(c.transitions.size(), 9);
+  RouteStop held{ .bends = &high,
+                  .floor = 0,
+                  .per_bend = 1,
+                  .at = 9 * static_cast<int64_t>(c.transitions.size()) };
+  Routes over;
+  route_transitions(over,
+                    c,
+                    g,
+                    o,
+                    z,
+                    {},
+                    p,
+                    *router,
+                    1,
+                    nullptr,
+                    nullptr,
+                    nullptr,
+                    true,
+                    &held);
+  CHECK(held.stopped);
+}
+
 TEST_CASE("route: a face with no effect at an end changes nothing it draws") {
   // Unmarked faces, at ends with an empty mask and at seated ends, both occur and change
   // nothing; some marked face changes the route.

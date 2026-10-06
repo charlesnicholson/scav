@@ -585,6 +585,7 @@ struct CandidateReuse {
   Prefix *prefix{ nullptr };           // receives the prefix
   Prefix const *from{ nullptr };       // a prefix whose pins differ only in faces
   CandidateScratch *scratch{ nullptr };
+  RouteStop *stop{ nullptr };  // where routing may stop
 };
 
 // Sizes `orders`, turns ports to face their routes, then orders and sizes again, writing
@@ -673,7 +674,12 @@ void lay_routes(Candidate &out,
                     with.reuse,
                     with.fill,
                     pins,
-                    labels);
+                    labels,
+                    with.stop);
+  if ((with.stop != nullptr) && with.stop->stopped) {
+    out.viable = true;
+    return;
+  }
   if (with.prefix != nullptr) { with.prefix->routes = out.routes; }
 
   // Spacing retry: `out` holds the best attempt so far, `fewest` its degraded count.
@@ -1037,7 +1043,8 @@ struct KeptCandidate {
 
 // Per-thread scratch for scoring one move; a move runs on one thread.
 struct MoveScratch {
-  SearchPins pins;  // the move's pins, valid until its scoring returns
+  SearchPins pins;              // the move's pins, valid until its scoring returns
+  std::vector<int32_t> shares;  // the move's route bound's bends per transition
   SubmachineOrders moved;
   Candidate whole, face;
   CandidateScratch keep;
@@ -1127,18 +1134,11 @@ constexpr int64_t SEATED_FROM_TENTHS{ 7 };
 #ifdef SCAV_TESTING
 // Turns of transition `t`'s polyline in `r`, counted as `cost_terms` counts bends.
 uint32_t route_turns(Routes const &r, uint32_t t) {
-  auto const way = [](scav_point a, scav_point b) {
-    auto const axis = [](int32_t from, int32_t to) {
-      if (to > from) { return 2U; }
-      return (to < from) ? 0U : 1U;
-    };
-    return (axis(a.x, b.x) * 3U) + axis(a.y, b.y);
-  };
   scav_span const at{ r.route[t] };
   uint32_t out{ 0 };
   for (uint32_t k = 0; (k + 2) < at.len; ++k) {
     scav_point const *p{ r.points.data() + at.off + k };
-    out += (way(p[0], p[1]) != way(p[1], p[2])) ? 1U : 0U;
+    out += (direction(p[0], p[1]) != direction(p[1], p[2])) ? 1U : 0U;
   }
   return out;
 }
@@ -1216,39 +1216,36 @@ Scored score_memoized(Chart const &c,
     use.pruned = true;
     return true;
   };
-  CostTerms bound{};  // the move's route bound where `bounded`
-#ifdef SCAV_TESTING
-  std::vector<int32_t>
-      shares;  // its bends per transition, under `test_route_bound_verify`
-#endif
+  CostTerms bound{};                          // the move's route bound where `bounded`
+  std::vector<int32_t> &shares{ sc.shares };  // its bends per transition
   bool bounded{ false };
+  // A move routed against a Tier-0-free incumbent stops once it reaches it.
+  bool stops{ memo.prune && (memo.incumbent.t0_violations == 0) &&
+              (memo.incumbent.t1_hints == 0) };
+#ifdef SCAV_TESTING
+  stops = stops && test_cost_stop;
+#endif
   // Prunes by the stored route bound, else by that of `bends` sized as `z`, which it
   // stores.
   auto const pruned_by = [&](std::vector<std::vector<uint32_t>> const &bends,
                              SizedLayout const &z) {
     if (prune_at(stored_bound)) { return true; }
-    bool compute{ memo.prune && (stored_bound < 0) &&
-                  (memo.incumbent.t0_violations == 0) };
+    bool const fresh{ memo.prune && (stored_bound < 0) &&
+                      (memo.incumbent.t0_violations == 0) };
+    bool seat_all{ false };
 #ifdef SCAV_TESTING
-    compute = compute || test_route_bound_verify;
+    seat_all = test_route_bound_verify;
 #endif
-    if (!compute) { return false; }
-#ifdef SCAV_TESTING
-    std::vector<int32_t> *const per_trans{ test_route_bound_verify ? &shares : nullptr };
-#else
-    std::vector<int32_t> *const per_trans{ nullptr };
-#endif
-    bound = route_bound(c, g, bends, z, sc.faces, objective, row, router, false);
+    if (!fresh && !stops && !seat_all) { return false; }
+    bound = route_bound(c, g, bends, z, sc.faces, objective, row, router, false, &shares);
     int64_t t2{ cost_of(bound, objective).t2 };
-    if ((per_trans != nullptr) ||
-        ((t2 < memo.incumbent.t2) &&
-         ((t2 * 10) >= (memo.incumbent.t2 * SEATED_FROM_TENTHS)))) {
-      bound =
-          route_bound(c, g, bends, z, sc.faces, objective, row, router, true, per_trans);
+    if (seat_all || ((t2 < memo.incumbent.t2) &&
+                     ((t2 * 10) >= (memo.incumbent.t2 * SEATED_FROM_TENTHS)))) {
+      bound = route_bound(c, g, bends, z, sc.faces, objective, row, router, true, &shares);
       t2 = cost_of(bound, objective).t2;
     }
     bounded = true;
-    table.set_route_bound(use.entry, t2);
+    if (fresh || seat_all) { table.set_route_bound(use.entry, t2); }
     return prune_at(t2);
   };
   // Looks up drawing `drawn` under the move's faces; true when a stored score answers.
@@ -1370,12 +1367,33 @@ Scored score_memoized(Chart const &c,
       break;
     case Claim::Taken: break;
   }
-  lay_routes(cand, c, g, *laid, s, row, router, 1, &pins, { .reuse = reuse }, labels);
-  bool stops{ memo.prune && (memo.incumbent.t0_violations == 0) &&
-              (memo.incumbent.t1_hints == 0) };
-#ifdef SCAV_TESTING
-  stops = stops && test_cost_stop;
-#endif
+  CostTerms floor{ bound };
+  floor.bends = 0;
+  RouteStop stop{ .bends = &shares,
+                  .floor = cost_of(floor, objective).t2,
+                  .per_bend = objective.w_bends,
+                  .at = memo.incumbent.t2 };
+  bool const staged{ stops && bounded && router.rectilinear() };
+  lay_routes(cand,
+             c,
+             g,
+             *laid,
+             s,
+             row,
+             router,
+             1,
+             &pins,
+             { .reuse = reuse, .stop = staged ? &stop : nullptr },
+             labels);
+  if (stop.stopped) {
+    out = Scored{};
+    out.cost = { .t0_violations = 0, .t1_hints = 0, .t2 = stop.reached };
+    out.viable = true;
+    out.stopped = true;
+    use.stopped = true;
+    table.release(use.entry, labels, stop.reached);
+    return out;
+  }
   out =
       scored_of(c, g, scoring, s, objective, cand, labels, stops ? memo.incumbent.t2 : -1);
 #ifdef SCAV_TESTING

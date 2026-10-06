@@ -23,6 +23,15 @@ constexpr bool kind_inscribed(StateKind kind) {
 
 constexpr bool same(scav_point a, scav_point b) { return (a.x == b.x) && (a.y == b.y); }
 
+// Direction code `3 * x + y`, each axis 0 falling, 1 still, 2 rising; a bend changes it.
+constexpr uint32_t direction(scav_point a, scav_point b) {
+  auto const axis = [](int32_t from, int32_t to) {
+    if (to > from) { return 2U; }
+    return (to < from) ? 0U : 1U;
+  };
+  return (axis(a.x, b.x) * 3U) + axis(a.y, b.y);
+}
+
 constexpr bool overlaps(scav_rect const &a, scav_rect const &b) {
   return (a.x < (b.x + b.w)) && (b.x < (a.x + a.w)) && (a.y < (b.y + b.h)) &&
          (b.y < (a.y + a.h));

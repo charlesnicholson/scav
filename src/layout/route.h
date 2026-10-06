@@ -47,6 +47,18 @@ struct RouteFrameCache {
   std::vector<RouteMetrics> metrics;
 };
 
+// Where routing may stop: once `floor` plus `per_bend` per bend, each transition taking
+// the larger of its `bends` and its routed nets' turns, reaches `at`; `reached` is that.
+struct RouteStop {
+  std::vector<int32_t> const *bends{ nullptr };
+  int64_t floor{ 0 };
+  int64_t per_bend{ 0 };
+  int64_t at{ 0 };
+  bool stopped{ false };
+  int64_t reached{ 0 };
+  int64_t sum{ 0 };  // the bends `reached` counts
+};
+
 // As `reuse`, shared read-only by a round's candidates; as `fill`, written by the one
 // run that sets the incumbent.
 struct RouteCache {
@@ -82,7 +94,8 @@ Routes route_transitions(Chart const &c,
                          SearchPins const *pins = nullptr,
                          bool labels = true);
 
-// The same into `out`, reusing its capacity.
+// The same into `out`, reusing its capacity; with `stop`, frames route in order on this
+// thread, and a stop leaves `out` unfinished.
 void route_transitions(Routes &out,
                        Chart const &c,
                        SplitGraph const &g,
@@ -95,7 +108,8 @@ void route_transitions(Routes &out,
                        RouteCache const *reuse,
                        RouteCache *fill,
                        SearchPins const *pins,
-                       bool labels);
+                       bool labels,
+                       RouteStop *stop = nullptr);
 
 // Places the path boxes on `out`'s finished routes, as `route_transitions` does.
 void label_routes(Routes &out,
