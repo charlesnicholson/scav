@@ -229,11 +229,17 @@ struct TraceEvent {
   };
 };
 
+struct TraceWriter;
+
 // The sink the phases append to during a traced run.
 struct LayoutTrace {
   std::vector<TraceEvent> events;
-  uint32_t frame{ INVALID };  // stamped onto each event that sets no frame
+  TraceWriter *writer{ nullptr };  // when set, events are encoded to it instead
+  uint32_t frame{ INVALID };       // stamped onto each event that sets no frame
 };
+
+// Appends `e` to `t.events`, or encodes it to `t.writer`.
+void trace_put(LayoutTrace &t, TraceEvent const &e);
 
 // This thread's sink, null outside a traced run. A traced run forces `threads = 1`.
 LayoutTrace *trace_sink();
@@ -243,7 +249,7 @@ inline void trace_emit(TraceEvent e) {
   LayoutTrace *const t{ trace_sink() };
   if (t == nullptr) { return; }
   if (e.frame == INVALID) { e.frame = t->frame; }
-  vec_push_back(t->events, e);
+  trace_put(*t, e);
 }
 
 // This thread's sink for the search outline alone: the row and kick events, recorded with
@@ -258,7 +264,7 @@ inline void trace_outline_emit(TraceEvent const &e) {
     trace_emit(e);
     return;
   }
-  vec_push_back(t->events, e);
+  trace_put(*t, e);
 }
 
 // Sets the sink's frame stamp for its scope and restores the previous one on exit.

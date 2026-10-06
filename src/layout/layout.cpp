@@ -12,6 +12,7 @@
 #include "layout/shard.h"
 #include "layout/size.h"
 #include "layout/trace.h"
+#include "layout/trace_stream.h"
 #include "layout/wire.h"
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
@@ -3530,82 +3531,85 @@ uint32_t layout_coordinate_hash(Chart const &c) {
   return xxhash32(b.data(), b.size(), 0);
 }
 
-bool layout_trace_json(Chart &c,
-                       scav_spaces const &s,
-                       scav_layout_opts const &o,
-                       std::vector<scav_placed> &placed,
-                       std::vector<Diagnostic> &diags,
-                       std::vector<char> &out,
-                       uint32_t row,
-                       TraceScope scope,
-                       SearchPins const *pins,
-                       uint32_t *tuple,
-                       SearchPins *won_pins) {
-  if (scope == TraceScope::Stats) {
-    SearchStats counted;
-    search_stats_set(&counted);
-    bool const ran{
-      layout_run(c, s, o, placed, diags, nullptr, tuple, row, nullptr, won_pins, pins)
-    };
-    search_stats_set(nullptr);
-    search_stats_to_json(counted, out);
-    return ran;
-  }
-  if (scope != TraceScope::Shipped) {
-    LayoutTrace t;
-    scav_layout_opts serial{ o };
-    serial.threads = 1;
-    bool const outline{ scope == TraceScope::Outline };
-    if (outline) {
-      trace_outline_set(&t);
-    } else {
-      trace_sink_set(&t);
-    }
-    bool const ran{ layout_run(c,
-                               s,
-                               serial,
-                               placed,
-                               diags,
-                               nullptr,
-                               nullptr,
-                               row,
-                               nullptr,
-                               nullptr,
-                               pins) };
-    trace_outline_set(nullptr);
-    trace_sink_set(nullptr);
-    trace_to_json(t, c, out);
-    return ran;
-  }
+bool layout_search_stats(Chart &c,
+                         scav_spaces const &s,
+                         scav_layout_opts const &o,
+                         std::vector<scav_placed> &placed,
+                         std::vector<Diagnostic> &diags,
+                         std::vector<char> &out,
+                         uint32_t row,
+                         SearchPins const *pins,
+                         uint32_t *tuple,
+                         SearchPins *taken) {
+  SearchStats counted;
+  search_stats_set(&counted);
+  bool const ran{
+    layout_run(c, s, o, placed, diags, nullptr, tuple, row, nullptr, taken, pins)
+  };
+  search_stats_set(nullptr);
+  search_stats_to_json(counted, out);
+  return ran;
+}
 
-  // Searches first for the winning row and pins; the trace below re-lays only those.
-  uint32_t won{ 0 };
-  SearchPins taken;
-  if (!layout_run(c, s, o, placed, diags, nullptr, &won, row, nullptr, &taken, pins)) {
-    trace_to_json({}, c, out);
-    return false;
-  }
-
-  // Re-lays the won row from `taken` on one thread with a zero move budget.
+bool layout_trace(Chart &c,
+                  scav_spaces const &s,
+                  scav_layout_opts const &o,
+                  std::vector<scav_placed> &placed,
+                  std::vector<Diagnostic> &diags,
+                  TraceTo const &to,
+                  bool &streamed,
+                  uint32_t row,
+                  TraceScope scope,
+                  SearchPins const *pins) {
+  TraceStream stream{ c, to };
+  streamed = false;
+  if (!stream.opened()) { return false; }
   scav_layout_opts serial{ o };
   serial.threads = 1;
-  serial.profile.portfolio_k = 0;
-  LayoutTrace t;
-  trace_sink_set(&t);
-  std::vector<Diagnostic> again;
-  bool const laid{ layout_run(c,
-                              s,
-                              serial,
-                              placed,
-                              again,
-                              nullptr,
-                              nullptr,
-                              won,
-                              nullptr,
-                              nullptr,
-                              &taken) };
-  trace_sink_set(nullptr);
-  trace_to_json(t, c, out);
+  bool laid{ false };
+  if (scope != TraceScope::Shipped) {
+    if (scope == TraceScope::Outline) {
+      trace_outline_set(&stream.sink());
+    } else {
+      trace_sink_set(&stream.sink());
+    }
+    laid = layout_run(c,
+                      s,
+                      serial,
+                      placed,
+                      diags,
+                      nullptr,
+                      nullptr,
+                      row,
+                      nullptr,
+                      nullptr,
+                      pins);
+    trace_outline_set(nullptr);
+    trace_sink_set(nullptr);
+  } else {
+    // Searches first for the winning row and pins, then re-lays only those on one thread
+    // with a zero move budget, traced.
+    uint32_t won{ 0 };
+    SearchPins taken;
+    if (layout_run(c, s, o, placed, diags, nullptr, &won, row, nullptr, &taken, pins)) {
+      serial.profile.portfolio_k = 0;
+      trace_sink_set(&stream.sink());
+      std::vector<Diagnostic> again;
+      laid = layout_run(c,
+                        s,
+                        serial,
+                        placed,
+                        again,
+                        nullptr,
+                        nullptr,
+                        won,
+                        nullptr,
+                        nullptr,
+                        &taken);
+      trace_sink_set(nullptr);
+    }
+  }
+  streamed = stream.finish();
   return laid;
 }
 

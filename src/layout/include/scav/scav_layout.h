@@ -9,6 +9,7 @@
 #include "scav/scav_types.h"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -200,24 +201,51 @@ bool layout_run(Chart &c,
 enum class TraceScope : uint32_t {
   Shipped,  // a single-threaded re-run of the winning row and pins, searching nothing
   Search,   // the whole search on one thread, every candidate included
-  Outline,  // the whole search on one thread, its row and kick events only
-  Stats     // the whole search on the caller's threads, its counts as one JSON object
+  Outline   // the whole search on one thread, its row and kick events only
 };
 
-// Runs `layout_run` from `pins` and writes its decision trace as JSON to `out`. Debug
-// output, unhashed. Under `Stats`, `tuple` and `won_pins` are `layout_run`'s `tuple` and
-// `taken`.
-bool layout_trace_json(Chart &c,
-                       scav_spaces const &s,
-                       scav_layout_opts const &o,
-                       std::vector<scav_placed> &placed,
-                       std::vector<Diagnostic> &diags,
-                       std::vector<char> &out,
-                       uint32_t row = INVALID,
-                       TraceScope scope = TraceScope::Shipped,
-                       SearchPins const *pins = nullptr,
-                       uint32_t *tuple = nullptr,
-                       SearchPins *won_pins = nullptr);
+// Receives a trace's JSON text in order; false stops the trace.
+using TraceWrite = bool (*)(void *ctx, char const *text, size_t n);
+
+// Where `layout_trace` streams a trace: with `path` set, its binary encoding into that
+// file, which appears or is replaced once the whole trace is written; else JSON to
+// `write`.
+struct TraceTo {
+  char const *path{ nullptr };
+  TraceWrite write{ nullptr };
+  void *ctx{ nullptr };
+};
+
+// Runs `layout_run` from `pins` with a decision trace attached and streams the trace to
+// `to` in bounded memory. Debug output, unhashed. `streamed` is false when the whole
+// trace did not reach `to`; a file that cannot be created runs nothing.
+bool layout_trace(Chart &c,
+                  scav_spaces const &s,
+                  scav_layout_opts const &o,
+                  std::vector<scav_placed> &placed,
+                  std::vector<Diagnostic> &diags,
+                  TraceTo const &to,
+                  bool &streamed,
+                  uint32_t row = INVALID,
+                  TraceScope scope = TraceScope::Shipped,
+                  SearchPins const *pins = nullptr);
+
+// Writes the trace file at `path` to `write` as the JSON `layout_trace` writes; false when
+// the file cannot be read, is not a whole trace, or `write` fails.
+bool trace_file_json(char const *path, TraceWrite write, void *ctx);
+
+// Runs `layout_run` from `pins` on the caller's threads and writes the search's counts as
+// one JSON object to `out`. `tuple` and `taken` are `layout_run`'s.
+bool layout_search_stats(Chart &c,
+                         scav_spaces const &s,
+                         scav_layout_opts const &o,
+                         std::vector<scav_placed> &placed,
+                         std::vector<Diagnostic> &diags,
+                         std::vector<char> &out,
+                         uint32_t row = INVALID,
+                         SearchPins const *pins = nullptr,
+                         uint32_t *tuple = nullptr,
+                         SearchPins *taken = nullptr);
 
 // Structural: route lengths, turn directions, port sides and depths, seeded with the
 // model's structural digest. Coordinate: the rest; a translation moves only this one.

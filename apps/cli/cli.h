@@ -84,13 +84,21 @@ void append_layout_args(std::string &out,
                         uint32_t row,
                         SearchPins const &pins);
 
+// What `dump --layout` records beside the drawing: its trace, or the search's counts.
+struct DumpTrace {
+  bool trace{ false };
+  TraceScope scope{ TraceScope::Shipped };
+  char const *file{ nullptr };  // the binary trace's path; null prints JSON
+  bool stats{ false };
+};
+
 int run_dump(char const *path,
              bool hash_only,
              bool as_json,
              bool with_layout,
-             bool trace,
-             TraceScope scope,
+             DumpTrace const &trace,
              LayoutArgs const &args);
+int run_trace(char const *path);
 int run_render(char const *path,
                char const *out_path,
                bool embed_font,

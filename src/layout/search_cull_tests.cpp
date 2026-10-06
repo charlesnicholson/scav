@@ -420,15 +420,20 @@ TEST_CASE("search: a traced culled search draws what the untraced one ships") {
   scav_layout_opts const opts{ .profile = culled(), .router = 0, .threads = 0 };
   std::vector<scav_placed> placed;
   std::vector<Diagnostic> diags;
-  std::vector<char> json;
-  REQUIRE(layout_trace_json(traced,
-                            s,
-                            opts,
-                            placed,
-                            diags,
-                            json,
-                            INVALID,
-                            TraceScope::Search));
+  TraceWrite const discard = [](void * /*ctx*/, char const * /*text*/, size_t /*n*/) {
+    return true;
+  };
+  bool streamed{ false };
+  REQUIRE(layout_trace(traced,
+                       s,
+                       opts,
+                       placed,
+                       diags,
+                       { .path = nullptr, .write = discard, .ctx = nullptr },
+                       streamed,
+                       INVALID,
+                       TraceScope::Search));
+  CHECK(streamed);
   Laid const shipped{ lay("dock.scav", culled(), true) };
   CHECK(layout_coordinate_hash(traced) == shipped.coordinate);
   CHECK(layout_structural_hash(traced) == shipped.structural);

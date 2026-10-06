@@ -10,7 +10,9 @@
 #include "scav/scav_types.h"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <ctime>
 #include <string>
@@ -1017,14 +1019,25 @@ void append_json(std::string &out, Chart const &c) {
   });
 }
 
+bool write_stdout(void * /*ctx*/, char const *text, size_t n) {
+  return std::fwrite(text, 1, n, stdout) == n;
+}
+
 }  // namespace
+
+int run_trace(char const *path) {
+  if (!trace_file_json(path, write_stdout, nullptr)) {
+    write_error("not a whole trace file", path);
+    return EXIT_UNUSABLE;
+  }
+  return EXIT_CLEAN;
+}
 
 int run_dump(char const *path,
              bool hash_only,
              bool as_json,
              bool with_layout,
-             bool trace,
-             TraceScope scope,
+             DumpTrace const &trace,
              LayoutArgs const &args) {
   Loaded net;
   load_and_report(path, true, net);
@@ -1051,43 +1064,58 @@ int run_dump(char const *path,
       return EXIT_UNUSABLE;
     }
     std::vector<Diagnostic> diags;
-    std::vector<char> events;
-    std::clock_t const began{ std::clock() };
-    bool const laid{ trace ? layout_trace_json(net.chart,
-                                               as_spaces(spaces),
-                                               opts,
-                                               placed,
-                                               diags,
-                                               events,
-                                               args.row,
-                                               scope,
-                                               &args.pins,
-                                               &won,
-                                               &taken)
-                           : layout_run(net.chart,
-                                        as_spaces(spaces),
-                                        opts,
-                                        placed,
-                                        diags,
-                                        nullptr,
-                                        &won,
-                                        args.row,
-                                        nullptr,
-                                        &taken,
-                                        &args.pins) };
-    std::clock_t const ended{ std::clock() };
-    // The trace, or the search's counts after the layout's processor time, goes to stdout
-    // ahead of the model dump.
-    if (scope == TraceScope::Stats) {
+    bool laid{ false };
+    // The trace streams to stdout as the layout runs, or the search's counts follow the
+    // layout's processor time, ahead of the model dump.
+    if (trace.stats) {
+      std::vector<char> counts;
+      std::clock_t const began{ std::clock() };
+      laid = layout_search_stats(net.chart,
+                                 as_spaces(spaces),
+                                 opts,
+                                 placed,
+                                 diags,
+                                 counts,
+                                 args.row,
+                                 &args.pins,
+                                 &won,
+                                 &taken);
+      std::clock_t const ended{ std::clock() };
       std::string line{ "{\"cpu_ms\":" };
       line += std::to_string(((ended - began) * 1000) / CLOCKS_PER_SEC);
       line += ",\"search\":";
-      line.append(events.begin(), events.end());
+      line.append(counts.begin(), counts.end());
       while (!line.empty() && (line.back() == '\n')) { line.pop_back(); }
       line += "}\n";
       write_stream(line, stdout);
-    } else if (trace) {
-      write_stream(std::string{ events.begin(), events.end() }, stdout);
+    } else if (trace.trace) {
+      bool streamed{ false };
+      laid = layout_trace(net.chart,
+                          as_spaces(spaces),
+                          opts,
+                          placed,
+                          diags,
+                          { .path = trace.file, .write = write_stdout, .ctx = nullptr },
+                          streamed,
+                          args.row,
+                          trace.scope,
+                          &args.pins);
+      if (!streamed) {
+        write_error("cannot write the trace", (trace.file != nullptr) ? trace.file : "-");
+        return EXIT_UNUSABLE;
+      }
+    } else {
+      laid = layout_run(net.chart,
+                        as_spaces(spaces),
+                        opts,
+                        placed,
+                        diags,
+                        nullptr,
+                        &won,
+                        args.row,
+                        nullptr,
+                        &taken,
+                        &args.pins);
     }
     if (!diags.empty()) {
       std::string err;

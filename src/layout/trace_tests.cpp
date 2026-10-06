@@ -268,8 +268,20 @@ TEST_CASE("trace: a traced run writes the geometry an untraced one does") {
   std::vector<scav_placed> pb;
   std::vector<Diagnostic> da;
   std::vector<Diagnostic> db;
-  std::vector<char> events;
-  REQUIRE(layout_trace_json(traced, {}, opts, pa, da, events, INVALID));
+  std::string events;
+  TraceWrite const append = [](void *ctx, char const *text, size_t n) {
+    static_cast<std::string *>(ctx)->append(text, n);
+    return true;
+  };
+  bool streamed{ false };
+  REQUIRE(layout_trace(traced,
+                       {},
+                       opts,
+                       pa,
+                       da,
+                       { .path = nullptr, .write = append, .ctx = &events },
+                       streamed));
+  CHECK(streamed);
   REQUIRE(layout_run(plain, {}, opts, pb, db, nullptr, nullptr, INVALID));
 
   CHECK(layout_structural_hash(traced) == layout_structural_hash(plain));
