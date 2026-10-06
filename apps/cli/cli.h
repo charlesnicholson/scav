@@ -44,6 +44,8 @@ struct LayoutArgs {
   char const *profile{ "readable" };
   uint32_t row{ INVALID };
   SearchPins pins;
+  int32_t jitter_seed{ -1 };  // the profile's `jitter_seed`; -1 keeps the profile's
+  int32_t search{ -1 };       // the profile's `search_cull`; -1 keeps the profile's
   bool no_search{ false };
   bool no_text{ false };
   bool given{ false };  // any of the flags below appeared
@@ -65,25 +67,48 @@ enum class ArgRead : uint32_t { NotOurs, Taken, Malformed };
 //                        the fold cuts before
 //   --loop S:F:E         state S's loop room on face F of its free interior (as
 //                        --end), at end E (0 top or left, 1 bottom or right)
+//   --search full|culled the full search, or the culled one
+//   --jitter-seed N      near-equal moves and kicks rank by a hash of N; 0 is none
 //   --no-search          lay out the row and pins given, and move nothing
 //   --no-text            lay out with no space requests, the scale the layout
 //                        goldens are stated at
 ArgRead read_layout_arg(int argc, char **argv, int &i, LayoutArgs &out);
 
-// Appends the flags that reproduce a run: the non-default profile and `--no-text`
-// from `args`, then `row` and every pin.
+// Writes `args`' search flags into `p`: no search, the culled search, the jitter seed.
+void apply_layout_args(LayoutArgs const &args, scav_profile &p);
+
+// Appends the flags that reproduce a run: the non-default profile, search and seed, and
+// `--no-text` from `args`, then `row` and every pin.
 void append_layout_args(std::string &out,
                         LayoutArgs const &args,
                         uint32_t row,
                         SearchPins const &pins);
 
+// What `dump --layout` records beside the drawing: its trace, or the search's counts.
+struct DumpTrace {
+  bool trace{ false };
+  TraceScope scope{ TraceScope::Shipped };
+  char const *file{ nullptr };  // the binary trace's path; null prints JSON
+  bool stats{ false };
+};
+
 int run_dump(char const *path,
              bool hash_only,
              bool as_json,
              bool with_layout,
-             bool trace,
-             TraceScope scope,
+             DumpTrace const &trace,
              LayoutArgs const &args);
+// Runs `layout_trace`, streaming its trace through a writer thread into `trace.file`, or
+// as JSON to stdout; false when the trace was not written whole.
+bool trace_layout(Chart &c,
+                  scav_spaces const &s,
+                  scav_layout_opts const &o,
+                  std::vector<scav_placed> &placed,
+                  std::vector<Diagnostic> &diags,
+                  DumpTrace const &trace,
+                  LayoutArgs const &args,
+                  bool &laid);
+int run_trace(char const *path);
 int run_render(char const *path,
                char const *out_path,
                bool embed_font,

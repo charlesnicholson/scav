@@ -10,8 +10,11 @@
 #include "scav/scav_types.h"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
+#include <ctime>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -300,7 +303,7 @@ std::array<int64_t, TIER2_TERMS> term_values(CostTerms const &t) {
 
 // The profile values layout reads and the spacing it derives from them, parallel to
 // `profile_values`.
-constexpr std::array<char const *, 35> PROFILE{ "em",
+constexpr std::array<char const *, 38> PROFILE{ "em",
                                                 "line_height",
                                                 "pad",
                                                 "rank_sep",
@@ -332,6 +335,9 @@ constexpr std::array<char const *, 35> PROFILE{ "em",
                                                 "portfolio_m",
                                                 "lane_pitch",
                                                 "portfolio_k",
+                                                "search_cull",
+                                                "kick_rows",
+                                                "jitter_seed",
                                                 "sweep_count",
                                                 "spacing_inflation_cap",
                                                 "spacing_inflation_increment" };
@@ -371,6 +377,9 @@ std::array<int64_t, PROFILE.size()> profile_values(scav_profile const &p) {
            p.portfolio_m,
            imax64(route_clearance(p), p.font_size_grid),  // the orthogonal router's lanes
            p.portfolio_k,
+           p.search_cull,
+           p.kick_rows,
+           p.jitter_seed,
            p.sweep_count,
            p.spacing_inflation_cap,
            p.spacing_inflation_increment };
@@ -1016,8 +1025,7 @@ int run_dump(char const *path,
              bool hash_only,
              bool as_json,
              bool with_layout,
-             bool trace,
-             TraceScope scope,
+             DumpTrace const &trace,
              LayoutArgs const &args) {
   Loaded net;
   load_and_report(path, true, net);
@@ -1028,7 +1036,7 @@ int run_dump(char const *path,
     write_error("no such profile", args.profile);
     return EXIT_UNUSABLE;
   }
-  if (args.no_search) { opts.profile.portfolio_k = 0; }
+  apply_layout_args(args, opts.profile);
   CostTerms cost{};
   // The winning row and taken pins, for `rests on`; INVALID under `--trace`.
   uint32_t won{ INVALID };
@@ -1044,29 +1052,55 @@ int run_dump(char const *path,
       return EXIT_UNUSABLE;
     }
     std::vector<Diagnostic> diags;
-    std::vector<char> events;
-    bool const laid{ trace ? layout_trace_json(net.chart,
-                                               as_spaces(spaces),
-                                               opts,
-                                               placed,
-                                               diags,
-                                               events,
-                                               args.row,
-                                               scope,
-                                               &args.pins)
-                           : layout_run(net.chart,
-                                        as_spaces(spaces),
-                                        opts,
-                                        placed,
-                                        diags,
-                                        nullptr,
-                                        &won,
-                                        args.row,
-                                        nullptr,
-                                        &taken,
-                                        &args.pins) };
-    // The trace goes to stdout, ahead of the model dump.
-    if (trace) { write_stream(std::string{ events.begin(), events.end() }, stdout); }
+    bool laid{ false };
+    // The trace streams to stdout as the layout runs, or the search's counts follow the
+    // layout's processor time, ahead of the model dump.
+    if (trace.stats) {
+      std::vector<char> counts;
+      std::clock_t const began{ std::clock() };
+      laid = layout_search_stats(net.chart,
+                                 as_spaces(spaces),
+                                 opts,
+                                 placed,
+                                 diags,
+                                 counts,
+                                 args.row,
+                                 &args.pins,
+                                 &won,
+                                 &taken);
+      std::clock_t const ended{ std::clock() };
+      std::string line{ "{\"cpu_ms\":" };
+      line += std::to_string((ended - began) / (CLOCKS_PER_SEC / 1000));
+      line += ",\"search\":";
+      line.append(counts.begin(), counts.end());
+      while (!line.empty() && (line.back() == '\n')) { line.pop_back(); }
+      line += "}\n";
+      write_stream(line, stdout);
+    } else if (trace.trace) {
+      if (!trace_layout(net.chart,
+                        as_spaces(spaces),
+                        opts,
+                        placed,
+                        diags,
+                        trace,
+                        args,
+                        laid)) {
+        write_error("cannot write the trace", (trace.file != nullptr) ? trace.file : "-");
+        return EXIT_UNUSABLE;
+      }
+    } else {
+      laid = layout_run(net.chart,
+                        as_spaces(spaces),
+                        opts,
+                        placed,
+                        diags,
+                        nullptr,
+                        &won,
+                        args.row,
+                        nullptr,
+                        &taken,
+                        &args.pins);
+    }
     if (!diags.empty()) {
       std::string err;
       for (Diagnostic const &d : diags) { diag_append(err, net.chart, d, path); }

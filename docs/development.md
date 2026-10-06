@@ -173,16 +173,22 @@ same bytes, which is the point: worker count reaches scheduling and nothing
 else. `NULL` is what the `wasm32-wasi` target will use, and building it now is
 how that stays true.
 
-**Tests run in two tiers.** The cache variable `SCAV_TEST_TIER` is `fast`, the
-default on every preset, or `full`; every test reads the environment variable of
-the same name, and a test binary run by hand is fast unless it is set. The fast
-tier takes seconds: corpus loops keep only `brew`, `dock`, `estop`, `kiln` and `led`, still
-compared line by line against the same goldens, and doctest cases tagged
-`doctest::test_suite("full")` and Python tests marked `scavtest.full_only` are
-left out. CI's release and testable rows build with `-DSCAV_TEST_TIER=full` and
-run everything in under five minutes; add the same flag locally to do so. The
-functional tests' traced-dump and render loops leave out `bottler`, `mill`, `tcp`
-and `toolchanger` in both tiers, and the full-corpus `scav selftest` run is opt-in
+**Tests run in three tiers.** The cache variable `SCAV_TEST_TIER` is `fast`, the
+default on every preset, `full` or `exhaustive`; every test reads the environment
+variable of the same name, and a test binary run by hand is fast unless it is set.
+
+- `fast` takes seconds. Corpus loops keep only `brew`, `dock`, `estop`, `kiln` and
+  `led`, still compared line by line against the same goldens; whole searches leave out
+  `brew` and `kiln` too. Doctest cases tagged `doctest::test_suite("full")` or `"exhaustive"` and
+  Python tests marked `scavtest.full_only` are left out.
+- `full` runs everything else, in under five minutes. CI's release and testable rows
+  build with `-DSCAV_TEST_TIER=full`; add the same flag locally to do so.
+- `exhaustive` adds the cases tagged `doctest::test_suite("exhaustive")`: corpus-wide
+  proofs that lay out every culled, pruned, stopped or memo-answered move whole and
+  compare. They take minutes of CPU and run by hand after a change to the search.
+
+The functional tests' traced-dump and render loops leave out `bottler`, `mill`, `tcp`
+and `toolchanger` in every tier, and the full-corpus `scav selftest` run is opt-in
 with `SCAV_TEST_SELFTEST=1`.
 
 **Corpus tests lay out from committed pins.** For each corpus chart and scale,
@@ -312,6 +318,65 @@ Everything suite-level lives in `src/core/tests/`, named by its class
 declares `scav_stable_sort` — so a call site names its header without a grep.
 (Test fixture headers count their stem after the `test_` marker:
 `test_synth.h` declares `synth_*`.)
+
+## Measuring the search
+
+`scav dump --layout --search-stats <chart>` prints one JSON line ahead of the model:
+
+- `cpu_ms`: the layout's processor time (`std::clock`; wall time on Windows).
+- `searches`: Level 1 searches run; `recalled`: those the search memo answered.
+- `aliased`: rows laid out and searched as an earlier row, differing only in knobs no
+  sizing of the chart reads.
+- `deferred`: moves scored again after another thread routed the same drawing.
+- `relaid`: unlabelled bounds laid out again where the memo held only a labelled score
+  that cannot win.
+- `memo_bytes`: the candidate memo's peak bytes.
+- `drawn`: memo answers found by drawing rather than by laid ordering; `faced`: moves
+  whose facing pass the memo answered.
+- Per Level 1 move kind:
+  - `offered`: moves offered;
+  - `deduped`: those the memo answered;
+  - `pruned`: those left unrouted because their route bound reached the incumbent;
+  - `stopped`: those whose routing or Tier 2 reached the incumbent before Tier 0 was
+    counted;
+  - `taken`: those taken;
+  - `culled`: moves never offered because they change nothing;
+  - `skipped`: moves the culled search's don't-look bits left unscored in a round that
+    took a move.
+
+`tools/trace.py --stats [chart...]` tabulates these over the corpus, or the charts given,
+at both text scales, with `scored` as offered less deduped and pruned. `deduped` and
+`relaid` vary by a few tenths of a percent between runs; the drawing does not.
+
+`--search full` runs the full search (PRD §11.10c) in place of the culled default, and
+`--jitter-seed N` breaks near-equal moves and kicks by a hash of `N`.
+
+- `tools/jitter.py --runs DIR` runs the corpus at both scales for two searches
+  (`--searches full,culled` by default), unperturbed and under three seeds, keeps each run
+  in DIR, and reports per chart whether one search is worse: every one of its runs more
+  than 2% above every run of the other.
+- `tools/shootout.py --runs DIR --out FILE --shots PNGDIR` draws every chart by the same
+  two searches side by side from those runs, each panel with its Tier 2, Tier 0, bends,
+  crossings, candidates evaluated and search CPU; `--prefix` names the PNGs.
+
+## Tracing a layout
+
+`scav dump --layout --trace <chart>` prints the decisions behind the shipped drawing
+ahead of the model: a JSON array, one event per line (PRD §11.16). `--trace-search`
+traces every candidate of the whole search, `--trace-outline` only its row and kick
+events. A traced run streams in bounded memory: each event is encoded as it happens
+and a writer thread prints it, so `bottler`'s whole-search trace, 10.8 GB of JSON,
+peaks at 36 MiB.
+
+`--trace-file FILE` writes the trace in its binary encoding to FILE instead, a tenth
+of the JSON's size; FILE appears, or is replaced, only once the whole trace is
+written. `scav trace FILE` prints a kept file as the JSON `--trace` prints, and prints
+nothing for a cut file or one another scav build wrote. The file is self-describing:
+its header names every event kind, each kind's fields and their types, and the chart's
+state names, so a reader written from the format needs only the file.
+
+`tools/trace.py` reads the JSON from scav's pipe one line at a time: `--trans N` the
+events behind one transition's route, `--outline` the outline, `--raw` every event.
 
 ## The Unicode tables
 

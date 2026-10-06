@@ -1,5 +1,6 @@
 // The trace sink's frame stamping, scoping and JSON output, then traced layout runs.
 
+#include "layout/tests/trace_record.h"
 #include "layout/trace.h"
 
 #include "scav/scav_core.h"
@@ -31,15 +32,14 @@ struct Attached {
   Attached &operator=(Attached const &) = delete;
 };
 
-std::string json_of(LayoutTrace const &t, Chart const &c) {
-  std::vector<char> out;
-  trace_to_json(t, c, out);
-  return { out.begin(), out.end() };
+std::string json_of(TraceRecord &t) {
+  std::vector<char> const json{ t.json() };
+  return { json.begin(), json.end() };
 }
 
-uint32_t count_kind(LayoutTrace const &t, TraceKind k) {
+uint32_t count_kind(TraceRecord &t, TraceKind k) {
   uint32_t n{ 0 };
-  for (TraceEvent const &e : t.events) {
+  for (TraceEvent const &e : t.events()) {
     if (e.kind == k) { ++n; }
   }
   return n;
@@ -54,12 +54,12 @@ struct Round {
   uint32_t end{ 0 };
 };
 
-std::vector<Round> rounds_of(LayoutTrace const &t) {
+std::vector<Round> rounds_of(std::vector<TraceEvent> const &events) {
   std::vector<Round> out;
   uint32_t orderings{ 0 };
   bool open{ false };
-  for (uint32_t i = 0; i < t.events.size(); ++i) {
-    TraceEvent const &e{ t.events[i] };
+  for (uint32_t i = 0; i < events.size(); ++i) {
+    TraceEvent const &e{ events[i] };
     if ((e.kind != TraceKind::CandidateScored) && (e.kind != TraceKind::CandidateTerms)) {
       open = false;
       orderings += (e.kind == TraceKind::EdgeReversed) ? 1U : 0U;
@@ -85,18 +85,19 @@ TEST_CASE("trace: no sink is the shipped state, and emitting into one is a no-op
 }
 
 TEST_CASE("trace: the sink stamps its frame, and an explicit one wins") {
-  LayoutTrace t;
+  TraceRecord t;
   Attached const held{ t };
   t.frame = 7;
   trace_emit({ .kind = TraceKind::EdgeReversed, .seg = { .seg = 1 } });
   trace_emit({ .kind = TraceKind::EdgeReversed, .frame = 9, .seg = { .seg = 2 } });
-  REQUIRE(t.events.size() == 2);
-  CHECK(t.events[0].frame == 7);
-  CHECK(t.events[1].frame == 9);
+  std::vector<TraceEvent> const events{ t.events() };
+  REQUIRE(events.size() == 2);
+  CHECK(events[0].frame == 7);
+  CHECK(events[1].frame == 9);
 }
 
 TEST_CASE("trace: a frame scope restores its caller's, including from INVALID") {
-  LayoutTrace t;
+  TraceRecord t;
   Attached const held{ t };
   CHECK(t.frame == INVALID);
   {
@@ -119,7 +120,8 @@ TEST_CASE("trace: a frame scope with no sink attached touches nothing") {
 
 TEST_CASE("trace: an empty trace serializes to an empty array") {
   Chart const c;
-  CHECK(json_of({}, c) == "[\n]\n");
+  TraceRecord t{ c };
+  CHECK(json_of(t) == "[\n]\n");
 }
 
 TEST_CASE("trace: a state is named, a nameless one is its ordinal, a stranger is null") {
@@ -128,17 +130,15 @@ TEST_CASE("trace: a state is named, a nameless one is its ordinal, a stranger is
   StateId const a{ build_state(c, root, "Alpha", StateKind::Normal, {}) };
   StateId const anon{ build_state(c, root, "", StateKind::Initial, {}) };
 
-  LayoutTrace t;
-  t.events.push_back(
-      { .kind = TraceKind::RankAssigned, .rank = { .state = a.v, .rank = 4 } });
-  t.events.push_back(
-      { .kind = TraceKind::RankAssigned, .rank = { .state = anon.v, .rank = 0 } });
-  t.events.push_back(
-      { .kind = TraceKind::RankAssigned, .rank = { .state = 99, .rank = 0 } });
-  t.events.push_back(
-      { .kind = TraceKind::RankAssigned, .rank = { .state = INVALID, .rank = 0 } });
+  TraceRecord t{ c };
+  trace_put(t, { .kind = TraceKind::RankAssigned, .rank = { .state = a.v, .rank = 4 } });
+  trace_put(t,
+            { .kind = TraceKind::RankAssigned, .rank = { .state = anon.v, .rank = 0 } });
+  trace_put(t, { .kind = TraceKind::RankAssigned, .rank = { .state = 99, .rank = 0 } });
+  trace_put(t,
+            { .kind = TraceKind::RankAssigned, .rank = { .state = INVALID, .rank = 0 } });
 
-  std::string const out{ json_of(t, c) };
+  std::string const out{ json_of(t) };
   CHECK(out.find("\"state_id\":" + std::to_string(a.v) +
                  ",\"state\":\"Alpha\",\"rank\":4") != std::string::npos);
   CHECK(out.find("\"state\":\"#" + std::to_string(anon.v) + "\"") != std::string::npos);
@@ -149,72 +149,86 @@ TEST_CASE("trace: a state is named, a nameless one is its ordinal, a stranger is
 
 TEST_CASE("trace: every payload shape serializes its own fields") {
   Chart const c;
-  LayoutTrace t;
-  t.events.push_back({ .kind = TraceKind::EdgeChained,
-                       .chain = { .seg = 3, .rank = 2, .index = 1, .count = 1 } });
-  t.events.push_back({ .kind = TraceKind::NodePlaced,
-                       .place = { .state = INVALID, .seg = 3, .x = 2823, .y = 1489 } });
-  t.events.push_back({ .kind = TraceKind::SpacingInflated,
-                       .inflate = { .node_sep = 320, .rank_sep = 640 } });
-  t.events.push_back({ .kind = TraceKind::NetPlanned,
-                       .net = { .seg = 3,
-                                .trans = 3,
-                                .waypoints = 1,
-                                .sx = 1997,
-                                .sy = 2469,
-                                .dx = 1344,
-                                .dy = 509 } });
-  t.events.push_back({ .kind = TraceKind::NetWaypoint, .point = { .x = -8, .y = 1489 } });
-  t.events.push_back(
+  TraceRecord t{ c };
+  trace_put(t,
+            { .kind = TraceKind::EdgeChained,
+              .chain = { .seg = 3, .rank = 2, .index = 1, .count = 1 } });
+  trace_put(t,
+            { .kind = TraceKind::NodePlaced,
+              .place = { .state = INVALID, .seg = 3, .x = 2823, .y = 1489 } });
+  trace_put(t,
+            { .kind = TraceKind::SpacingInflated,
+              .inflate = { .node_sep = 320, .rank_sep = 640 } });
+  trace_put(t,
+            { .kind = TraceKind::NetPlanned,
+              .net = { .seg = 3,
+                       .trans = 3,
+                       .waypoints = 1,
+                       .sx = 1997,
+                       .sy = 2469,
+                       .dx = 1344,
+                       .dy = 509 } });
+  trace_put(t, { .kind = TraceKind::NetWaypoint, .point = { .x = -8, .y = 1489 } });
+  trace_put(
+      t,
       { .kind = TraceKind::SeatMoved,
         .pass = static_cast<uint16_t>(SeatPass::Separate),
         .seat = { .net = 2, .end = 1, .from_x = 1, .from_y = 2, .to_x = 3, .to_y = 4 } });
-  t.events.push_back(
+  trace_put(
+      t,
       { .kind = TraceKind::LaneAssigned, .lane = { .net = 5, .lane = 1, .at = 96 } });
-  t.events.push_back({ .kind = TraceKind::LaneFound,
-                       .found = { .horizontal = 1,
-                                  .at = -40,
-                                  .members = 3,
-                                  .bundles = 2,
-                                  .merged = 1,
-                                  .reordered = 1,
-                                  .spread = 0 } });
-  t.events.push_back({ .kind = TraceKind::BundleRefused,
-                       .bundle = { .net = 4, .lane = 0, .members = 2, .to = 76 } });
-  t.events.push_back({ .kind = TraceKind::CandidateScored,
-                       .pass = static_cast<uint16_t>(MoveVerdict::NotBetter),
-                       .score = { .row = INVALID,
-                                  .state = INVALID,
-                                  .rank = 0,
-                                  .t0 = 0,
-                                  .t2 = 4294967296 } });
-  t.events.push_back({ .kind = TraceKind::GapCharged,
-                       .pass = static_cast<uint16_t>(GapCause::Lanes),
-                       .gap = { .boundary = 2, .seg = 7, .width = 538 } });
-  t.events.push_back({ .kind = TraceKind::RowSearched,
-                       .pass = static_cast<uint16_t>(RowPass::Refold),
-                       .search = { .row = 3, .of = INVALID, .t0 = 1, .t2 = 2461 } });
-  t.events.push_back({ .kind = TraceKind::RowRepeated, .search = { .row = 5, .of = 1 } });
-  t.events.push_back({ .kind = TraceKind::KickScored,
-                       .pass = static_cast<uint16_t>(KickVerdict::Improves),
-                       .frame = 2,
-                       .search = { .row = 1,
-                                   .of = INVALID,
-                                   .move = TRACE_MOVE_REVERSE,
-                                   .trans = 6,
-                                   .leg = 1,
-                                   .t0 = 0,
-                                   .framed_t0 = 2,
-                                   .t2 = 1495,
-                                   .framed = 3715 } });
-  t.events.push_back({ .kind = TraceKind::KickScored,
-                       .pass = static_cast<uint16_t>(KickVerdict::NotBetter),
-                       .search = { .row = 0, .move = TRACE_MOVE_ORIENT, .t2 = 7 } });
-  t.events.push_back({ .kind = TraceKind::KickTaken,
-                       .pass = static_cast<uint16_t>(KickHow::Stacked),
-                       .search = { .row = 1, .t0 = 0, .t2 = 1441 } });
+  trace_put(t,
+            { .kind = TraceKind::LaneFound,
+              .found = { .horizontal = 1,
+                         .at = -40,
+                         .members = 3,
+                         .bundles = 2,
+                         .merged = 1,
+                         .reordered = 1,
+                         .spread = 0 } });
+  trace_put(t,
+            { .kind = TraceKind::BundleRefused,
+              .bundle = { .net = 4, .lane = 0, .members = 2, .to = 76 } });
+  trace_put(t,
+            { .kind = TraceKind::CandidateScored,
+              .pass = static_cast<uint16_t>(MoveVerdict::NotBetter),
+              .score = { .row = INVALID,
+                         .state = INVALID,
+                         .rank = 0,
+                         .t0 = 0,
+                         .t2 = 4294967296 } });
+  trace_put(t,
+            { .kind = TraceKind::GapCharged,
+              .pass = static_cast<uint16_t>(GapCause::Lanes),
+              .gap = { .boundary = 2, .seg = 7, .width = 538 } });
+  trace_put(t,
+            { .kind = TraceKind::RowSearched,
+              .pass = static_cast<uint16_t>(RowPass::Refold),
+              .search = { .row = 3, .of = INVALID, .t0 = 1, .t2 = 2461 } });
+  trace_put(t, { .kind = TraceKind::RowRepeated, .search = { .row = 5, .of = 1 } });
+  trace_put(t,
+            { .kind = TraceKind::KickScored,
+              .pass = static_cast<uint16_t>(KickVerdict::Improves),
+              .frame = 2,
+              .search = { .row = 1,
+                          .of = INVALID,
+                          .move = TRACE_MOVE_REVERSE,
+                          .trans = 6,
+                          .leg = 1,
+                          .t0 = 0,
+                          .framed_t0 = 2,
+                          .t2 = 1495,
+                          .framed = 3715 } });
+  trace_put(t,
+            { .kind = TraceKind::KickScored,
+              .pass = static_cast<uint16_t>(KickVerdict::NotBetter),
+              .search = { .row = 0, .move = TRACE_MOVE_ORIENT, .t2 = 7 } });
+  trace_put(t,
+            { .kind = TraceKind::KickTaken,
+              .pass = static_cast<uint16_t>(KickHow::Stacked),
+              .search = { .row = 1, .t0 = 0, .t2 = 1441 } });
 
-  std::string const out{ json_of(t, c) };
+  std::string const out{ json_of(t) };
   CHECK(out.find("\"seg\":3,\"rank\":2,\"index\":1,\"count\":1") != std::string::npos);
   CHECK(out.find("\"bend_of_seg\":3,\"at\":[2823,1489]") != std::string::npos);
   CHECK(out.find("\"node_sep\":320,\"rank_sep\":640") != std::string::npos);
@@ -268,13 +282,20 @@ TEST_CASE("trace: a traced run writes the geometry an untraced one does") {
   std::vector<scav_placed> pb;
   std::vector<Diagnostic> da;
   std::vector<Diagnostic> db;
-  std::vector<char> events;
-  REQUIRE(layout_trace_json(traced, {}, opts, pa, da, events, INVALID));
+  std::vector<uint8_t> bytes;
+  TraceChunk const append = [](void *ctx, uint8_t const *data, size_t n) {
+    auto &out{ *static_cast<std::vector<uint8_t> *>(ctx) };
+    out.insert(out.end(), data, data + n);
+    return true;
+  };
+  bool streamed{ false };
+  REQUIRE(layout_trace(traced, {}, opts, pa, da, append, &bytes, streamed));
+  CHECK(streamed);
   REQUIRE(layout_run(plain, {}, opts, pb, db, nullptr, nullptr, INVALID));
 
   CHECK(layout_structural_hash(traced) == layout_structural_hash(plain));
   CHECK(layout_coordinate_hash(traced) == layout_coordinate_hash(plain));
-  CHECK(!events.empty());
+  CHECK(!bytes.empty());
   CHECK(trace_sink() == nullptr);  // the run detaches its sink on return
 }
 
@@ -295,7 +316,7 @@ TEST_CASE("trace: a fold pin names the frame it decides and the mode it takes") 
   opts.threads = 1;
   std::vector<scav_placed> placed;
   std::vector<Diagnostic> diags;
-  LayoutTrace bare;
+  TraceRecord bare;
   {
     Attached const held{ bare };
     REQUIRE(layout_run(c, {}, opts, placed, diags, nullptr, nullptr, 0));
@@ -304,7 +325,7 @@ TEST_CASE("trace: a fold pin names the frame it decides and the mode it takes") 
   CHECK(count_kind(bare, TraceKind::FoldPinned) == 0);
 
   SearchPins const pins{ .folds = { { .frame = root, .mode = FOLD_NEVER } } };
-  LayoutTrace t;
+  TraceRecord t{ c };
   {
     Attached const held{ t };
     REQUIRE(layout_run(c,
@@ -321,12 +342,12 @@ TEST_CASE("trace: a fold pin names the frame it decides and the mode it takes") 
   }
   CHECK(count_kind(t, TraceKind::FoldCut) == 0);
   REQUIRE(count_kind(t, TraceKind::FoldPinned) == 1);
-  for (TraceEvent const &e : t.events) {
+  for (TraceEvent const &e : t.events()) {
     if (e.kind != TraceKind::FoldPinned) { continue; }
     CHECK(e.frame == root.v);
     CHECK(e.pass == FOLD_NEVER);
   }
-  CHECK(json_of(t, c).find("\"kind\":\"fold_pinned\",\"frame\":0,\"mode\":\"never\"") !=
+  CHECK(json_of(t).find("\"kind\":\"fold_pinned\",\"frame\":0,\"mode\":\"never\"") !=
         std::string::npos);
 }
 
@@ -342,7 +363,7 @@ TEST_CASE("trace: a back edge's kinks are one chained bend, and the trace says s
   build_trans(c, b, d, TransKind::Default, {});
   TransId const back{ build_trans(c, d, a, TransKind::Default, {}) };
 
-  LayoutTrace t;
+  TraceRecord t;
   scav_layout_opts opts{};
   REQUIRE(profile_named("readable", opts.profile));
   opts.threads = 1;
@@ -358,7 +379,7 @@ TEST_CASE("trace: a back edge's kinks are one chained bend, and the trace says s
 
   // A, B and C take increasing ranks.
   std::array<uint32_t, 3> ranks{ INVALID, INVALID, INVALID };
-  for (TraceEvent const &e : t.events) {
+  for (TraceEvent const &e : t.events()) {
     if (e.kind != TraceKind::RankAssigned) { continue; }
     for (uint32_t i = 0; i < 3; ++i) {
       if (e.rank.state == (StateId{ a.v + i }).v) { ranks[i] = e.rank.rank; }
@@ -369,7 +390,7 @@ TEST_CASE("trace: a back edge's kinks are one chained bend, and the trace says s
 
   // One bend, at B's rank, and one reversal.
   CHECK(count_kind(t, TraceKind::EdgeChained) == 1);
-  for (TraceEvent const &e : t.events) {
+  for (TraceEvent const &e : t.events()) {
     if (e.kind != TraceKind::EdgeChained) { continue; }
     CHECK(e.chain.rank == ranks[1]);
     CHECK(e.chain.count == 1);
@@ -378,7 +399,7 @@ TEST_CASE("trace: a back edge's kinks are one chained bend, and the trace says s
 
   // Only the back edge's net carries a waypoint, and it carries one.
   uint32_t carrying{ 0 };
-  for (TraceEvent const &e : t.events) {
+  for (TraceEvent const &e : t.events()) {
     if (e.kind != TraceKind::NetPlanned) { continue; }
     if (e.net.waypoints == 0) { continue; }
     ++carrying;
@@ -390,7 +411,7 @@ TEST_CASE("trace: a back edge's kinks are one chained bend, and the trace says s
 
   // The waypoint equals the bend's placed coordinate.
   scav_point bend{ .x = INT32_MIN, .y = INT32_MIN };
-  for (TraceEvent const &e : t.events) {
+  for (TraceEvent const &e : t.events()) {
     if ((e.kind == TraceKind::NodePlaced) && (e.place.state == INVALID)) {
       bend = { .x = e.place.x, .y = e.place.y };
     }
@@ -413,7 +434,7 @@ TEST_CASE("trace: a label's charge names its frame, its boundary and its segment
   scav_path_box const box{ .subject = into.v, .w = 1511, .h = 269, .order = 0 };
   scav_spaces const s{ .path_box = &box, .n_path_box = 1 };
 
-  LayoutTrace trace;
+  TraceRecord trace;
   scav_layout_opts opts{};
   REQUIRE(profile_named("readable", opts.profile));
   opts.threads = 1;
@@ -425,7 +446,7 @@ TEST_CASE("trace: a label's charge names its frame, its boundary and its segment
     REQUIRE(layout_run(c, s, opts, placed, diags, nullptr, nullptr, 0));
   }
   uint32_t labels{ 0 };
-  for (TraceEvent const &e : trace.events) {
+  for (TraceEvent const &e : trace.events()) {
     if ((e.kind != TraceKind::GapCharged) ||
         (static_cast<GapCause>(e.pass) != GapCause::Label)) {
       continue;
@@ -451,9 +472,10 @@ TEST_CASE("trace: the search re-orders per move, and every move states its verdi
   build_trans(c, b, d, TransKind::Default, {});
   TransId const back{ build_trans(c, d, a, TransKind::Default, {}) };
 
-  LayoutTrace t;
+  TraceRecord t;
   scav_layout_opts opts{};
   REQUIRE(profile_named("readable", opts.profile));
+  opts.profile.search_cull = 0;  // the full search
   opts.threads = 1;
   std::vector<scav_placed> placed;
   std::vector<Diagnostic> diags;
@@ -465,7 +487,7 @@ TEST_CASE("trace: the search re-orders per move, and every move states its verdi
   // Every verdict is one of the four, and rejected moves are traced too.
   uint32_t const scored{ count_kind(t, TraceKind::CandidateScored) };
   uint32_t taken{ 0 };
-  for (TraceEvent const &e : t.events) {
+  for (TraceEvent const &e : t.events()) {
     if (e.kind != TraceKind::CandidateScored) { continue; }
     CHECK(e.pass <= static_cast<uint16_t>(MoveVerdict::NotBetter));
     // A placement names a state and no transition; every other move names a transition
@@ -479,7 +501,8 @@ TEST_CASE("trace: the search re-orders per move, and every move states its verdi
   CHECK(taken < scored);  // at least one move is rejected
 
   // Each round reorders once per scored move plus once before it, twice before the first.
-  std::vector<Round> const rounds{ rounds_of(t) };
+  std::vector<TraceEvent> const events{ t.events() };
+  std::vector<Round> const rounds{ rounds_of(events) };
   REQUIRE(!rounds.empty());
   for (uint32_t k = 0; k < rounds.size(); ++k) {
     CAPTURE(k);
@@ -491,7 +514,7 @@ TEST_CASE("trace: the search re-orders per move, and every move states its verdi
   (void)back;
   uint32_t planned{ 0 };
   uint32_t carrying{ 0 };
-  for (TraceEvent const &e : t.events) {
+  for (TraceEvent const &e : t.events()) {
     if (e.kind != TraceKind::NetPlanned) { continue; }
     ++planned;
     carrying += (e.net.waypoints != 0) ? 1U : 0U;
@@ -514,7 +537,7 @@ TEST_CASE("trace: a reversal is offered only on a segment that lies on a cycle")
   build_trans(c, d, a, TransKind::Default, {});
   TransId const off{ build_trans(c, d, tail, TransKind::Default, {}) };
 
-  LayoutTrace t;
+  TraceRecord t;
   scav_layout_opts opts{};
   REQUIRE(profile_named("readable", opts.profile));
   opts.threads = 1;
@@ -525,7 +548,7 @@ TEST_CASE("trace: a reversal is offered only on a segment that lies on a cycle")
     REQUIRE(layout_run(c, {}, opts, placed, diags, nullptr, nullptr, 0));
   }
   uint32_t reversals{ 0 };
-  for (TraceEvent const &e : t.events) {
+  for (TraceEvent const &e : t.events()) {
     if ((e.kind != TraceKind::CandidateScored) || (e.score.move != TRACE_MOVE_REVERSE)) {
       continue;
     }
@@ -550,7 +573,7 @@ TEST_CASE("trace: a face is offered only where its transition bends or is priced
   build_trans(c, e, f, TransKind::Default, {});
   build_trans(c, d, f, TransKind::Default, {});
 
-  LayoutTrace t;
+  TraceRecord t;
   scav_layout_opts opts{};
   REQUIRE(profile_named("readable", opts.profile));
   opts.threads = 1;
@@ -564,7 +587,7 @@ TEST_CASE("trace: a face is offered only where its transition bends or is priced
   CHECK(layout_test_noop_faces() > 0);  // faces with no effect are skipped and counted
   uint32_t faced{ 0 };
   uint32_t ranked{ 0 };
-  for (TraceEvent const &ev : t.events) {
+  for (TraceEvent const &ev : t.events()) {
     if (ev.kind != TraceKind::CandidateScored) { continue; }
     ranked += (ev.score.move == TRACE_MOVE_RANK) ? 1U : 0U;
     if (ev.score.move != TRACE_MOVE_FACE) { continue; }
@@ -586,7 +609,7 @@ TEST_CASE("trace: the search scores unchain moves beside placement moves") {
   build_trans(c, b, d, TransKind::Default, {});
   TransId const back{ build_trans(c, d, a, TransKind::Default, {}) };
 
-  LayoutTrace t;
+  TraceRecord t;
   scav_layout_opts opts{};
   REQUIRE(profile_named("readable", opts.profile));
   opts.threads = 1;
@@ -599,7 +622,8 @@ TEST_CASE("trace: the search scores unchain moves beside placement moves") {
 
   // One cut in the first round, on the back edge; in every round every cut precedes
   // every placement move.
-  std::vector<Round> const rounds{ rounds_of(t) };
+  std::vector<TraceEvent> const events{ t.events() };
+  std::vector<Round> const rounds{ rounds_of(events) };
   REQUIRE(!rounds.empty());
   bool seen_pin{ false };
   for (uint32_t k = 0; k < rounds.size(); ++k) {
@@ -608,7 +632,7 @@ TEST_CASE("trace: the search scores unchain moves beside placement moves") {
     bool pinned{ false };
     bool cut_after_pin{ false };
     for (uint32_t i = rounds[k].first; i < rounds[k].end; ++i) {
-      TraceEvent const &e{ t.events[i] };
+      TraceEvent const &e{ events[i] };
       if (e.kind != TraceKind::CandidateScored) { continue; }
       if (e.score.move == TRACE_MOVE_RANK) {
         pinned = true;
@@ -712,11 +736,12 @@ TEST_CASE("trace: the outline names each row's searches, every kick and what a r
   kicked(plain);
   scav_layout_opts opts{};
   REQUIRE(profile_named("readable", opts.profile));
+  opts.profile.search_cull = 0;  // the full search
   std::vector<scav_placed> placed;
   std::vector<Diagnostic> diags;
   REQUIRE(layout_run(plain, {}, opts, placed, diags));
   opts.threads = 1;
-  LayoutTrace t;
+  TraceRecord t;
   trace_outline_set(&t);
   bool const ran{ layout_run(traced, {}, opts, placed, diags) };
   trace_outline_set(nullptr);
@@ -730,7 +755,7 @@ TEST_CASE("trace: the outline names each row's searches, every kick and what a r
   uint32_t firsts{ 0 };
   uint32_t refolds{ 0 };
   uint32_t outward{ 0 };  // kicks dearer in their own frame that improve once it re-ranks
-  for (TraceEvent const &ev : t.events) {
+  for (TraceEvent const &ev : t.events()) {
     CAPTURE(static_cast<uint32_t>(ev.kind));
     uint32_t const row{ ev.search.row };
     REQUIRE(row < LAYOUT_SEARCH_ROWS);

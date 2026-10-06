@@ -43,6 +43,10 @@ struct RouteNet {
 // resolve as in `ortho_ring`.
 uint32_t face_of(scav_point at, scav_rect const &r);
 
+// True when face `face` of `r` exceeds twice the inset `max(clear, arc)` a seat keeps from
+// each corner.
+bool face_seats(scav_rect const &r, uint32_t face, int32_t clear, int32_t arc);
+
 // Appends to `out` the run between a loop's `ends` on each face of `r` they touch, padded
 // by `clear`, as spans of obstacle `st`.
 void loop_occupied(std::array<scav_point, 2> const &ends,
@@ -130,6 +134,17 @@ class Router {
   // How far the caller grows `region` on every side for this router's lanes.
   [[nodiscard]] virtual int32_t margin(scav_profile const & /*p*/) const { return 0; }
 
+  // True when undegraded nets run axis-aligned and leave each box end square from a seat
+  // `max(arc, 1)` off a face's corners, or at an inscribed glyph's face middle.
+  [[nodiscard]] virtual bool rectilinear() const { return false; }
+
+  // The face an end on box `r` with no seatable named face is seated on, aimed at `aim`,
+  // on a box neither inscribed nor looped; 4 for any face.
+  [[nodiscard]] virtual uint32_t seat_face(scav_rect const & /*r*/,
+                                           scav_point /*aim*/) const {
+    return 4;
+  }
+
   // Bit f set where naming face f at end `end` (0 source, 1 destination) of
   // `in.nets[net]` can change the route; independent of that end's own named face.
   [[nodiscard]] virtual uint32_t effective_faces(RouteInput const & /*in*/,
@@ -162,6 +177,8 @@ class OrthogonalRouter final : public Router {
   }
   [[nodiscard]] uint32_t version() const override { return 1; }
   [[nodiscard]] int32_t margin(scav_profile const &p) const override;
+  [[nodiscard]] bool rectilinear() const override { return true; }
+  [[nodiscard]] uint32_t seat_face(scav_rect const &r, scav_point aim) const override;
   [[nodiscard]] uint32_t effective_faces(RouteInput const &in,
                                          uint32_t net,
                                          uint32_t end) const override;

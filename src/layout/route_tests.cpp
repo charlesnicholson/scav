@@ -11,6 +11,7 @@
 #include "layout/order.h"
 #include "layout/router.h"
 #include "layout/size.h"
+#include "layout/tests/trace_record.h"
 #include "layout/trace.h"
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
@@ -1086,11 +1087,11 @@ TEST_CASE("route: nothing is nudged for a router that asks for no margin") {
 
   // Segments nudging moves onto a lane.
   auto const lane_moves = [&](Router const &router) {
-    LayoutTrace trace;
+    TraceRecord trace;
     trace_sink_set(&trace);
     (void)route_transitions(c, g, o, z, {}, profile(), router);
     trace_sink_set(nullptr);
-    return std::ranges::count_if(trace.events, [](TraceEvent const &e) {
+    return std::ranges::count_if(trace.events(), [](TraceEvent const &e) {
       return e.kind == TraceKind::LaneAssigned;
     });
   };
@@ -1368,6 +1369,210 @@ TEST_CASE("route: a cache filled by a run that reused one answers like routing a
     }
     CHECK(chained > 0);
   }
+}
+
+namespace {
+
+// Turns of transition `t`'s route in `r`, as `cost_terms` counts bends.
+int64_t route_turns(Routes const &r, uint32_t t) {
+  scav_span const at{ r.route[t] };
+  int64_t out{ 0 };
+  for (uint32_t k = 0; (k + 2) < at.len; ++k) {
+    scav_point const *q{ r.points.data() + at.off + k };
+    out += (direction(q[0], q[1]) != direction(q[1], q[2])) ? 1 : 0;
+  }
+  return out;
+}
+
+}  // namespace
+
+TEST_CASE("route: the turns a stop counts frame by frame never pass the routes'") {
+  // Laid end to end and nudged, a transition's nets turn at least as often as alone.
+  scav_profile p{};
+  REQUIRE(profile_named("readable", p));
+  Router const *const router{ router_at(0) };
+  REQUIRE(router != nullptr);
+  for (char const *name : CORPUS) {
+    if (scav::test::corpus_skipped(name)) { continue; }
+    CAPTURE(name);
+    Chart c;
+    load_corpus_chart(name, c);
+    SplitGraph const g{ decompose(c) };
+    for (uint32_t moved = 0; moved < 4; ++moved) {
+      CAPTURE(moved);
+      SearchPins pins;
+      uint32_t const st{ moved * 3 };
+      if ((moved > 0) && (st < c.states.size()) && (c.states[st].live != 0)) {
+        pins.ranks.push_back({ .state = StateId{ st }, .rank = 0 });
+      }
+      SubmachineOrders const o{ order_submachines(c, g, {}, p, 1, pins) };
+      SizedLayout z;
+      std::vector<Diagnostic> diags;
+      if (!size_layout(c, g, o, {}, p, z, diags)) { continue; }
+      Routes const whole{ route_transitions(c, g, o, z, {}, p, *router, 1) };
+      std::vector<int32_t> const none(c.transitions.size(), 0);
+      RouteStop stop{ .bends = &none, .floor = 0, .per_bend = 1, .at = INT64_MAX };
+      Routes counted;
+      route_transitions(counted,
+                        c,
+                        g,
+                        o,
+                        z,
+                        {},
+                        p,
+                        *router,
+                        1,
+                        nullptr,
+                        nullptr,
+                        nullptr,
+                        true,
+                        &stop);
+      CHECK_FALSE(stop.stopped);
+      CHECK(same_routes(whole, counted));
+      int64_t turns{ 0 };
+      for (uint32_t t = 0; t < c.transitions.size(); ++t) {
+        turns += route_turns(whole, t);
+      }
+      CHECK(stop.reached <= turns);
+      CHECK(stop.reached > 0);
+    }
+  }
+}
+
+TEST_CASE("route: a stop ends routing once routed turns lift its bound to it") {
+  scav_profile p{};
+  REQUIRE(profile_named("readable", p));
+  Router const *const router{ router_at(0) };
+  REQUIRE(router != nullptr);
+  Chart c;
+  load_corpus_chart("estop.scav", c);  // one frame, every transition one net
+  SplitGraph const g{ decompose(c) };
+  SubmachineOrders const o{ order_submachines(c, g, {}, p, 1, {}) };
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  REQUIRE(size_layout(c, g, o, {}, p, z, diags));
+  Routes const whole{ route_transitions(c, g, o, z, {}, p, *router, 1) };
+  int64_t turns{ 0 };
+  for (uint32_t t = 0; t < c.transitions.size(); ++t) { turns += route_turns(whole, t); }
+  REQUIRE(turns > 0);
+  std::vector<int32_t> const none(c.transitions.size(), 0);
+  int64_t const reach{ 100 + (7 * turns) };
+  RouteStop at{ .bends = &none, .floor = 100, .per_bend = 7, .at = reach };
+  Routes stopped;
+  route_transitions(stopped,
+                    c,
+                    g,
+                    o,
+                    z,
+                    {},
+                    p,
+                    *router,
+                    1,
+                    nullptr,
+                    nullptr,
+                    nullptr,
+                    true,
+                    &at);
+  CHECK(at.stopped);
+  CHECK(at.reached == reach);
+  RouteStop past{ .bends = &none, .floor = 100, .per_bend = 7, .at = reach + 1 };
+  Routes all;
+  route_transitions(all,
+                    c,
+                    g,
+                    o,
+                    z,
+                    {},
+                    p,
+                    *router,
+                    1,
+                    nullptr,
+                    nullptr,
+                    nullptr,
+                    true,
+                    &past);
+  CHECK_FALSE(past.stopped);
+  CHECK(same_routes(whole, all));
+  // A bound above the routed turns stands in for them.
+  std::vector<int32_t> const high(c.transitions.size(), 9);
+  RouteStop held{ .bends = &high,
+                  .floor = 0,
+                  .per_bend = 1,
+                  .at = 9 * static_cast<int64_t>(c.transitions.size()) };
+  Routes over;
+  route_transitions(over,
+                    c,
+                    g,
+                    o,
+                    z,
+                    {},
+                    p,
+                    *router,
+                    1,
+                    nullptr,
+                    nullptr,
+                    nullptr,
+                    true,
+                    &held);
+  CHECK(held.stopped);
+}
+
+namespace {
+
+// Pairs of one-rank edges of a frame of `o` whose ends interleave between their ranks.
+int64_t layered_crossings(SubmachineOrders const &o) {
+  int64_t out{ 0 };
+  for (Span const es : o.sub_edges) {
+    for (uint32_t i = 0; i < es.len; ++i) {
+      for (uint32_t j = i + 1; j < es.len; ++j) {
+        std::array<OrderEdge, 2> const e{ o.edges[es.off + i], o.edges[es.off + j] };
+        std::array<uint32_t, 2> low{};   // north end per edge
+        std::array<uint32_t, 2> high{};  // south end per edge
+        bool spans{ true };
+        for (uint32_t k = 0; k < 2; ++k) {
+          OrderNode const &a{ o.nodes[e[k].src] };
+          OrderNode const &b{ o.nodes[e[k].dst] };
+          bool const down{ a.rank < b.rank };
+          spans = spans && (((down ? a.rank : b.rank) + 1) == (down ? b.rank : a.rank));
+          low[k] = down ? e[k].src : e[k].dst;
+          high[k] = down ? e[k].dst : e[k].src;
+        }
+        bool const shared{ (low[0] == low[1]) || (high[0] == high[1]) };
+        if (!spans || shared || (o.nodes[low[0]].rank != o.nodes[low[1]].rank)) {
+          continue;
+        }
+        bool const north{ o.nodes[low[0]].pos < o.nodes[low[1]].pos };
+        bool const south{ o.nodes[high[0]].pos < o.nodes[high[1]].pos };
+        out += (north != south) ? 1 : 0;
+      }
+    }
+  }
+  return out;
+}
+
+}  // namespace
+
+TEST_CASE("route: crossings the laid ordering forces do not bound the routed ones") {
+  // estop with `Tripped` pinned to rank 2 and `Tripped -> Latched` reversed: two edges
+  // interleave between ranks, and the routes go round each other without crossing.
+  scav_profile p{};
+  REQUIRE(profile_named("readable", p));
+  Router const *const router{ router_at(0) };
+  REQUIRE(router != nullptr);
+  Chart c;
+  load_corpus_chart("estop.scav", c);
+  SplitGraph const g{ decompose(c) };
+  SearchPins const pins{ .ranks = { { .state = StateId{ 1 }, .rank = 2 } },
+                         .reverses = { { .trans = TransId{ 1 }, .leg = 0 } } };
+  SubmachineOrders const o{ order_submachines(c, g, {}, p, 1, pins) };
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  REQUIRE(size_layout(c, g, o, {}, p, z, diags));
+  Routes const r{ route_transitions(c, g, o, z, {}, p, *router, 1) };
+  CostTerms const t{ cost_terms(c, g, z, r, {}, p) };
+  CHECK(layered_crossings(o) == 1);
+  CHECK(t.crossings == 0);
+  CHECK(cost_of(t, p).t0_violations == 0);
 }
 
 TEST_CASE("route: a face with no effect at an end changes nothing it draws") {
@@ -1774,13 +1979,13 @@ TEST_CASE("route: an outer loop's face is traced with its segment and transition
   z.state[b.v] = { .x = 0, .y = 4000, .w = 1600, .h = 640 };
   z.sub[root.v] = { .x = 0, .y = 0, .w = 10000, .h = 10000 };
 
-  LayoutTrace trace;
+  TraceRecord trace;
   trace_sink_set(&trace);
   OrthogonalRouter const ortho;
   Routes const r{ route_transitions(c, g, o, z, {}, profile(), ortho) };
   trace_sink_set(nullptr);
   uint32_t faced{ 0 };
-  for (TraceEvent const &e : trace.events) {
+  for (TraceEvent const &e : trace.events()) {
     if (e.kind != TraceKind::LoopFaced) { continue; }
     ++faced;
     CHECK(e.port.trans == 1);

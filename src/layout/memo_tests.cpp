@@ -187,3 +187,59 @@ TEST_CASE("memo: a serial is never repeated and an interned profile is one word 
   CHECK(again != pw);
   for (uint32_t const w : words) { CHECK(again != w); }
 }
+
+namespace {
+
+uint32_t find_in(KeyIndex const &k, std::vector<uint32_t> const &key) {
+  return k.find(key.data(), static_cast<uint32_t>(key.size()), memo_hash(key));
+}
+
+uint32_t put_in(KeyIndex &k, std::vector<uint32_t> const &key) {
+  return k.insert(key.data(), static_cast<uint32_t>(key.size()), memo_hash(key));
+}
+
+}  // namespace
+
+TEST_CASE("key index: keys are numbered in insertion order and found by their whole key") {
+  KeyIndex k;
+  CHECK(find_in(k, { 1, 2, 3 }) == INVALID);
+  CHECK(put_in(k, { 1, 2, 3 }) == 0);
+  CHECK(put_in(k, { 4 }) == 1);
+  CHECK(put_in(k, {}) == 2);
+  CHECK(k.size() == 3);
+  CHECK(find_in(k, { 1, 2, 3 }) == 0);
+  CHECK(find_in(k, { 4 }) == 1);
+  CHECK(find_in(k, {}) == 2);
+  CHECK(find_in(k, { 1, 2, 4 }) == INVALID);
+  CHECK(find_in(k, { 1, 2 }) == INVALID);
+  CHECK(find_in(k, { 1, 2, 3, 0 }) == INVALID);
+  CHECK(find_in(k, { 0, 1, 2, 3 }) == INVALID);
+}
+
+TEST_CASE(
+    "key index: keys sharing one hash, through several doublings, keep their numbers") {
+  KeyIndex k;
+  constexpr uint32_t N{ 3000 };
+  bool all{ true };
+  for (uint32_t i = 0; i < N; ++i) {
+    std::vector<uint32_t> const key{ i, i ^ 0x5555U };
+    all = all && (k.insert(key.data(), 2, 7) == i);
+  }
+  for (uint32_t i = 0; i < N; ++i) {
+    std::vector<uint32_t> const key{ i, i ^ 0x5555U };
+    all = all && (k.find(key.data(), 2, 7) == i);
+  }
+  CHECK(all);
+  std::vector<uint32_t> const absent{ N, N ^ 0x5555U };
+  CHECK(k.find(absent.data(), 2, 7) == INVALID);
+  CHECK(k.bytes() > 0);
+}
+
+TEST_CASE("key index: growing keeps every key it had") {
+  KeyIndex k;
+  constexpr uint32_t N{ 20000 };
+  for (uint32_t i = 0; i < N; ++i) { REQUIRE(put_in(k, { i, i * 3U }) == i); }
+  bool all{ true };
+  for (uint32_t i = 0; i < N; ++i) { all = all && (find_in(k, { i, i * 3U }) == i); }
+  CHECK(all);
+}

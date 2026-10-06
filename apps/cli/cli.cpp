@@ -32,6 +32,9 @@ void write_error(std::string_view what, std::string_view path) {
 
 namespace {
 
+// `--search` values by the profile's `search_cull`.
+constexpr std::array<std::string_view, 2> SEARCHES{ "full", "culled" };
+
 // True when all of `arg` is two colon-separated ordinals, read into `a` and `b`.
 bool ordinal_pair(std::string_view arg, uint32_t &a, uint32_t &b) {
   size_t const colon{ arg.find(':') };
@@ -84,6 +87,22 @@ bool read_value(std::string_view flag, std::string_view value, LayoutArgs &out) 
     }
     out.row = a;
     return true;
+  }
+  if (flag == "--search") {
+    for (size_t k = 0; k < SEARCHES.size(); ++k) {
+      if (value == SEARCHES[k]) {
+        out.search = static_cast<int32_t>(k);
+        return true;
+      }
+    }
+    return false;
+  }
+  if (flag == "--jitter-seed") {
+    std::from_chars_result const got{
+      std::from_chars(value.data(), value.data() + value.size(), out.jitter_seed)
+    };
+    return (got.ec == std::errc{}) && (got.ptr == (value.data() + value.size())) &&
+           (out.jitter_seed >= 0);
   }
   if (flag == "--orient") {
     std::from_chars_result const got{
@@ -149,7 +168,8 @@ ArgRead read_layout_arg(int argc, char **argv, int &i, LayoutArgs &out) {
   }
   if ((arg != "--profile") && (arg != "--portfolio-row") && (arg != "--rank") &&
       (arg != "--cut") && (arg != "--reverse") && (arg != "--end") &&
-      (arg != "--orient") && (arg != "--fold") && (arg != "--loop")) {
+      (arg != "--orient") && (arg != "--fold") && (arg != "--loop") &&
+      (arg != "--search") && (arg != "--jitter-seed")) {
     return ArgRead::NotOurs;
   }
   if ((i + 1) >= argc) { return ArgRead::Malformed; }
@@ -160,6 +180,12 @@ ArgRead read_layout_arg(int argc, char **argv, int &i, LayoutArgs &out) {
     return ArgRead::Taken;
   }
   return read_value(arg, argv[i], out) ? ArgRead::Taken : ArgRead::Malformed;
+}
+
+void apply_layout_args(LayoutArgs const &args, scav_profile &p) {
+  if (args.no_search) { p.portfolio_k = 0; }
+  if (args.search >= 0) { p.search_cull = args.search; }
+  if (args.jitter_seed >= 0) { p.jitter_seed = args.jitter_seed; }
 }
 
 void append_layout_args(std::string &out,
@@ -177,6 +203,16 @@ void append_layout_args(std::string &out,
   if (std::string_view{ args.profile } != "readable") {
     out += "--profile ";
     out += args.profile;
+    out += ' ';
+  }
+  if (args.search >= 0) {
+    out += "--search ";
+    out += SEARCHES[static_cast<size_t>(args.search)];
+    out += ' ';
+  }
+  if (args.jitter_seed > 0) {
+    out += "--jitter-seed ";
+    string_append_u32(out, static_cast<uint32_t>(args.jitter_seed));
     out += ' ';
   }
   if (args.no_text) { out += "--no-text "; }

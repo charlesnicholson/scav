@@ -68,8 +68,16 @@ struct CostContext {
 
 CostContext cost_context(Chart const &c, SplitGraph const &g);
 
-// `ctx` is `cost_context(c, g)`. `party`, if given, is all 1 on a Tier 0 violation, else 1
-// per transition that bends or carries crossings, corridor, crowding, excess_len or label.
+// Where `cost_terms` may stop: once its Tier 2 terms less the labels', with aspect only
+// where `aspect`, reach `t2`, it sets `stopped` and counts no more.
+struct CostStop {
+  int64_t t2{ 0 };
+  bool aspect{ true };
+  bool stopped{ false };
+};
+
+// `ctx` is `cost_context(c, g)`. Per transition, `party` gets 1 where a term charges it,
+// all 1 on a Tier 0 violation, and `charge` the em-scaled Tier 2 it is charged.
 CostTerms cost_terms(CostContext const &ctx,
                      Chart const &c,
                      SplitGraph const &g,
@@ -77,7 +85,9 @@ CostTerms cost_terms(CostContext const &ctx,
                      Routes const &r,
                      scav_spaces const &s,
                      scav_profile const &p,
-                     std::vector<uint8_t> *party = nullptr);
+                     std::vector<uint8_t> *party = nullptr,
+                     std::vector<Wide> *charge = nullptr,
+                     CostStop *stop = nullptr);
 
 // The same with a context built for this one call.
 CostTerms cost_terms(Chart const &c,
@@ -86,6 +96,19 @@ CostTerms cost_terms(Chart const &c,
                      Routes const &r,
                      scav_spaces const &s,
                      scav_profile const &p);
+
+// Per term, the least any routing of `z` by `router` with Tier 0 zero and no degraded net
+// scores, box ends on their seats' faces where `seated`; `faces` per `box_faces`.
+CostTerms cost_bound(Chart const &c,
+                     SplitGraph const &g,
+                     std::vector<std::vector<uint32_t>> const &bends,  // `segment_bends`
+                     SizedLayout const &z,
+                     std::vector<uint32_t> const &faces,
+                     scav_profile const &p,
+                     int32_t clear,
+                     Router const &router,
+                     bool seated = true,
+                     std::vector<int32_t> *per_trans = nullptr);  // bends per transition
 
 // The same scoring read from the geometry columns; `placed` is the run's placed-box
 // out-param.

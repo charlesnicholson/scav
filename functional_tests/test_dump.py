@@ -545,6 +545,197 @@ class TestDump(unittest.TestCase):
         self.assertEqual(2, result.returncode)
         self.assertTrue(result.stderr.startswith("usage: scav <verb>"))
 
+    def run_trace(self, *args: scavtest.Arg) -> subprocess.CompletedProcess[str]:
+        argv = [str(self.exe), "trace", *[str(a) for a in args]]
+        print(f"+ {' '.join(argv)}", flush=True)
+        return subprocess.run(
+            argv,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=self.cfg.repo_root,
+        )
+
+    def test_a_trace_file_holds_the_trace_that_trace_prints(self) -> None:
+        """`--trace-file` keeps the trace out of stdout, and `scav trace` prints it as
+        `--trace` does, at every scope."""
+        flags = [*self.pinned(NETWORK), NETWORK.as_posix()]
+        path = self.cfg.scratch_dir / "dump" / "vac.trace"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        for scope in ([], ["--trace-search"], ["--trace-outline"]):
+            with self.subTest(scope=scope):
+                printed = self.run_dump("--json", "--layout", "--trace", *scope, *flags)
+                self.assertEqual(0, printed.returncode, printed.stderr)
+                end = printed.stdout.index("\n]\n") + 3
+                path.unlink(missing_ok=True)
+                kept = self.run_dump("--json", "--layout", "--trace", *scope,
+                                     "--trace-file", path, *flags)
+                self.assertEqual(0, kept.returncode, kept.stderr)
+                self.assertEqual(printed.stdout[end:], kept.stdout)
+                self.assertFalse(path.with_name(path.name + ".tmp").exists())
+                read = self.run_trace(path)
+                self.assertEqual(0, read.returncode, read.stderr)
+                self.assertEqual("", read.stderr)
+                self.assertEqual(printed.stdout[:end], read.stdout)
+
+    def run_capped(self, verb: str, *args: scavtest.Arg, stdout: Path | None = None,
+                   cap: int) -> subprocess.CompletedProcess[str]:
+        """`scav VERB ARGS` with every file it writes held to `cap` bytes, stdout into the
+        file `stdout` when given."""
+        import resource
+        import signal
+
+        def limit() -> None:
+            signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
+            resource.setrlimit(resource.RLIMIT_FSIZE, (cap, cap))
+
+        argv = [str(self.exe), verb, *[str(a) for a in args]]
+        print(f"+ {' '.join(argv)}  (files capped at {cap} bytes)", flush=True)
+        env = dict(os.environ)
+        if "LLVM_PROFILE_FILE" in env:  # a cut profile stays out of the merge
+            env["LLVM_PROFILE_FILE"] = str(self.cfg.scratch_dir / "capped-%p.profraw")
+        with open(stdout or os.devnull, "w", encoding="utf-8") as out:
+            done = subprocess.run(argv, stdout=out, stderr=subprocess.PIPE, text=True,
+                                  cwd=self.cfg.repo_root, preexec_fn=limit, env=env)
+        done.stderr = "".join(line for line in done.stderr.splitlines(keepends=True)
+                              if not line.startswith("LLVM Profile Error"))
+        return done
+
+    @unittest.skipIf(os.name == "nt", "file size limits are POSIX")
+    def test_a_trace_file_replaces_the_old_one_only_when_written_whole(self) -> None:
+        flags = [*self.pinned(NETWORK), NETWORK.as_posix()]
+        path = self.cfg.scratch_dir / "dump" / "replaced.trace"
+        temp = path.with_name(path.name + ".tmp")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("previous", encoding="utf-8")
+        whole = self.run_dump("--layout", "--trace", "--trace-file", path, *flags)
+        self.assertEqual(0, whole.returncode, whole.stderr)
+        self.assertFalse(temp.exists())
+        size = path.stat().st_size
+        self.assertEqual(0, self.run_trace(path).returncode)
+        path.write_text("previous", encoding="utf-8")
+        cut = self.run_capped("dump", "--layout", "--trace", "--trace-file", path, *flags,
+                              cap=size // 2)
+        self.assertEqual(2, cut.returncode)
+        self.assertEqual(f"scav: cannot write the trace '{path}'\n", cut.stderr)
+        self.assertEqual("previous", path.read_text(encoding="utf-8"))
+        self.assertFalse(temp.exists())
+
+    @unittest.skipIf(os.name == "nt", "file size limits are POSIX")
+    def test_a_trace_whose_json_cannot_be_written_is_an_error(self) -> None:
+        flags = [*self.pinned(NETWORK), NETWORK.as_posix()]
+        path = self.cfg.scratch_dir / "dump" / "unwritten.trace"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.unlink(missing_ok=True)
+        self.assertEqual(0, self.run_dump("--layout", "--trace", "--trace-file", path,
+                                          *flags).returncode)
+        out = self.cfg.scratch_dir / "dump" / "unwritten.json"
+        for verb, args in (("dump", ["--layout", "--trace", *flags]), ("trace", [path])):
+            with self.subTest(verb=verb):
+                result = self.run_capped(verb, *args, stdout=out, cap=4096)
+                self.assertEqual(2, result.returncode)
+                self.assertEqual("scav: cannot write the trace '-'\n", result.stderr)
+
+    def test_a_trace_file_that_cannot_be_written_is_an_error(self) -> None:
+        path = self.cfg.scratch_dir / "dump" / "no_such_dir" / "vac.trace"
+        result = self.run_dump("--json", "--layout", "--trace", "--trace-file", path,
+                               *self.pinned(NETWORK), NETWORK.as_posix())
+        self.assertEqual(2, result.returncode)
+        self.assertEqual("", result.stdout)
+        self.assertEqual(f"scav: cannot write the trace '{path}'\n", result.stderr)
+        self.assertFalse(path.exists())
+
+    def test_trace_prints_nothing_for_a_cut_trace_file(self) -> None:
+        """A real trace cut anywhere, mid-record and just before its end record among
+        the cuts, prints nothing to stdout, however much of it decodes first."""
+        states = 1000
+        chart = self.write("chain.scav", "chart g {\n"
+                           + "".join(f"  state S{i},\n" for i in range(states))
+                           + "".join(f"  trans S{i} -> S{i + 1},\n"
+                                     for i in range(states - 1))
+                           + "}\n")
+        whole = self.cfg.scratch_dir / "dump" / "chain.trace"
+        whole.unlink(missing_ok=True)
+        made = self.run_dump("--layout", "--no-text", "--portfolio-row", "0",
+                             "--no-search", "--trace", "--trace-file", whole, chart)
+        self.assertEqual(0, made.returncode, made.stderr)
+        read = self.run_trace(whole)
+        self.assertEqual(0, read.returncode, read.stderr)
+        self.assertGreater(len(read.stdout), 1 << 19)
+        data = whole.read_bytes()
+
+        def varint(at: int) -> tuple[int, int]:
+            """The varint at `at` and the offset after it."""
+            value, shift = 0, 0
+            while data[at] & 0x80:
+                value |= (data[at] & 0x7F) << shift
+                at, shift = at + 1, shift + 7
+            return value | (data[at] << shift), at + 1
+
+        def encoded(value: int) -> bytes:
+            out = bytearray()
+            while value >= 0x80:
+                out.append((value & 0x7F) | 0x80)
+                value >>= 7
+            return bytes(out + bytes([value]))
+
+        # Magic, version, then the length of the rest of the header.
+        _, at = varint(8)
+        length, at = varint(at)
+        header_end = at + length
+        end = bytes([0xFF]) + encoded(len(json.loads(read.stdout)))
+        self.assertTrue(data.endswith(end))
+        end_at = len(data) - len(end)
+        middle = len(data) // 2
+        cuts = sorted({0, 4, 8, header_end - 1, header_end, header_end + 1,
+                       *range(middle, middle + 4), *range(end_at - 4, end_at),
+                       end_at, end_at + 1, len(data) - 1})
+        cut = self.cfg.scratch_dir / "dump" / "cut.trace"
+        for n in [*cuts, None]:
+            with self.subTest(cut=n):
+                cut.write_bytes(data[:n] if n is not None else data + b"\0")
+                result = self.run_trace(cut)
+                self.assertEqual(2, result.returncode)
+                self.assertEqual("", result.stdout)
+                self.assertEqual(f"scav: not a whole trace file '{cut}'\n", result.stderr)
+
+    def test_trace_names_a_trace_another_build_wrote(self) -> None:
+        """A header whose version or schema differs from this build's prints nothing and
+        says another build wrote it."""
+        path = self.cfg.scratch_dir / "dump" / "other.trace"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.unlink(missing_ok=True)
+        made = self.run_dump("--layout", "--trace", "--trace-file", path,
+                             *self.pinned(NETWORK), NETWORK.as_posix())
+        self.assertEqual(0, made.returncode, made.stderr)
+        data = path.read_bytes()
+        # The version byte follows the 8-byte magic; the first kind is named `none`.
+        named = data.index(b"none")
+        for at in (8, named):
+            with self.subTest(at=at):
+                other = bytearray(data)
+                other[at] ^= 0x20 if at == named else 0x01
+                path.write_bytes(bytes(other))
+                result = self.run_trace(path)
+                self.assertEqual(2, result.returncode)
+                self.assertEqual("", result.stdout)
+                self.assertEqual(f"scav: trace written by a different scav build '{path}'\n",
+                                 result.stderr)
+
+    def test_trace_prints_only_a_whole_trace_file(self) -> None:
+        chart = self.write("not_a.trace", "chart g {\n  state A,\n}\n")
+        result = self.run_trace(chart)
+        self.assertEqual(2, result.returncode)
+        self.assertEqual("", result.stdout)
+        self.assertEqual(f"scav: not a whole trace file '{chart}'\n", result.stderr)
+        for args in ([], ["--json", chart], [chart, chart], ["-"]):
+            with self.subTest(args=args):
+                result = self.run_trace(*args)
+                self.assertEqual(2, result.returncode)
+                self.assertEqual("", result.stdout)
+                self.assertTrue(result.stderr.startswith("usage: scav <verb>"),
+                                result.stderr)
+
     # Usage =================================================================
 
     def test_bad_arguments_are_refused(self) -> None:
@@ -555,6 +746,12 @@ class TestDump(unittest.TestCase):
                      ["dump", "--layout"],
                      ["dump", "--trace", chart],
                      ["dump", "--layout", "--trace", "--trace", chart],
+                     ["dump", "--layout", "--trace-file", "x.trace", chart],
+                     ["dump", "--layout", "--search-stats", "--trace-file", "x.trace",
+                      chart],
+                     ["dump", "--layout", "--trace", "--trace-file", "a.trace",
+                      "--trace-file", "b.trace", chart],
+                     ["dump", "--layout", "--trace", "--trace-file"],
                      ["dump", "--json", "--json", chart],
                      ["dump", "--layout", "--layout", chart],
                      ["dump", "--hash", "--hash", chart],

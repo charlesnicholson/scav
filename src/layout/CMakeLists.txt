@@ -25,6 +25,7 @@ scav_static_library(scavlayout
   # The selected thread shim backend, from the src/ root; consumers get it through layout.
   "../scav_thread_${scav_thread_backend_file}.cpp"
   c_api.cpp
+  candidate_memo.cpp
   layout.cpp
   profile.cpp
   router.cpp
@@ -39,6 +40,7 @@ scav_static_library(scavlayout
   size.cpp
   route.cpp
   trace.cpp
+  trace_stream.cpp
   nudge.cpp
   label.cpp
   cost.cpp
@@ -54,6 +56,7 @@ scav_optimize_for_size(scavlayout SOURCES
   router_straight.cpp
   spaces.cpp
   trace.cpp
+  trace_stream.cpp
 )
 target_link_libraries(scavlayout PUBLIC scavcore)
 target_link_libraries(scavlayout_testable PUBLIC scavcore_testable)
@@ -73,6 +76,7 @@ target_link_libraries(scav_shared PRIVATE scavlayout)
 if(SCAV_BUILD_TESTS)
   scav_tests(scav_layout_tests
     c_api_tests.cpp
+    candidate_memo_tests.cpp
     layout_tests.cpp
     bench_tests.cpp
     gauntlet_tests.cpp
@@ -89,15 +93,19 @@ if(SCAV_BUILD_TESTS)
     memo_tests.cpp
     frame_memo_tests.cpp
     search_memo_tests.cpp
+    search_cull_tests.cpp
     geom_tests.cpp
     pack_tests.cpp
     size_tests.cpp
     trace_tests.cpp
+    trace_stream_tests.cpp
     route_tests.cpp
     nudge_tests.cpp
     label_tests.cpp
     cost_tests.cpp
     # Tests for the src/-root primitives that replace standard-library facilities.
+    ../scav_chunk_queue.cpp  # also compiled into the CLI
+    ../scav_chunk_queue_tests.cpp
     ../scav_rnd_tests.cpp
     ../scav_shard_tests.cpp
     ../scav_thread_tests.cpp

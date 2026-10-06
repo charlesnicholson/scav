@@ -35,11 +35,12 @@ inline constexpr std::array<char const *, 50> GAUNTLET{
   "through.scav",   "tight.scav",     "transit.scav", "under.scav",   "unfolded.scav"
 };
 
-// Whether the corpus is brew, dock, estop, kiln and led: every tier but
-// SCAV_TEST_TIER=full.
+// Whether the corpus is brew, dock, estop, kiln and led: the fast tier, not full or
+// exhaustive.
 inline bool corpus_light() {
   char const *const tier{ std::getenv("SCAV_TEST_TIER") };
-  return (tier == nullptr) || (std::string_view{ tier } != "full");
+  return (tier == nullptr) || ((std::string_view{ tier } != "full") &&
+                               (std::string_view{ tier } != "exhaustive"));
 }
 
 // Whether the light corpus drops this chart; a gauntlet chart is never dropped.
@@ -49,6 +50,13 @@ inline bool corpus_skipped(std::string_view chart) {
                      (chart.find('/') == std::string_view::npos) };
   return light && corpus && (chart != "brew.scav") && (chart != "dock.scav") &&
          (chart != "estop.scav") && (chart != "kiln.scav") && (chart != "led.scav");
+}
+
+// Whether the light tier skips a whole search of `chart`: brew, kiln and every chart it
+// drops.
+inline bool search_skipped(std::string_view chart) {
+  return corpus_skipped(chart) ||
+         (corpus_light() && ((chart == "brew.scav") || (chart == "kiln.scav")));
 }
 
 // `golden` less every line naming a skipped chart as one of its words.

@@ -169,6 +169,59 @@ Mutex::~Mutex() { delete static_cast<SRWLOCK *>(impl); }
 void Mutex::lock() { AcquireSRWLockExclusive(static_cast<SRWLOCK *>(impl)); }
 void Mutex::unlock() { ReleaseSRWLockExclusive(static_cast<SRWLOCK *>(impl)); }
 
+ConditionVariable::ConditionVariable() : impl(new CONDITION_VARIABLE) {
+  InitializeConditionVariable(static_cast<CONDITION_VARIABLE *>(impl));
+}
+ConditionVariable::~ConditionVariable() { delete static_cast<CONDITION_VARIABLE *>(impl); }
+void ConditionVariable::wait(Mutex &held) {
+  SleepConditionVariableSRW(static_cast<CONDITION_VARIABLE *>(impl),
+                            static_cast<SRWLOCK *>(held.impl),
+                            INFINITE,
+                            0);
+}
+void ConditionVariable::notify_all() {
+  WakeAllConditionVariable(static_cast<CONDITION_VARIABLE *>(impl));
+}
+
+namespace {
+
+struct Started {
+  HANDLE handle;
+  void (*fn)(void *);
+  void *ctx;
+};
+
+DWORD WINAPI thread_main(LPVOID arg) {
+  Started const &s{ *static_cast<Started *>(arg) };
+  s.fn(s.ctx);
+  return 0;
+}
+
+}  // namespace
+
+Thread::~Thread() { join(); }
+
+bool Thread::start(void (*fn)(void *), void *ctx) {
+  if (impl != nullptr) { return false; }
+  auto *const s{ new Started{ .handle = nullptr, .fn = fn, .ctx = ctx } };
+  s->handle = CreateThread(nullptr, 0, thread_main, s, 0, nullptr);
+  if (s->handle == nullptr) {
+    delete s;
+    return false;
+  }
+  impl = s;
+  return true;
+}
+
+void Thread::join() {
+  if (impl == nullptr) { return; }
+  auto *const s{ static_cast<Started *>(impl) };
+  WaitForSingleObject(s->handle, INFINITE);
+  CloseHandle(s->handle);
+  delete s;
+  impl = nullptr;
+}
+
 uint32_t thread_concurrency() {
   DWORD const active{ GetActiveProcessorCount(ALL_PROCESSOR_GROUPS) };
   return (active > 1) ? static_cast<uint32_t>(active) : 1U;

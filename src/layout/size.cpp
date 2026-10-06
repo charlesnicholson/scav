@@ -2505,6 +2505,24 @@ int32_t loop_boundary(SizedLayout const &z, uint32_t st, uint32_t face) {
   }
 }
 
+bool loop_room_unmoved(Chart const &c, SizedLayout const &z, uint32_t st, uint32_t place) {
+  if ((st >= c.states.size()) || (st >= z.loop.size()) || (st >= z.loop_place.size()) ||
+      (st >= z.lead.size()) || (st >= z.trail.size()) ||
+      ((place / 2U) != (z.loop_place[st] / 2U))) {
+    return false;
+  }
+  // Top or bottom: either end when the room spans the width between the side bands.
+  if ((place / 2U) >= 2) {
+    return (Wide{ z.lead[st].x } + z.lead[st].w + z.loop[st].w) == Wide{ z.trail[st].x };
+  }
+  // Left or right: either end when no live submachine shares the body with the room.
+  Span const subs{ c.states[st].submachines };
+  for (uint32_t u = 0; u < subs.len; ++u) {
+    if (c.submachines[c.submachine_ids[subs.off + u].v].live != 0) { return false; }
+  }
+  return true;
+}
+
 bool face_lined(scav_spaces const &s, uint32_t state, uint32_t face) {
   scav_box_space const b{ box_of(s.box_state, s.n_box_state, state) };
   return (face < 4) && (bands_of(b)[face] > 0);
@@ -2585,6 +2603,63 @@ void loop_rows(Chart const &c,
                  : scav_rect{ .x = r.x, .y = r.y + cursor[st], .w = r.w, .h = across };
     cursor[st] += across;
   }
+}
+
+RowReads size_row_reads(Chart const &c, SubmachineOrders const &o) {
+  RowReads out;
+  std::vector<uint32_t> root;  // union-find over one frame's nodes
+  auto const find = [&root](uint32_t v) {
+    while (root[v] != v) {
+      root[v] = root[root[v]];
+      v = root[v];
+    }
+    return v;
+  };
+  for (uint32_t m = 0; (m < c.submachines.size()) && (m < o.sub_nodes.size()); ++m) {
+    Span const ns{ o.sub_nodes[m] };
+    Span const es{ o.sub_edges[m] };
+    if ((c.submachines[m].live == 0) || (ns.len == 0)) { continue; }
+    bool const edged{ es.len != 0 };  // a component can take two layers
+    vec_resize(root, ns.len);
+    for (uint32_t k = 0; k < ns.len; ++k) { root[k] = k; }
+    uint32_t parts{ ns.len };
+    for (uint32_t k = 0; k < es.len; ++k) {
+      OrderEdge const &e{ o.edges[es.off + k] };
+      uint32_t const a{ find(e.src - ns.off) };
+      uint32_t const b{ find(e.dst - ns.off) };
+      if (a != b) {
+        root[a] = b;
+        --parts;
+      }
+    }
+    bool const packs{ edged || (parts >= 2) };
+    out.fold = out.fold || edged;
+    out.trybox = out.trybox || packs;
+    out.pack = out.pack || packs;
+    out.dar = out.dar || (packs && (c.submachines[m].owner.v != INVALID));
+  }
+  for (State const &st : c.states) {
+    if (st.live == 0) { continue; }
+    uint32_t regions{ 0 };
+    for (uint32_t k = 0; k < st.submachines.len; ++k) {
+      regions +=
+          (c.submachines[c.submachine_ids[st.submachines.off + k].v].live != 0) ? 1U : 0U;
+    }
+    bool const packs{ regions >= 2 };
+    out.trybox = out.trybox || packs;
+    out.pack = out.pack || packs;
+    out.dar = out.dar || packs;
+  }
+  return out;
+}
+
+Row size_row_canonical(Row const &row, RowReads const &reads, scav_profile const &base) {
+  Row out{ row };
+  if (!reads.trybox) { out.knobs.trybox = base.trybox; }
+  if (!reads.pack) { out.pack = Compaction::Off; }
+  if (!reads.dar) { out.dar = DarSource::Profile; }
+  if (!reads.fold) { out.fold = Fold::Scale; }
+  return out;
 }
 
 bool size_layout(Chart const &c,

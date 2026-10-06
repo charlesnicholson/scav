@@ -76,6 +76,9 @@ LoopPlace loop_place_default(scav_spaces const &s, uint32_t state);
 bool loop_anchored(scav_spaces const &s, uint32_t state, uint32_t face);
 // Where the legs of loops leaving by `face` end: the border, or the band's inner edge.
 int32_t loop_boundary(SizedLayout const &z, uint32_t st, uint32_t face);
+// True when placement `place` (`face * 2 + end`) is on the face `z` draws `st`'s loop room
+// by and lays the room out where `z` has it.
+bool loop_room_unmoved(Chart const &c, SizedLayout const &z, uint32_t st, uint32_t place);
 
 // Whether a band of `state` lines `face` (0 left, 1 right, 2 top, 3 bottom), which then
 // takes no port.
@@ -109,6 +112,21 @@ void loop_rows(Chart const &c,
                scav_profile const &p,
                std::vector<scav_extent> &label,
                std::vector<scav_rect> &row);
+
+// Which row knobs can change a sizing of `c` under some pins: `trybox` and compaction
+// where a packing may hold two rects, the owner's hole inside a composite, the fold rule.
+struct RowReads {
+  bool trybox{ false };
+  bool pack{ false };
+  bool dar{ false };
+  bool fold{ false };
+};
+
+// The knobs sizing reads of `c`, from ordering `o`'s frames: their components and edges.
+RowReads size_row_reads(Chart const &c, SubmachineOrders const &o);
+
+// `row` with each knob `reads` leaves unread at its value in `base`'s row 0.
+Row size_row_canonical(Row const &row, RowReads const &reads, scav_profile const &base);
 
 // False when an extent would leave the coordinate domain: one diagnostic per entity and
 // `out` partly written. The defaults are row 0's tuple.

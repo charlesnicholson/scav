@@ -14,13 +14,17 @@ namespace scav {
 // Mixes eight-word blocks into four lanes, two words per lane, then folds the lanes and
 // the tail into one hash.
 uint64_t memo_hash(std::vector<uint32_t> const &key) {
+  return memo_hash(key.data(), key.size());
+}
+
+uint64_t memo_hash(uint32_t const *key, size_t len) {
   constexpr uint64_t K{ UINT64_C(0x9E37'79B9'7F4A'7C15) };
   auto const mix = [](uint64_t h, uint64_t w) {
     h = (h ^ w) * K;
     return h ^ (h >> 29U);
   };
   std::array<uint64_t, 4> lane{ 1, 2, 3, 4 };
-  size_t const n{ key.size() };
+  size_t const n{ len };
   size_t i{ 0 };
   for (; (i + 8) <= n; i += 8) {
     for (size_t l = 0; l < lane.size(); ++l) {
@@ -150,6 +154,54 @@ bool Memo::find(std::vector<uint32_t> const &key, int32_t const *&at, uint32_t &
   at = values.data() + slot.value_off;
   len = slot.value_len;
   return true;
+}
+
+size_t KeyIndex::slot_of(uint32_t const *key, uint32_t len, uint64_t hash) const {
+  size_t const mask{ slots.size() - 1 };
+  uint32_t const check{ static_cast<uint32_t>(hash >> 32U) };
+  for (size_t at = check & mask;; at = (at + 1) & mask) {
+    Slot const &slot{ slots[at] };
+    if (slot.entry == 0) { return at; }
+    if (slot.check != check) { continue; }
+    Entry const &e{ entries[slot.entry - 1] };
+    if ((e.len == len) &&
+        ((len == 0) ||
+         (std::memcmp(keys.data() + e.off, key, size_t{ len } * sizeof(uint32_t)) == 0))) {
+      return at;
+    }
+  }
+}
+
+uint32_t KeyIndex::find(uint32_t const *key, uint32_t len, uint64_t hash) const {
+  if (slots.empty()) { return INVALID; }
+  uint32_t const entry{ slots[slot_of(key, len, hash)].entry };
+  return (entry == 0) ? INVALID : (entry - 1);
+}
+
+// Doubles the slots (at least 64) and reinserts every slot at its check word.
+void KeyIndex::grow() {
+  std::vector<Slot> old;
+  old.swap(slots);
+  vec_assign(slots, imax(old.size() * 2, size_t{ 64 }), Slot{});
+  size_t const mask{ slots.size() - 1 };
+  for (Slot const &slot : old) {
+    if (slot.entry == 0) { continue; }
+    size_t at{ slot.check & mask };
+    while (slots[at].entry != 0) { at = (at + 1) & mask; }
+    slots[at] = slot;
+  }
+}
+
+uint32_t KeyIndex::insert(uint32_t const *key, uint32_t len, uint64_t hash) {
+  constexpr size_t LIMIT{ size_t{ UINT32_MAX } - 1 };
+  if (((keys.size() + len) > LIMIT) || (entries.size() >= LIMIT)) { return INVALID; }
+  if (((entries.size() + 1) * 2) > slots.size()) { grow(); }
+  uint32_t const n{ static_cast<uint32_t>(entries.size()) };
+  slots[slot_of(key, len, hash)] = { .check = static_cast<uint32_t>(hash >> 32U),
+                                     .entry = n + 1 };
+  vec_push_back(entries, { .off = static_cast<uint32_t>(keys.size()), .len = len });
+  vec_insert(keys, keys.end(), key, key + len);
+  return n;
 }
 
 void Memo::insert(std::vector<uint32_t> const &key, std::vector<int32_t> const &value) {

@@ -16,7 +16,7 @@ LIGHT_CHARTS: frozenset[str] = frozenset({"brew.scav", "dock.scav", "estop.scav"
 
 
 def full_tier() -> bool:
-    return os.environ.get("SCAV_TEST_TIER") == "full"
+    return os.environ.get("SCAV_TEST_TIER") in ("full", "exhaustive")
 
 
 full_only = unittest.skipUnless(full_tier(), "SCAV_TEST_TIER=full only")

@@ -52,6 +52,11 @@ enum class TraceKind : uint16_t {
   KickTaken,      // a row took a kick search's result; `pass` is its `KickHow`
 };
 
+inline constexpr uint32_t TRACE_KINDS{ static_cast<uint32_t>(TraceKind::KickTaken) + 1U };
+
+// The kind's name in the JSON and the stream header; "none" for any other value.
+char const *trace_kind_name(TraceKind k);
+
 // What a rank boundary's charge is for; `GapCharged.pass`. `Held` adds nothing: the
 // boundary's charge already covers the label.
 enum class GapCause : uint16_t { Label, Lanes, Held };
@@ -72,7 +77,7 @@ enum class SeatPass : uint16_t {
 };
 
 // A Level 1 move's outcome; `CandidateScored.pass`.
-enum class MoveVerdict : uint16_t { Taken, NotViable, Inflated, NotBetter };
+enum class MoveVerdict : uint16_t { Taken, NotViable, Inflated, NotBetter, Degraded };
 
 // Which of a row's searches converged; `RowSearched.pass`. `Refold` adds fold moves.
 enum class RowPass : uint16_t { First, Refold };
@@ -223,11 +228,19 @@ struct TraceEvent {
   };
 };
 
-// The sink the phases append to during a traced run.
+// The sink the phases append to during a traced run: events are encoded into `chunk`,
+// which goes to `sink` once it holds about TRACE_CHUNK bytes.
 struct LayoutTrace {
-  std::vector<TraceEvent> events;
+  TraceChunk sink{ nullptr };
+  void *ctx{ nullptr };
+  std::vector<uint8_t> chunk;
+  uint64_t count{ 0 };        // events encoded
   uint32_t frame{ INVALID };  // stamped onto each event that sets no frame
+  bool ok{ true };            // `sink` took every chunk
 };
+
+// Encodes `e` into `t.chunk`, handing a full chunk to `t.sink`.
+void trace_put(LayoutTrace &t, TraceEvent const &e);
 
 // This thread's sink, null outside a traced run. A traced run forces `threads = 1`.
 LayoutTrace *trace_sink();
@@ -237,7 +250,7 @@ inline void trace_emit(TraceEvent e) {
   LayoutTrace *const t{ trace_sink() };
   if (t == nullptr) { return; }
   if (e.frame == INVALID) { e.frame = t->frame; }
-  vec_push_back(t->events, e);
+  trace_put(*t, e);
 }
 
 // This thread's sink for the search outline alone: the row and kick events, recorded with
@@ -252,7 +265,7 @@ inline void trace_outline_emit(TraceEvent const &e) {
     trace_emit(e);
     return;
   }
-  vec_push_back(t->events, e);
+  trace_put(*t, e);
 }
 
 // Sets the sink's frame stamp for its scope and restores the previous one on exit.
@@ -269,8 +282,35 @@ struct TraceFrame {
   TraceFrame &operator=(TraceFrame const &) = delete;
 };
 
-// A JSON array, one event per line in order; `tools/trace.py` reads it.
-void trace_to_json(LayoutTrace const &t, Chart const &c, std::vector<char> &out);
+// Appends `e` as one line's JSON object with ordinal `i`, naming states from a decoded
+// header's `names` and `name_end`; the caller writes the separators and newlines.
+void trace_event_json(TraceEvent const &e,
+                      uint64_t i,
+                      std::vector<char> const &names,
+                      std::vector<uint32_t> const &name_end,
+                      std::vector<char> &out);
+
+inline constexpr uint32_t TRACE_MOVES{ 8 };  // `TRACE_MOVE_*` values
+
+// Per `TRACE_MOVE_*`: moves offered, answered by the candidate memo, taken, culled
+// unoffered as changing nothing, and left unscored by don't-look bits in a taking round.
+struct SearchStats {
+  std::array<uint64_t, TRACE_MOVES> offered{}, deduped{}, taken{}, culled{}, skipped{};
+  std::array<uint64_t, TRACE_MOVES> pruned{};   // route bound reached the incumbent
+  std::array<uint64_t, TRACE_MOVES> stopped{};  // routed, then Tier 2 reached it
+  uint64_t drawn{ 0 };                          // moves the memo answered by their drawing
+  uint64_t faced{ 0 };       // moves whose facing pass the memo answered
+  uint64_t searches{ 0 };    // Level 1 searches run
+  uint64_t recalled{ 0 };    // Level 1 searches the search memo answered
+  uint64_t memo_bytes{ 0 };  // the most a layout's candidate memo held
+  uint64_t aliased{ 0 };     // rows laid out and searched as an earlier row
+  uint64_t deferred{ 0 };    // moves rescored after another thread routed their drawing
+  uint64_t relaid{ 0 };      // bounds laid out afresh to set a don't-look bit
+};
+
+// One JSON object: the totals, then per move kind its offered, deduped, pruned, stopped,
+// taken, culled and skipped counts.
+void search_stats_to_json(SearchStats const &st, std::vector<char> &out);
 
 }  // namespace scav
 

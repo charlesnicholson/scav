@@ -19,9 +19,11 @@ constexpr std::string_view USAGE{
   "  check <file>                 structural validation, exit 1 on a finding\n"
   "  deps [--target NAME] <file>  the document network as a depfile\n"
   "  dump [--hash|--json] [--layout [LAYOUT...]] [--trace "
-  "[--trace-search|--trace-outline]] "
+  "[--trace-search|--trace-outline] [--trace-file FILE]|--search-stats] "
   "<file>  the model; --layout adds geometry and the flags it rests on, --trace its "
-  "decisions\n"
+  "decisions as JSON, or with --trace-file in binary to FILE, --search-stats the "
+  "search's counts and CPU\n"
+  "  trace <file>                 a --trace-file trace as --trace's JSON\n"
   "  render [-o FILE] [--embed-font] [LAYOUT...] <file>"
   "   chart -> SVG\n"
   "  selftest [--against FILE]   recompute the layout hashes on this toolchain "
@@ -29,7 +31,7 @@ constexpr std::string_view USAGE{
   "\n"
   "  LAYOUT: --profile NAME, --portfolio-row N, --rank S:R, --cut T:L, "
   "--reverse T:L, --end T:L:E:F, --orient F, --fold F:M[:L], --loop S:F:E, "
-  "--no-search, "
+  "--search full|culled, --jitter-seed N, --no-search, "
   "--no-text\n"
 };
 
@@ -49,12 +51,19 @@ int dispatch(int argc, char **argv) {
     bool trace{ false };
     bool trace_search{ false };
     bool trace_outline{ false };
+    bool search_stats{ false };
+    char const *trace_file{ nullptr };
     LayoutArgs args;
     for (int i = 2; i < argc; ++i) {
       ArgRead const read{ read_layout_arg(argc, argv, i, args) };
       if (read == ArgRead::Malformed) { return usage(); }
       if (read == ArgRead::Taken) { continue; }
       std::string_view const arg{ argv[i] };
+      if (arg == "--trace-file") {
+        if (((i + 1) >= argc) || (trace_file != nullptr)) { return usage(); }
+        trace_file = argv[++i];
+        continue;
+      }
       bool *flag{ nullptr };
       if (arg == "--hash") {
         flag = &hash;
@@ -68,6 +77,8 @@ int dispatch(int argc, char **argv) {
         flag = &trace_search;
       } else if (arg == "--trace-outline") {
         flag = &trace_outline;
+      } else if (arg == "--search-stats") {
+        flag = &search_stats;
       }
       if (flag != nullptr) {
         if (*flag) { return usage(); }
@@ -78,18 +89,26 @@ int dispatch(int argc, char **argv) {
         return usage();
       }
     }
-    // Layout flags and `--trace` require `--layout`; `--trace-search` and
-    // `--trace-outline` require `--trace` and exclude each other; `--hash` excludes
-    // `--json` and `--layout`.
+    // `--layout` gates layout flags, `--trace` and `--search-stats`; `--trace` its scopes
+    // and file. Exclusive: the two scopes, stats and trace, hash and json or layout.
     if ((path == nullptr) || (hash && (json || layout)) ||
-        ((trace_search || trace_outline) && !trace) || (trace_search && trace_outline) ||
-        ((args.given || trace) && !layout)) {
+        ((trace_search || trace_outline || (trace_file != nullptr)) && !trace) ||
+        (trace_search && trace_outline) || (search_stats && trace) ||
+        ((args.given || trace || search_stats) && !layout)) {
       return usage();
     }
-    TraceScope scope{ TraceScope::Shipped };
-    if (trace_search) { scope = TraceScope::Search; }
-    if (trace_outline) { scope = TraceScope::Outline; }
-    return run_dump(path, hash, json, layout, trace, scope, args);
+    DumpTrace dumped{ .trace = trace,
+                      .scope = TraceScope::Shipped,
+                      .file = trace_file,
+                      .stats = search_stats };
+    if (trace_search) { dumped.scope = TraceScope::Search; }
+    if (trace_outline) { dumped.scope = TraceScope::Outline; }
+    return run_dump(path, hash, json, layout, dumped, args);
+  }
+
+  if (verb == "trace") {
+    if ((argc != 3) || std::string_view{ argv[2] }.starts_with("-")) { return usage(); }
+    return run_trace(argv[2]);
   }
 
   if (verb == "render") {

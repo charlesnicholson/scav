@@ -6,6 +6,7 @@
 #include "layout/label.h"
 #include "layout/order.h"
 #include "layout/router.h"
+#include "layout/tests/trace_record.h"
 #include "layout/trace.h"
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
@@ -266,7 +267,7 @@ TEST_CASE("size: states joined inside one column share the widest one's centre l
 
   SizedLayout z;
   std::vector<Diagnostic> diags;
-  LayoutTrace t;
+  TraceRecord t;
   trace_sink_set(&t);
   bool const sized{ size_layout(
       c,
@@ -293,7 +294,7 @@ TEST_CASE("size: states joined inside one column share the widest one's centre l
   CHECK(z.state[bar.v].x == w.x);
   // One ColumnCentred event, for `N`, by its offset from `W`'s leading edge.
   uint32_t centred{ 0 };
-  for (TraceEvent const &e : t.events) {
+  for (TraceEvent const &e : t.events()) {
     if (e.kind != TraceKind::ColumnCentred) { continue; }
     ++centred;
     CHECK(e.shift.state == narrow.v);
@@ -378,7 +379,7 @@ TEST_CASE("size: a fold that stacks its pieces carries no label room onto the se
 
   SizedLayout z;
   std::vector<Diagnostic> diags;
-  LayoutTrace t;
+  TraceRecord t;
   trace_sink_set(&t);
   bool const sized{ size_layout(
       c,
@@ -398,7 +399,7 @@ TEST_CASE("size: a fold that stacks its pieces carries no label room onto the se
   trace_sink_set(nullptr);
   REQUIRE(sized);
   bool cut{ false };
-  for (TraceEvent const &e : t.events) {
+  for (TraceEvent const &e : t.events()) {
     if ((e.kind == TraceKind::FoldCut) && (e.fold.refused == 0)) {
       cut = true;
       CHECK(e.fold.carried == 0);
@@ -426,7 +427,7 @@ TEST_CASE("size: a fold never cuts a boundary node away from the node it joins")
 
   SizedLayout z;
   std::vector<Diagnostic> diags;
-  LayoutTrace t;
+  TraceRecord t;
   trace_sink_set(&t);
   bool const sized{ size_layout(
       c,
@@ -449,7 +450,7 @@ TEST_CASE("size: a fold never cuts a boundary node away from the node it joins")
   trace_sink_set(nullptr);
   REQUIRE(sized);
   bool refused{ false };
-  for (TraceEvent const &e : t.events) {
+  for (TraceEvent const &e : t.events()) {
     refused = refused || ((e.kind == TraceKind::FoldCut) && (e.fold.rank == 2) &&
                           (e.fold.refused != 0));
   }
@@ -867,7 +868,7 @@ TEST_CASE("size: a fold never cuts between an initial pseudostate and its target
 
   SizedLayout z;
   std::vector<Diagnostic> diags;
-  LayoutTrace t;
+  TraceRecord t;
   trace_sink_set(&t);
   bool const sized{ size_layout(
       c,
@@ -884,7 +885,7 @@ TEST_CASE("size: a fold never cuts between an initial pseudostate and its target
   REQUIRE(sized);
   // The fold refused a cut at rank 1, before `S0`.
   bool refused{ false };
-  for (TraceEvent const &e : t.events) {
+  for (TraceEvent const &e : t.events()) {
     refused = refused || ((e.kind == TraceKind::FoldCut) && (e.fold.rank == 1) &&
                           (e.fold.refused != 0));
   }
@@ -2234,7 +2235,7 @@ struct Traced {
 
 Traced traced(Sample const &x, scav_profile const &p, Fold fold) {
   Traced out;
-  LayoutTrace t;
+  TraceRecord t{ x.c };
   trace_sink_set(&t);
   std::vector<Diagnostic> diags;
   out.ok = size_layout(x.c,
@@ -2248,7 +2249,7 @@ Traced traced(Sample const &x, scav_profile const &p, Fold fold) {
                        Compaction::On,
                        fold);
   trace_sink_set(nullptr);
-  trace_to_json(t, x.c, out.trace);
+  out.trace = t.json();
   return out;
 }
 
@@ -2303,4 +2304,86 @@ TEST_CASE("size: a sizing is the same whatever its thread sized before") {
     CHECK(same(large_after, large_fresh));
     CHECK(same(small_after, small_fresh));
   }
+}
+
+namespace {
+
+// What sizing `c` reads of a row's knobs, ordered with no pins.
+RowReads reads_of(Chart const &c) {
+  SplitGraph const g{ decompose(c) };
+  return size_row_reads(c, order_submachines(c, g, {}, profile()));
+}
+
+}  // namespace
+
+TEST_CASE("size: a lone state reads no row knob, and an edge reads all but the hole") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  RowReads const lone{ reads_of(c) };
+  CHECK(!lone.trybox);
+  CHECK(!lone.pack);
+  CHECK(!lone.dar);
+  CHECK(!lone.fold);
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::Default, {});
+  RowReads const edged{ reads_of(c) };
+  CHECK(edged.trybox);
+  CHECK(edged.pack);
+  CHECK(!edged.dar);  // no composite owns a frame
+  CHECK(edged.fold);
+}
+
+TEST_CASE("size: two unjoined states pack, and so read the packer and compaction") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  build_state(c, root, "A", StateKind::Normal, {});
+  build_state(c, root, "B", StateKind::Normal, {});
+  RowReads const r{ reads_of(c) };
+  CHECK(r.trybox);
+  CHECK(r.pack);
+  CHECK(!r.dar);
+  CHECK(!r.fold);
+}
+
+TEST_CASE("size: a composite reads its hole only where its packings can hold two rects") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const owner{ build_state(c, root, "O", StateKind::Normal, {}) };
+  SubmachineId const inner{ build_submachine(c, owner, "r", {}) };
+  StateId const x{ build_state(c, inner, "X", StateKind::Normal, {}) };
+  CHECK(!reads_of(c).dar);  // one region of one state
+  StateId const y{ build_state(c, inner, "Y", StateKind::Normal, {}) };
+  build_trans(c, x, y, TransKind::Default, {});
+  CHECK(reads_of(c).dar);  // its region can fold
+  Chart two;
+  SubmachineId const top{ build_chart(two, "t", {}) };
+  StateId const both{ build_state(two, top, "O", StateKind::Normal, {}) };
+  build_state(two, build_submachine(two, both, "r1", {}), "X", StateKind::Normal, {});
+  build_state(two, build_submachine(two, both, "r2", {}), "Y", StateKind::Normal, {});
+  RowReads const regions{ reads_of(two) };
+  CHECK(regions.dar);  // two regions pack in its hole
+  CHECK(regions.pack);
+  CHECK(!regions.fold);
+}
+
+TEST_CASE(
+    "size: a knob no sizing reads takes row 0's value, one that is read keeps its own") {
+  scav_profile const p{ profile() };
+  Row flipped{ .knobs = p,
+               .dar = DarSource::OwnerHole,
+               .pack = Compaction::On,
+               .fold = Fold::Always };
+  flipped.knobs.trybox = 1 - p.trybox;
+  Row const none{ size_row_canonical(flipped, {}, p) };
+  CHECK(none.knobs.trybox == p.trybox);
+  CHECK(none.dar == DarSource::Profile);
+  CHECK(none.pack == Compaction::Off);
+  CHECK(none.fold == Fold::Scale);
+  RowReads const all{ .trybox = true, .pack = true, .dar = true, .fold = true };
+  Row const kept{ size_row_canonical(flipped, all, p) };
+  CHECK(kept.knobs.trybox == flipped.knobs.trybox);
+  CHECK(kept.dar == DarSource::OwnerHole);
+  CHECK(kept.pack == Compaction::On);
+  CHECK(kept.fold == Fold::Always);
 }

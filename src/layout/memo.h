@@ -21,6 +21,45 @@ uint32_t memo_profile(scav_profile const &p);
 // The probe hash; any function is correct, a constant one included.
 using MemoHash = uint64_t (*)(std::vector<uint32_t> const &key);
 uint64_t memo_hash(std::vector<uint32_t> const &key);
+uint64_t memo_hash(uint32_t const *key, size_t len);  // the same over `key[0..len)`
+
+// An open-addressed index numbering word-string keys 0, 1, 2, ... in insertion order; keys
+// sit back to back in one arena, slots at their hash's high word, and a hit compares all.
+class KeyIndex {
+ public:
+  // The number of `key[0..len)`, or INVALID; `hash` is the hash it was stored under.
+  [[nodiscard]] uint32_t find(uint32_t const *key, uint32_t len, uint64_t hash) const;
+
+  // Numbers the absent `key[0..len)`; INVALID when the arena cannot hold it.
+  uint32_t insert(uint32_t const *key, uint32_t len, uint64_t hash);
+
+  [[nodiscard]] uint32_t size() const { return static_cast<uint32_t>(entries.size()); }
+
+  // Bytes the arena, entries and slots hold.
+  [[nodiscard]] size_t bytes() const {
+    return (keys.capacity() * sizeof(uint32_t)) + (entries.capacity() * sizeof(Entry)) +
+           (slots.capacity() * sizeof(Slot));
+  }
+
+ private:
+  struct Slot {
+    uint32_t check;  // the hash's high word
+    uint32_t entry;  // 0 for an empty slot, else the key's number plus 1
+  };
+  struct Entry {
+    uint32_t off, len;  // -> keys
+  };
+  static_assert(sizeof(Slot) == 8);
+  static_assert(sizeof(Entry) == 8);
+
+  // The slot holding the key, or the empty slot it goes in.
+  [[nodiscard]] size_t slot_of(uint32_t const *key, uint32_t len, uint64_t hash) const;
+  void grow();
+
+  std::vector<uint32_t> keys;
+  std::vector<Entry> entries;
+  std::vector<Slot> slots;  // a power of two, at most half full
+};
 
 class Memo {
  public:

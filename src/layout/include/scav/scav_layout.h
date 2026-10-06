@@ -9,6 +9,7 @@
 #include "scav/scav_types.h"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -172,7 +173,10 @@ struct SearchPins {
 // compaction, ratio source and fold; bounds `portfolio_m` and `layout_run`'s `row`.
 inline constexpr uint32_t LAYOUT_SEARCH_ROWS{ 16 };
 
-// Lays out and searches the first `portfolio_m` table rows; keeps the lowest `Cost`.
+struct SearchStats;
+
+// Lays out and searches the first `portfolio_m` table rows, less the compaction rows when
+// `search_cull` is set; keeps the lowest `Cost`.
 // Writes the geometry columns and sizes `placed` to the path boxes. False leaves the
 // last successful run's columns; true may leave one RouteDegraded finding in `diags`
 // per transition drawn as a straight line.
@@ -184,6 +188,7 @@ inline constexpr uint32_t LAYOUT_SEARCH_ROWS{ 16 };
 // `taken`: every pin the drawing rests on.
 // `pins`: a prior run's `taken`, seeding phase 1. With that run's row in `row` and
 // `portfolio_k` 0 it reproduces that run; a nonzero `portfolio_k` searches on from it.
+// `stats`: gains this run's search counts.
 bool layout_run(Chart &c,
                 scav_spaces const &s,
                 scav_layout_opts const &o,
@@ -194,7 +199,8 @@ bool layout_run(Chart &c,
                 uint32_t row = INVALID,
                 uint32_t *moves = nullptr,
                 SearchPins *taken = nullptr,
-                SearchPins const *pins = nullptr);
+                SearchPins const *pins = nullptr,
+                SearchStats *stats = nullptr);
 
 enum class TraceScope : uint32_t {
   Shipped,  // a single-threaded re-run of the winning row and pins, searching nothing
@@ -202,17 +208,62 @@ enum class TraceScope : uint32_t {
   Outline   // the whole search on one thread, its row and kick events only
 };
 
-// Runs `layout_run` from `pins` and writes its decision trace as JSON to `out`. Debug
-// output, unhashed.
-bool layout_trace_json(Chart &c,
-                       scav_spaces const &s,
-                       scav_layout_opts const &o,
-                       std::vector<scav_placed> &placed,
-                       std::vector<Diagnostic> &diags,
-                       std::vector<char> &out,
-                       uint32_t row = INVALID,
-                       TraceScope scope = TraceScope::Shipped,
-                       SearchPins const *pins = nullptr);
+// Receives a run's encoded trace in order, a chunk at a time, on the thread that called
+// `layout_trace`; false stops it.
+using TraceChunk = bool (*)(void *ctx, uint8_t const *data, size_t n);
+
+// Runs `layout_run` from `pins`, handing its decision trace to `sink` in chunks as it
+// runs. `streamed` is true when `sink` took every chunk; a null `sink` runs nothing.
+bool layout_trace(Chart &c,
+                  scav_spaces const &s,
+                  scav_layout_opts const &o,
+                  std::vector<scav_placed> &placed,
+                  std::vector<Diagnostic> &diags,
+                  TraceChunk sink,
+                  void *ctx,
+                  bool &streamed,
+                  uint32_t row = INVALID,
+                  TraceScope scope = TraceScope::Shipped,
+                  SearchPins const *pins = nullptr);
+
+// Receives JSON text in order, inside `trace_decode` and `trace_decode_end` on the
+// caller's thread; false stops the decode.
+using TraceWrite = bool (*)(void *ctx, char const *text, size_t n);
+
+// Decodes `layout_trace`'s chunks, fed in pieces of any size, to the JSON array `scav dump
+// --trace` prints, written through `write`; a null `write` only checks the bytes.
+struct TraceDecoder {
+  TraceWrite write{ nullptr };
+  void *ctx{ nullptr };
+  std::vector<uint8_t> pending;    // fed bytes short of a whole record
+  std::vector<char> names;         // the header's state names, end to end
+  std::vector<uint32_t> name_end;  // per state, the end of its name in `names`
+  std::vector<char> text;          // JSON not yet written
+  uint64_t events{ 0 };            // records decoded
+  bool header{ false };
+  bool ended{ false };
+  bool failed{ false };
+  bool foreign{ false };  // the header is another build's: its version or schema differs
+};
+
+// Feeds `data[0..n)`; false once the bytes fed begin no trace or `write` fails.
+bool trace_decode(TraceDecoder &d, uint8_t const *data, size_t n);
+
+// Writes the rest of the JSON; false unless the bytes fed are one whole trace.
+bool trace_decode_end(TraceDecoder &d);
+
+// Runs `layout_run` from `pins` on the caller's threads and writes the search's counts as
+// one JSON object to `out`. `tuple` and `taken` are `layout_run`'s.
+bool layout_search_stats(Chart &c,
+                         scav_spaces const &s,
+                         scav_layout_opts const &o,
+                         std::vector<scav_placed> &placed,
+                         std::vector<Diagnostic> &diags,
+                         std::vector<char> &out,
+                         uint32_t row = INVALID,
+                         SearchPins const *pins = nullptr,
+                         uint32_t *tuple = nullptr,
+                         SearchPins *taken = nullptr);
 
 // Structural: route lengths, turn directions, port sides and depths, seeded with the
 // model's structural digest. Coordinate: the rest; a translation moves only this one.

@@ -204,7 +204,7 @@ int64_t timed(Chart &c, uint32_t threads) {
 }  // namespace
 
 TEST_CASE("determinism: the corpus lays out to one answer at every thread count") {
-  // Four Level 2 rows: both box packers, each with and without compaction.
+  // Rows 0-3; the culled search lays out rows 0 and 1, which compact nothing.
   scav_profile p{ readable() };
   p.portfolio_m = 4;
   // A move budget of 24, below the shipped 1024; the next case runs the shipped depth.
@@ -214,7 +214,12 @@ TEST_CASE("determinism: the corpus lays out to one answer at every thread count"
   std::string shards;
   for (char const *name : CHARTS) {
     if (scav::test::corpus_skipped(name)) { continue; }
-    check_corpus_chart(name, p);
+    // The full and culled searches.
+    for (int32_t const cull : { 0, 1 }) {
+      CAPTURE(cull);
+      p.search_cull = cull;
+      check_corpus_chart(name, p);
+    }
 
     Chart c;
     load_corpus(name, c);
@@ -229,20 +234,24 @@ TEST_CASE("determinism: the corpus lays out to one answer at every thread count"
 
 TEST_CASE("determinism: a searched drawing is the same drawing at every thread count" *
           doctest::test_suite("full")) {
-  // The shipped search depth on small charts: parallel candidates, rows, finishes and
-  // kicks reduce in enumeration order at every thread count.
-  scav_profile const p{ readable() };
-  for (char const *name :
-       { "estop.scav", "kiln.scav", "led.scav", "dock.scav", "brew.scav" }) {
-    CAPTURE(name);
-    Chart first;
-    load_corpus(name, first);
-    Snapshot const want{ lay_out(first, p, 1) };
-    for (uint32_t const threads : { 2U, 8U, 16U }) {
-      CAPTURE(threads);
-      Chart c;
-      load_corpus(name, c);
-      check_same(lay_out(c, p, threads), want);
+  // The shipped depth on small charts: candidates, rows, finishes and kicks reduce in
+  // enumeration order at every thread count, in both searches.
+  for (int32_t const cull : { 0, 1 }) {
+    CAPTURE(cull);
+    scav_profile p{ readable() };
+    p.search_cull = cull;
+    for (char const *name :
+         { "estop.scav", "kiln.scav", "led.scav", "dock.scav", "brew.scav" }) {
+      CAPTURE(name);
+      Chart first;
+      load_corpus(name, first);
+      Snapshot const want{ lay_out(first, p, 1) };
+      for (uint32_t const threads : { 2U, 8U, 16U }) {
+        CAPTURE(threads);
+        Chart c;
+        load_corpus(name, c);
+        check_same(lay_out(c, p, threads), want);
+      }
     }
   }
 }

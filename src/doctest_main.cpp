@@ -8,11 +8,11 @@
 
 int main(int argc, char **argv) {
   doctest::Context context;
-  char const *const tier{ std::getenv("SCAV_TEST_TIER") };
-  if ((tier == nullptr) || (std::string_view{ tier } != "full")) {
-    context.addFilter("test-suite-exclude",
-                      "full");  // the fast tier, unless asked for full
-  }
+  char const *const set{ std::getenv("SCAV_TEST_TIER") };
+  std::string_view const tier{ (set != nullptr) ? set : "fast" };
+  bool const exhaustive{ tier == "exhaustive" };
+  if (!exhaustive && (tier != "full")) { context.addFilter("test-suite-exclude", "full"); }
+  if (!exhaustive) { context.addFilter("test-suite-exclude", "exhaustive"); }
   context.applyCommandLine(argc, argv);
   return context.run();
 }

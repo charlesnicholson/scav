@@ -8,6 +8,7 @@
 #include "layout/route.h"
 #include "layout/router.h"
 #include "layout/size.h"
+#include "layout/tests/trace_record.h"
 #include "layout/trace.h"
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
@@ -138,7 +139,7 @@ void lay(char const *name,
   // Re-derives the kept drawing from its row and pins; order and route both read the pins.
   out.o = order_submachines(out.c, out.g, s, knobs, 0, pins);
   REQUIRE(size_layout(out.c, out.g, out.o, s, knobs, out.z, diags, dar, pack, fold));
-  LayoutTrace routed;
+  TraceRecord routed;
   trace_sink_set(&routed);
   out.r = route_transitions(out.c,
                             out.g,
@@ -152,10 +153,9 @@ void lay(char const *name,
                             nullptr,
                             &pins);
   trace_sink_set(nullptr);
-  out.lane_moves =
-      static_cast<uint32_t>(std::ranges::count_if(routed.events, [](TraceEvent const &e) {
-        return e.kind == TraceKind::LaneAssigned;
-      }));
+  out.lane_moves = static_cast<uint32_t>(std::ranges::count_if(
+      routed.events(),
+      [](TraceEvent const &e) { return e.kind == TraceKind::LaneAssigned; }));
   std::vector<scav_rect> boxes;
   out.unplaced =
       place_labels(out.c, out.g, out.z, s, out.r.route, out.r.points, knobs, boxes);
@@ -1139,7 +1139,7 @@ TEST_CASE("gauntlet: a cut before a boundary-fed state is taken, and carries the
   scav_layout_opts o{ .profile = one_row(readable()), .router = 0, .threads = 1 };
   std::vector<scav_placed> placed;
   std::vector<Diagnostic> diags;
-  LayoutTrace t;
+  TraceRecord t;
   trace_sink_set(&t);
   bool const ran{
     layout_run(bare.c, {}, o, placed, diags, nullptr, nullptr, 0, nullptr, nullptr, &pins)
@@ -1149,7 +1149,7 @@ TEST_CASE("gauntlet: a cut before a boundary-fed state is taken, and carries the
   uint32_t taken{ 0 };
   uint32_t refused{ 0 };
   uint32_t carried{ 0 };
-  for (TraceEvent const &e : t.events) {
+  for (TraceEvent const &e : t.events()) {
     if (e.frame != pins.folds[0].frame.v) { continue; }
     if (e.kind == TraceKind::FoldCut) { ++((e.fold.refused != 0) ? refused : taken); }
     if ((e.kind == TraceKind::BoundaryCarried) && (e.carry.rank == layer)) { ++carried; }
@@ -1638,12 +1638,12 @@ TEST_CASE("gauntlet: a route into a state walled on every face crosses its band 
     scav_layout_opts const o{ .profile = one_row(p), .router = id, .threads = 1 };
     std::vector<scav_placed> placed;
     std::vector<Diagnostic> diags;
-    LayoutTrace trace;
+    TraceRecord trace;
     trace_sink_set(&trace);
     bool const ran{ layout_run(c, s, o, placed, diags) };
     trace_sink_set(nullptr);
     REQUIRE(ran);
-    CHECK(std::ranges::count_if(trace.events, [](TraceEvent const &e) {
+    CHECK(std::ranges::count_if(trace.events(), [](TraceEvent const &e) {
             return e.kind == TraceKind::RouteWalled;
           }) > 0);
   }
@@ -2012,6 +2012,70 @@ TEST_CASE(
             .t0_violations == 0);
 }
 
+TEST_CASE(
+    "gauntlet: a loop room that sits alike at either end of its face lays out alike") {
+  // Each inner-loop placement against the other end of its face: where `loop_room_unmoved`
+  // holds both lay out alike; on `rooms` widened past its loops it fails.
+  scav_profile const p{ one_row(readable()) };
+  uint32_t alike{ 0 };
+  uint32_t apart{ 0 };
+  for (char const *name : { "room.scav", "inloop.scav", "rooms.scav" }) {
+    CAPTURE(name);
+    Chart const probe{ loaded(name) };
+    std::vector<scav_box_space> rows(probe.states.size());
+    uint32_t const busy{ state_named(probe, "Busy") };
+    if (std::string_view{ name } == "rooms.scav") {
+      REQUIRE(busy != INVALID);
+      rows[busy].min_w = 100 * p.font_size_grid;
+    }
+    std::vector<scav_path_box> const boxes{
+      label_boxes(probe, 3 * p.font_size_grid, p.font_size_grid)
+    };
+    scav_spaces s{ spaces_of(rows) };
+    s.path_box = boxes.data();
+    s.n_path_box = static_cast<uint32_t>(boxes.size());
+    s.path_box_stride = static_cast<uint32_t>(sizeof(scav_path_box));
+    for (uint32_t st = 0; st < probe.states.size(); ++st) {
+      bool looped{ false };
+      for (uint32_t t = 0; t < probe.transitions.size(); ++t) {
+        looped = looped || ((probe.transitions[t].src.v == st) && inner_loop(probe, t));
+      }
+      if (!looped) { continue; }
+      CAPTURE(st);
+      for (uint32_t k = 0; k < 8; ++k) {
+        CAPTURE(k);
+        SearchPins const at{
+          .loops = { { .state = StateId{ st }, .face = k / 2, .end = k % 2 } }
+        };
+        SearchPins const other{
+          .loops = { { .state = StateId{ st }, .face = k / 2, .end = (k % 2) ^ 1U } }
+        };
+        Laid drawn;
+        lay(name, p, drawn, s, &at);
+        Laid flipped;
+        lay(name, p, flipped, s, &other);
+        auto const rect = [](scav_rect const &a, scav_rect const &b) {
+          return (a.x == b.x) && (a.y == b.y) && (a.w == b.w) && (a.h == b.h);
+        };
+        bool const alike_drawn{
+          std::ranges::equal(drawn.z.state, flipped.z.state, rect) &&
+          std::ranges::equal(drawn.z.loop, flipped.z.loop, rect) &&
+          std::ranges::equal(drawn.z.sub, flipped.z.sub, rect) &&
+          std::ranges::equal(drawn.r.points, flipped.r.points, same)
+        };
+        if (loop_room_unmoved(drawn.c, drawn.z, st, k ^ 1U)) {
+          CHECK(alike_drawn);
+          ++alike;
+        } else {
+          ++apart;
+        }
+      }
+    }
+  }
+  CHECK(alike > 0);
+  CHECK(apart > 0);
+}
+
 TEST_CASE("gauntlet: an external self-loop leaves its state and returns to it outside") {
   // `tick` is a loop off one face of Waiting: both ends on its border at least a clearance
   // apart, and every corner outside it.
@@ -2359,13 +2423,13 @@ TEST_CASE(
       scav_layout_opts const o{ .profile = one_row(p), .router = id, .threads = 1 };
       std::vector<scav_placed> placed;
       std::vector<Diagnostic> diags;
-      LayoutTrace trace;
+      TraceRecord trace;
       trace_sink_set(&trace);
       bool const ran{ layout_run(c, s, o, placed, diags) };
       trace_sink_set(nullptr);
       REQUIRE(ran);
       uint32_t walled{ 0 };
-      for (TraceEvent const &e : trace.events) {
+      for (TraceEvent const &e : trace.events()) {
         if (e.kind == TraceKind::PortWalled) { ++walled; }
       }
       CHECK((walled > 0) == (lined == 4));

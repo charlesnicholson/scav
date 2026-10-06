@@ -628,6 +628,30 @@ struct FrameRoutes {
   std::vector<RouteMetrics> metrics;  // parallel to the frame's nets
 };
 
+// Adds the turns of `fr`'s nets, planned as `nets` into `planned`, to `turned`, and moves
+// `sum`, the larger of each transition's `least` and its turns, summed.
+void count_turns(FrameRoutes const &fr,
+                 std::vector<uint32_t> const &nets,
+                 std::vector<Planned> const &planned,
+                 SplitGraph const &g,
+                 std::vector<int32_t> const &least,
+                 std::vector<int32_t> &turned,
+                 int64_t &sum) {
+  for (uint32_t j = 0; (j < nets.size()) && (j < fr.net_points.size()); ++j) {
+    uint32_t const t{ g.segments[planned[nets[j]].seg].trans.v };
+    scav_span const at{ fr.net_points[j] };
+    int32_t turns{ 0 };
+    for (uint32_t k = 0; (k + 2) < at.len; ++k) {
+      scav_point const *q{ fr.points.data() + at.off + k };
+      turns += (direction(q[0], q[1]) != direction(q[1], q[2])) ? 1 : 0;
+    }
+    int32_t const floor{ (t < least.size()) ? least[t] : 0 };
+    sum -= imax(floor, turned[t]);
+    turned[t] += turns;
+    sum += imax(floor, turned[t]);
+  }
+}
+
 // Per-thread, reused across the frames the thread routes; one shard uses it at a time.
 struct FrameScratch {
   RouteInput in;
@@ -672,6 +696,7 @@ struct CallScratch {
   std::vector<Gap> gaps;
   std::vector<OnDivider> on_dividers;  // the divider ends planned so far
   std::vector<std::array<int32_t, 2>> blocks;
+  std::vector<int32_t> turned;  // per transition, its routed nets' turns
 };
 
 // Per-thread `CallScratch` stack: each call pops one for its run and pushes it back; a
@@ -688,6 +713,34 @@ void reset_lists(std::vector<std::vector<uint32_t>> &v, size_t n) {
 }
 
 }  // namespace
+
+void segment_bends(SubmachineOrders const &o,
+                   uint32_t segments,
+                   std::vector<uint32_t> &reversed,
+                   std::vector<std::vector<uint32_t>> &bends) {
+  vec_assign(reversed, segments, 0);
+  for (OrderEdge const &e : o.edges) { reversed[e.segment] = e.reversed; }
+  reset_lists(bends, segments);
+  for (uint32_t node = 0; node < o.nodes.size(); ++node) {
+    if (o.nodes[node].kind == OrderKind::Bend) {
+      vec_push_back(bends[o.nodes[node].subject], node);
+    }
+  }
+  for (uint32_t seg = 0; seg < bends.size(); ++seg) {
+    std::vector<uint32_t> &chain{ bends[seg] };
+    scav_stable_sort(chain, [&](uint32_t a, uint32_t b) {
+      return o.nodes[a].rank < o.nodes[b].rank;
+    });
+    // Ranks climb in the acyclic direction; reversed edges flip to authored order.
+    if (reversed[seg] != 0) {
+      for (uint32_t i = 0; i < (chain.size() / 2); ++i) {
+        uint32_t const other{ chain[i] };
+        chain[i] = chain[chain.size() - 1 - i];
+        chain[chain.size() - 1 - i] = other;
+      }
+    }
+  }
+}
 
 Routes route_transitions(Chart const &c,
                          SplitGraph const &g,
@@ -718,7 +771,8 @@ void route_transitions(Routes &out,
                        RouteCache const *reuse,
                        RouteCache *fill,
                        SearchPins const *pins,
-                       bool labels) {
+                       bool labels,
+                       RouteStop *stop) {
   out.points.clear();
   out.slots.clear();
   out.placed.clear();
@@ -771,30 +825,8 @@ void route_transitions(Routes &out,
   for (uint32_t seg = 0; seg < g.segments.size(); ++seg) {
     if (o.seg_port[seg] != INVALID) { port_seg[o.seg_port[seg]] = seg; }
   }
-  std::vector<uint32_t> &seg_reversed{ cs.seg_reversed };
-  vec_assign(seg_reversed, g.segments.size(), 0);
-  for (OrderEdge const &e : o.edges) { seg_reversed[e.segment] = e.reversed; }
   std::vector<std::vector<uint32_t>> &seg_bends{ cs.seg_bends };
-  reset_lists(seg_bends, g.segments.size());
-  for (uint32_t node = 0; node < o.nodes.size(); ++node) {
-    if (o.nodes[node].kind == OrderKind::Bend) {
-      vec_push_back(seg_bends[o.nodes[node].subject], node);
-    }
-  }
-  for (uint32_t seg = 0; seg < seg_bends.size(); ++seg) {
-    std::vector<uint32_t> &chain{ seg_bends[seg] };
-    scav_stable_sort(chain, [&](uint32_t a, uint32_t b) {
-      return o.nodes[a].rank < o.nodes[b].rank;
-    });
-    // Ranks climb in the acyclic direction; reversed edges flip to authored order.
-    if (seg_reversed[seg] != 0) {
-      for (uint32_t i = 0; i < (chain.size() / 2); ++i) {
-        uint32_t const other{ chain[i] };
-        chain[i] = chain[chain.size() - 1 - i];
-        chain[chain.size() - 1 - i] = other;
-      }
-    }
-  }
+  segment_bends(o, static_cast<uint32_t>(g.segments.size()), cs.seg_reversed, seg_bends);
 
   // Each inner loop's four points out of its state's border and back, in its row of the
   // state's loop room; `occupied` gets its ends' run on each face they touch, padded.
@@ -1446,23 +1478,43 @@ void route_transitions(Routes &out,
     for (uint32_t const st : sc.obstacle_states) { sc.obstacle_index[st] = INVALID; }
   };
 
-  uint32_t const shards{ layout_shard_count(c) };
-  auto body = [&](uint32_t shard) {
-    scav_span const mine{
-      shard_range(shard, shards, static_cast<uint32_t>(by_frame.size()))
-    };
-    if (mine.len == 0) { return; }
+  // Frames `first` onward of `count`, in order on this thread's scratch.
+  auto const route_frames = [&](uint32_t first, uint32_t count) {
     FrameScratch &sc{ frame_scratch() };
     sc.in.profile = p;
     vec_assign(sc.obstacle_index, c.states.size(), INVALID);
     vec_assign(sc.in_chain, c.states.size(), 0);
     vec_assign(sc.pick, (size_t{ state_count } + 63) / 64, 0);
-    for (uint32_t k = 0; k < mine.len; ++k) {
-      uint32_t const m{ mine.off + k };
-      if (!by_frame[m].empty()) { route_frame(m, sc); }
+    for (uint32_t m = first; (m < (first + count)) && (m < by_frame.size()); ++m) {
+      if (by_frame[m].empty()) { continue; }
+      route_frame(m, sc);
+      if (stop == nullptr) { continue; }
+      count_turns(frames[m], by_frame[m], planned, g, *stop->bends, cs.turned, stop->sum);
+      stop->reached = stop->floor + (stop->per_bend * stop->sum);
+      if (stop->reached >= stop->at) {
+        stop->stopped = true;
+        return;
+      }
     }
   };
-  parallel_for(shards, threads, body);
+  if (stop != nullptr) {
+    vec_assign(cs.turned, n, 0);
+    stop->sum = 0;
+    for (int32_t const b : *stop->bends) { stop->sum += b; }
+    route_frames(0, static_cast<uint32_t>(by_frame.size()));
+    if (stop->stopped) {
+      vec_push_back(stack, std::move(cs));
+      return;
+    }
+  } else {
+    uint32_t const shards{ layout_shard_count(c) };
+    parallel_for(shards, threads, [&](uint32_t shard) {
+      scav_span const mine{
+        shard_range(shard, shards, static_cast<uint32_t>(by_frame.size()))
+      };
+      if (mine.len != 0) { route_frames(mine.off, mine.len); }
+    });
+  }
 
   // Merges in frame order; totals and points are the same at every worker count.
   std::vector<scav_point> &routed{ cs.routed };

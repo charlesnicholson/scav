@@ -90,8 +90,11 @@ uint32_t ortho_index_of(std::vector<int32_t> const &v, int32_t at);
 // outside `r` on x as on y.
 bool ortho_escape_horizontal(scav_point toward, scav_rect const &r);
 
-// `at` moved along one axis onto `r`'s border: x when `ortho_escape_horizontal`, else y,
-// to the side nearer `toward`, ties to left or top.
+// The face of `r` an end aimed at `toward` leaves by: a side if `ortho_escape_horizontal`,
+// else top or bottom; the one nearer `toward`, ties to left or top.
+uint32_t ortho_escape_face(scav_point toward, scav_rect const &r);
+
+// `at` moved along one axis onto the face `ortho_escape_face` names.
 scav_point ortho_escape_box(scav_point at, scav_point toward, scav_rect const &r);
 
 // `ortho_attach_box` on a named face: 0 left, 1 right, 2 top, 3 bottom. A non-inscribed

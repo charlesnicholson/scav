@@ -15,6 +15,7 @@
 
 #include "doctest.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <string>
@@ -40,6 +41,11 @@ int32_t cost_through_boxes(Chart const &c,
 int64_t cost_crossings(std::vector<Piece> const &pieces, std::vector<uint32_t> &per_trans);
 Wide cost_corridor(Routes const &r, std::vector<Piece> const &pieces);
 Wide cost_crowding(std::vector<Piece> const &pieces, int32_t em);
+int32_t cost_path_turns(scav_rect const &s,
+                        uint32_t s_face,
+                        std::vector<scav_point> const &via,
+                        scav_rect const &t,
+                        uint32_t t_face);
 
 }  // namespace scav
 
@@ -328,6 +334,53 @@ TEST_CASE(
   CHECK(party[1] != 0);
   CHECK(party[2] != 0);
   CHECK(party[3] != 0);
+}
+
+TEST_CASE("cost: charge is each transition's weighted terms, a pair's to both of it") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  for (uint32_t i = 0; i < 4; ++i) { build_trans(c, a, b, TransKind::Default, {}); }
+  scav_profile const p{ profile() };
+  Wide const em{ p.font_size_grid };
+
+  // A bent route, two crossing diagonals, and a clear route.
+  Routes const r{ routes_of(
+      c,
+      { { { .x = 0, .y = 0 }, { .x = 100, .y = 0 }, { .x = 100, .y = 100 } },
+        { { .x = 300, .y = 0 }, { .x = 400, .y = 100 } },
+        { { .x = 300, .y = 100 }, { .x = 400, .y = 0 } },
+        { { .x = 1000, .y = 1000 }, { .x = 1100, .y = 1000 } } }) };
+  SplitGraph const g{ decompose(c) };
+  std::vector<uint8_t> party;
+  std::vector<Wide> charge;
+  (void)cost_terms(cost_context(c, g), c, g, blank(c), r, {}, p, &party, &charge);
+  REQUIRE(charge.size() == 4);
+  // The bend, and 200 run where the direct distance is 141.
+  CHECK(charge[0] == (Wide{ p.w_bends } * em) + (Wide{ p.w_excess_len } * (200 - 141)));
+  CHECK(charge[1] == Wide{ p.w_crossings } * em);
+  CHECK(charge[2] == Wide{ p.w_crossings } * em);
+  CHECK(charge[3] == 0);
+
+  // A run of 300 shared on one line, then two routes half an em apart over 1000.
+  Routes const shared{ routes_of(
+      c,
+      { { { .x = 0, .y = 60 }, { .x = 500, .y = 60 } },
+        { { .x = 100, .y = 60 }, { .x = 400, .y = 60 } },
+        { { .x = 0, .y = 1000 }, { .x = 1000, .y = 1000 } },
+        { { .x = 0, .y = 1000 + (p.font_size_grid / 2) },
+          { .x = 1000, .y = 1000 + (p.font_size_grid / 2) } } }) };
+  CostTerms const t{
+    cost_terms(cost_context(c, g), c, g, blank(c), shared, {}, p, &party, &charge)
+  };
+  CHECK(t.corridor == 300);
+  CHECK(t.crowding == 500);
+  CHECK(charge[0] == Wide{ p.w_corridor } * 300);
+  CHECK(charge[1] == Wide{ p.w_corridor } * 300);
+  CHECK(charge[2] == Wide{ p.w_crowding } * 500);
+  CHECK(charge[3] == Wide{ p.w_crowding } * 500);
+  for (uint32_t i = 0; i < 4; ++i) { CHECK((party[i] != 0) == (charge[i] != 0)); }
 }
 
 TEST_CASE("cost: party marks every transition while the drawing breaks Tier 0") {
@@ -3196,6 +3249,54 @@ TEST_CASE("cost: a thread's kept buffers carry nothing from one chart to the nex
   CHECK(mismatches == 0);
 }
 
+TEST_CASE("cost: a stop ends the count once the Tier 2 terms but the labels' reach it") {
+  // A route that jogs through a third box: Tier 0 counts the box, Tier 2 the bends.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  StateId const m{ build_state(c, root, "M", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::Default, {});
+  SplitGraph const g{ decompose(c) };
+  SizedLayout z{ blank(c) };
+  z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 100 };
+  z.state[b.v] = { .x = 600, .y = 0, .w = 100, .h = 100 };
+  z.state[m.v] = { .x = 300, .y = -50, .w = 100, .h = 200 };
+  z.chart = { .x = 0, .y = -50, .w = 700, .h = 200 };
+  z.sub[root.v] = z.chart;
+  Routes const r{ routes_of(c,
+                            { { { .x = 100, .y = 50 },
+                                { .x = 200, .y = 50 },
+                                { .x = 200, .y = 30 },
+                                { .x = 500, .y = 30 },
+                                { .x = 500, .y = 50 },
+                                { .x = 600, .y = 50 } } }) };
+  scav_profile const p{ profile() };
+  CostContext const ctx{ cost_context(c, g) };
+  CostTerms const whole{ cost_terms(ctx, c, g, z, r, {}, p) };
+  REQUIRE(whole.through_box == 1);
+  REQUIRE(whole.bends == 4);
+  int64_t const t2{ cost_of(whole, p).t2 };
+
+  CostStop low{ .t2 = t2 };
+  CostTerms const cut{ cost_terms(ctx, c, g, z, r, {}, p, nullptr, nullptr, &low) };
+  CHECK(low.stopped);
+  CHECK(cut.through_box == 0);
+  CHECK(cut.bends == 4);
+  CHECK(cost_of(cut, p).t2 == t2);
+
+  CostStop high{ .t2 = t2 + 1 };
+  CostTerms const all{ cost_terms(ctx, c, g, z, r, {}, p, nullptr, nullptr, &high) };
+  CHECK_FALSE(high.stopped);
+  CHECK(first_difference(all, whole).empty());
+
+  // Without aspect the same stop is not reached.
+  REQUIRE(whole.aspect > 0);
+  CostStop flat{ .t2 = t2, .aspect = false };
+  (void)cost_terms(ctx, c, g, z, r, {}, p, nullptr, nullptr, &flat);
+  CHECK_FALSE(flat.stopped);
+}
+
 TEST_CASE("cost: a context built once scores every candidate as one built for it") {
   Lattice r{ 7 };
   for (uint32_t trial = 0; trial < 40; ++trial) {
@@ -3230,4 +3331,291 @@ TEST_CASE("cost: a context built once scores every candidate as one built for it
       CHECK(ctx.grid.frame[m].bucket == again.grid.frame[m].bucket);
     }
   }
+}
+
+TEST_CASE("cost bound: boxes sharing a row or a column take no turn, others one") {
+  scav_rect const a{ .x = 0, .y = 0, .w = 100, .h = 40 };
+  CHECK(cost_path_turns(a, 4, {}, { .x = 300, .y = 20, .w = 100, .h = 40 }, 4) == 0);
+  CHECK(cost_path_turns(a, 4, {}, { .x = 50, .y = 200, .w = 100, .h = 40 }, 4) == 0);
+  CHECK(cost_path_turns(a, 4, {}, { .x = 300, .y = 200, .w = 100, .h = 40 }, 4) == 1);
+  // Touching corners share a point.
+  CHECK(cost_path_turns(a, 4, {}, { .x = 100, .y = 40, .w = 100, .h = 40 }, 4) == 0);
+}
+
+TEST_CASE("cost bound: a named face turned from the far box costs two turns") {
+  scav_rect const a{ .x = 0, .y = 0, .w = 100, .h = 400 };
+  scav_rect const right{ .x = 300, .y = 0, .w = 100, .h = 400 };
+  CHECK(cost_path_turns(a, 1, {}, right, 4) == 0);  // right face, toward it
+  CHECK(cost_path_turns(a, 0, {}, right, 4) == 2);  // left face, out and back
+  CHECK(cost_path_turns(a, 2, {}, right, 4) == 2);  // top face, up, across, down
+  CHECK(cost_path_turns(a, 4, {}, right, 0) == 0);  // into its left face
+  CHECK(cost_path_turns(a, 4, {}, right, 1) == 2);  // into its right face, round it
+  CHECK(cost_path_turns(a, 0, {}, right, 1) == 4);  // both faces turned away
+  // A box beyond the named face takes no extra turn.
+  CHECK(cost_path_turns(right, 0, {}, a, 4) == 0);
+}
+
+TEST_CASE("cost bound: a waypoint off the line between two boxes costs its turns") {
+  scav_rect const a{ .x = 0, .y = 0, .w = 100, .h = 40 };
+  scav_rect const b{ .x = 300, .y = 0, .w = 100, .h = 40 };
+  CHECK(cost_path_turns(a, 4, { { .x = 200, .y = 20 } }, b, 4) == 0);
+  CHECK(cost_path_turns(a, 4, { { .x = 200, .y = 300 } }, b, 4) == 2);
+  CHECK(cost_path_turns(a, 4, { { .x = 200, .y = 300 }, { .x = 250, .y = 300 } }, b, 4) ==
+        2);
+  CHECK(cost_path_turns(a, 4, { { .x = 200, .y = 300 }, { .x = 250, .y = 20 } }, b, 4) ==
+        2);
+  CHECK(cost_path_turns(a, 4, { { .x = 200, .y = 300 }, { .x = 250, .y = 600 } }, b, 4) ==
+        3);
+}
+
+namespace {
+
+// `c` sized by hand: every per-state vector sized, loops empty.
+SizedLayout sized(Chart const &c) {
+  SizedLayout z{ blank(c) };
+  z.lead.assign(c.states.size(), scav_rect{});
+  z.trail.assign(c.states.size(), scav_rect{});
+  z.loop.assign(c.states.size(), scav_rect{});
+  z.loop_place.assign(c.states.size(), 0);
+  return z;
+}
+
+// A rectilinear router that names no face for an unpinned end.
+class AnyFaceRouter final : public Router {
+ public:
+  [[nodiscard]] RouterName name() const override { return { .bytes = "any", .len = 3 }; }
+  [[nodiscard]] uint32_t version() const override { return 1; }
+  [[nodiscard]] bool rectilinear() const override { return true; }
+  void route(RouteInput const & /*in*/, RouteOutput &out) const override {
+    out.points.clear();
+    out.net_points.clear();
+    out.metrics.clear();
+  }
+};
+
+OrthogonalRouter const ORTHO;
+AnyFaceRouter const ANY_FACE;
+StraightRouter const STRAIGHT;
+
+// Two states and one transition A -> B in the root, sized as `a` and `b`; the chart is
+// their cover. `more` adds siblings sized as given.
+struct TwoBoxes {
+  Chart c;
+  SplitGraph g;
+  SizedLayout z;
+  std::vector<std::vector<uint32_t>> bends;
+
+  TwoBoxes(scav_rect const &a,
+           scav_rect const &b,
+           std::vector<scav_rect> const &more = {},
+           StateKind a_kind = StateKind::Normal) {
+    SubmachineId const root{ build_chart(c, "t", {}) };
+    StateId const sa{ build_state(c, root, "A", a_kind, {}) };
+    StateId const sb{ build_state(c, root, "B", StateKind::Normal, {}) };
+    std::vector<StateId> kids;
+    for (size_t k = 0; k < more.size(); ++k) {
+      std::string const name{ "S" + std::to_string(k) };
+      kids.push_back(build_state(c, root, name, StateKind::Normal, {}));
+    }
+    build_trans(c, sa, sb, TransKind::Default, {});
+    g = decompose(c);
+    z = sized(c);
+    z.state[sa.v] = a;
+    z.state[sb.v] = b;
+    for (size_t k = 0; k < more.size(); ++k) { z.state[kids[k].v] = more[k]; }
+    z.before = z.state;  // no corner arc
+    int32_t x0{ a.x };
+    int32_t y0{ a.y };
+    int32_t x1{ a.x + a.w };
+    int32_t y1{ a.y + a.h };
+    for (scav_rect const &r : more) {
+      x0 = std::min(x0, r.x);
+      y0 = std::min(y0, r.y);
+      x1 = std::max(x1, r.x + r.w);
+      y1 = std::max(y1, r.y + r.h);
+    }
+    x0 = std::min(x0, b.x);
+    y0 = std::min(y0, b.y);
+    x1 = std::max(x1, b.x + b.w);
+    y1 = std::max(y1, b.y + b.h);
+    z.chart = { .x = x0, .y = y0, .w = x1 - x0, .h = y1 - y0 };
+    z.sub[root.v] = z.chart;
+    bends.assign(g.segments.size(), {});
+  }
+
+  // The bound's bends under `router` with `faces` named.
+  [[nodiscard]] int64_t turns(Router const &router,
+                              std::vector<uint32_t> const &faces = {}) const {
+    scav_profile const p{ profile() };
+    return cost_bound(c, g, bends, z, faces, p, route_clearance(p), router).bends;
+  }
+};
+
+// The `CandidateMemo::box_faces` word naming face `face` at end `end` of segment `seg`.
+constexpr uint32_t face_word(uint32_t seg, uint32_t end, uint32_t face) {
+  return (seg << 3U) | (end << 2U) | face;
+}
+
+}  // namespace
+
+TEST_CASE("cost bound: area, length and bends of two boxes, and a named face") {
+  TwoBoxes const two{ { .x = 0, .y = 0, .w = 100, .h = 400 },
+                      { .x = 300, .y = 600, .w = 100, .h = 400 } };
+  scav_profile const p{ profile() };
+  int32_t const clear{ route_clearance(p) };
+
+  CostTerms const t{ cost_bound(two.c, two.g, two.bends, two.z, {}, p, clear, ANY_FACE) };
+  CHECK(t.area == 400LL * 1000);
+  CHECK(t.length == 200 + 200);
+  CHECK(t.bends == 1);
+  CHECK(cost_of(t, p).t0_violations == 0);
+
+  // A router that is not rectilinear: the larger axis gap, and no bends.
+  CostTerms const any{
+    cost_bound(two.c, two.g, two.bends, two.z, {}, p, clear, STRAIGHT)
+  };
+  CHECK(any.length == 200);
+  CHECK(any.bends == 0);
+
+  // Leaving A by its left face, away from B, turns twice.
+  CHECK(two.turns(ANY_FACE, { face_word(0, 0, 0) }) == 2);
+}
+
+TEST_CASE("cost bound: an unnamed end is seated on the face its aim escapes by") {
+  // B lies further below A than beside it: both ends seat on the faces toward each other
+  // along y, whose runs share no x, so the route jogs.
+  TwoBoxes const two{ { .x = 0, .y = 0, .w = 100, .h = 400 },
+                      { .x = 300, .y = 600, .w = 100, .h = 400 } };
+  CHECK(two.turns(ANY_FACE) == 1);
+  CHECK(two.turns(ORTHO) == 2);
+  // A named left face turns away from B and comes round to B's top.
+  CHECK(two.turns(ORTHO, { face_word(0, 0, 0) }) == 3);
+}
+
+TEST_CASE("cost bound: a named face too short to seat on takes the escape face") {
+  scav_profile const p{ profile() };
+  int32_t const clear{ route_clearance(p) };
+  TwoBoxes const two{ { .x = 0, .y = 0, .w = 100, .h = 2 * clear },
+                      { .x = 300, .y = 600, .w = 100, .h = 400 } };
+  // The left face cannot seat; the end takes A's bottom, as an unnamed end does.
+  CHECK(two.turns(ORTHO, { face_word(0, 0, 0) }) == two.turns(ORTHO));
+  CHECK(two.turns(ORTHO) == 2);
+}
+
+TEST_CASE("cost bound: a seat keeps off its face's corners") {
+  // A's bottom right corner touches B's top left corner: no face of one meets a face of
+  // the other away from a corner, so no straight line joins them.
+  TwoBoxes const two{ { .x = 0, .y = 0, .w = 100, .h = 400 },
+                      { .x = 300, .y = 400, .w = 100, .h = 400 } };
+  CHECK(two.turns(ANY_FACE) == 1);
+  CHECK(two.turns(ORTHO) == 2);  // right face to left face, at different heights
+  CHECK(two.turns(ANY_FACE, { face_word(0, 0, 1), face_word(0, 1, 0) }) == 2);
+}
+
+TEST_CASE("cost bound: an inscribed glyph is left at a face's middle") {
+  // B's left face starts below the middle of the glyph's right face.
+  TwoBoxes const two{ { .x = 0, .y = 0, .w = 100, .h = 100 },
+                      { .x = 300, .y = 60, .w = 100, .h = 400 },
+                      {},
+                      StateKind::Choice };
+  CHECK(two.turns(ANY_FACE) == 1);  // down from the bottom middle, into B's left face
+  CHECK(two.turns(ORTHO) == 1);
+  // The same box as a plain state seats level with B on its right face.
+  TwoBoxes const plain{ { .x = 0, .y = 0, .w = 100, .h = 100 },
+                        { .x = 300, .y = 60, .w = 100, .h = 400 } };
+  CHECK(plain.turns(ANY_FACE) == 0);
+}
+
+TEST_CASE("cost bound: a box holding loops may be left by any face") {
+  TwoBoxes two{ { .x = 0, .y = 0, .w = 100, .h = 400 },
+                { .x = 300, .y = 600, .w = 100, .h = 400 } };
+  CHECK(two.turns(ORTHO) == 2);
+  two.z.loop[0] = { .x = 10, .y = 10, .w = 20, .h = 20 };
+  CHECK(two.turns(ORTHO) == 1);  // A's right face, then down into B's top
+}
+
+TEST_CASE("cost bound: a waypoint bounds no turn") {
+  // A route may leave its waypoint as a spike its simplification drops.
+  TwoBoxes two{ { .x = 0, .y = 0, .w = 100, .h = 400 },
+                { .x = 300, .y = 0, .w = 100, .h = 400 } };
+  two.z.node = { { .x = 200, .y = 900 } };
+  two.bends[0] = { 0 };
+  CHECK(two.turns(ANY_FACE, { face_word(0, 0, 1), face_word(0, 1, 0) }) == 0);
+  // The waypoint still aims an unnamed end: A and B take their bottom faces.
+  CHECK(two.turns(ORTHO) == 2);
+}
+
+TEST_CASE("cost bound: a straight line every sibling blocks takes two turns") {
+  scav_rect const a{ .x = 0, .y = 0, .w = 100, .h = 400 };
+  scav_rect const b{ .x = 600, .y = 0, .w = 100, .h = 400 };
+  // A sibling across the whole run between the faces.
+  TwoBoxes const wall{ a, b, { { .x = 250, .y = -100, .w = 100, .h = 600 } } };
+  CHECK(wall.turns(ORTHO) == 2);
+  // A sibling across part of it leaves a straight line clear.
+  TwoBoxes const post{ a, b, { { .x = 250, .y = 100, .w = 100, .h = 50 } } };
+  CHECK(post.turns(ORTHO) == 0);
+  // A sibling whose border lies along the run within the border band blocks that line.
+  scav_profile const p{ profile() };
+  int32_t const band{ border_band(p) };
+  TwoBoxes const strip{ { .x = 0, .y = 0, .w = 100, .h = 3 * band },
+                        { .x = 600, .y = 0, .w = 100, .h = 3 * band },
+                        { { .x = 250, .y = -band, .w = 100, .h = 2 * band },
+                          { .x = 250, .y = 2 * band, .w = 100, .h = 2 * band } } };
+  CHECK(strip.turns(ORTHO) == 2);
+  // A sibling beyond the faces' span blocks nothing.
+  TwoBoxes const beside{ a, b, { { .x = 900, .y = -100, .w = 100, .h = 600 } } };
+  CHECK(beside.turns(ORTHO) == 0);
+}
+
+TEST_CASE("cost bound: an inner loop takes two bends, a self-transition none") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  build_trans(c, a, a, TransKind::Internal, {});
+  build_trans(c, a, a, TransKind::External, {});
+  SplitGraph const g{ decompose(c) };
+  SizedLayout z{ sized(c) };
+  z.state[a.v] = { .x = 0, .y = 0, .w = 400, .h = 400 };
+  z.chart = z.state[a.v];
+  scav_profile const p{ profile() };
+  CostTerms const t{ cost_bound(c, g, {}, z, {}, p, route_clearance(p), ORTHO) };
+  CHECK(t.bends == 2);
+  CHECK(t.length == 0);
+}
+
+TEST_CASE("cost bound: unseated, an unnamed end may leave from anywhere on its box") {
+  scav_profile const p{ profile() };
+  int32_t const clear{ route_clearance(p) };
+  auto const unseated = [&](scav_rect const &a,
+                            scav_rect const &b,
+                            std::vector<uint32_t> const &faces = {}) {
+    TwoBoxes const two{ a, b };
+    return cost_bound(two.c, two.g, two.bends, two.z, faces, p, clear, ORTHO, false).bends;
+  };
+  scav_rect const a{ .x = 0, .y = 0, .w = 100, .h = 400 };
+  scav_rect const diagonal{ .x = 300, .y = 600, .w = 100, .h = 400 };
+  CHECK(unseated(a, diagonal) == 1);
+  CHECK(unseated(a, { .x = 300, .y = 400, .w = 100, .h = 400 }) == 0);
+  CHECK(unseated(a, { .x = 300, .y = 100, .w = 100, .h = 400 }) == 0);
+  // A named face is left square from anywhere on it.
+  CHECK(unseated(a, diagonal, { face_word(0, 0, 0) }) == 2);
+}
+
+TEST_CASE("cost bound: each transition's share of the bends sums to the bound") {
+  TwoBoxes const two{ { .x = 0, .y = 0, .w = 100, .h = 400 },
+                      { .x = 300, .y = 600, .w = 100, .h = 400 } };
+  scav_profile const p{ profile() };
+  std::vector<int32_t> share;
+  CostTerms const t{ cost_bound(two.c,
+                                two.g,
+                                two.bends,
+                                two.z,
+                                {},
+                                p,
+                                route_clearance(p),
+                                ORTHO,
+                                true,
+                                &share) };
+  REQUIRE(share.size() == two.c.transitions.size());
+  CHECK(share[0] == t.bends);
 }

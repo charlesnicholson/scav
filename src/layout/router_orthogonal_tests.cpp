@@ -4,6 +4,7 @@
 #include "layout/router_orthogonal.h"
 
 #include "layout/router.h"
+#include "layout/tests/trace_record.h"
 #include "layout/trace.h"
 #include "scav/scav_layout.h"
 #include "scav_int.h"
@@ -16,6 +17,17 @@
 #include <cstdint>
 #include <utility>
 #include <vector>
+
+namespace scav {
+
+// Test-only prototype of the SCAV_INTERNAL turn count in `cost.cpp`.
+int32_t cost_path_turns(scav_rect const &s,
+                        uint32_t s_face,
+                        std::vector<scav_point> const &via,
+                        scav_rect const &t,
+                        uint32_t t_face);
+
+}  // namespace scav
 
 namespace {
 
@@ -2092,6 +2104,39 @@ TEST_CASE("ortho: waypoints are threaded, in the order they were given") {
   CHECK(first < second);
 }
 
+TEST_CASE("ortho: an attached seat lies on the face its aim escapes by") {
+  scav_rect const r{ rect(100, 100, 400, 200) };
+  for (int32_t x = -200; x <= 800; x += 50) {
+    for (int32_t y = -200; y <= 600; y += 50) {
+      CAPTURE(x);
+      CAPTURE(y);
+      scav_point const seat{ ortho_attach_box(pt(x, y), r, 96, false, 24) };
+      CHECK(face_of(seat, r) == ortho_escape_face(pt(x, y), r));
+    }
+  }
+}
+
+TEST_CASE("ortho: a waypoint a route doubles back from is dropped with its turns") {
+  // Up to the waypoint and back down the same line: the spike is simplified away.
+  RouteInput in;
+  in.profile = profile();
+  in.region = rect(0, 0, 1000, 1000);
+  in.waypoints.push_back(pt(0, 100));
+  in.nets.push_back(
+      { .src = pt(0, 500), .dst = pt(600, 500), .waypoint_off = 0, .waypoint_len = 1 });
+  RouteOutput out;
+  ORTHO.route(in, out);
+
+  REQUIRE(out.net_points.size() == 1);
+  CHECK(out.metrics[0].failed == RouteFailure::None);
+  scav_span const at{ out.net_points[0] };
+  for (uint32_t k = 0; k < at.len; ++k) { CHECK(!(out.points[at.off + k] == pt(0, 100))); }
+  CHECK(route_bends(out, 0) == 0);
+  // A path through the waypoint turns once.
+  CHECK(cost_path_turns(rect(0, 500, 0, 0), 4, { pt(0, 100) }, rect(600, 500, 0, 0), 4) ==
+        1);
+}
+
 TEST_CASE("ortho: a stubbed end leaves along its stub before it turns") {
   // Level ends run straight across; a stub straight up from the source sends the route up
   // to it first, with or without a corridor.
@@ -2973,11 +3018,11 @@ TEST_CASE(
   in.nets[0].dst = pt(3500, 3000);
   in.nets[1].seg = 7;
   auto const traced = [&](RouteOutput &out, TraceKind kind) {
-    LayoutTrace trace;
+    TraceRecord trace;
     trace_sink_set(&trace);
     ORTHO.route(in, out);
     trace_sink_set(nullptr);
-    return std::ranges::count_if(trace.events, [kind](TraceEvent const &e) {
+    return std::ranges::count_if(trace.events(), [kind](TraceEvent const &e) {
       return (e.kind == kind) && (e.seg.seg == 7);
     });
   };
