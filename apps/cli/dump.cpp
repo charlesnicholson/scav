@@ -1070,8 +1070,7 @@ int run_dump(char const *path,
                                  &taken);
       std::clock_t const ended{ std::clock() };
       std::string line{ "{\"cpu_ms\":" };
-      int64_t const ticks{ static_cast<int64_t>(ended - began) };
-      line += std::to_string((ticks * 1000) / static_cast<int64_t>(CLOCKS_PER_SEC));
+      line += std::to_string((ended - began) / (CLOCKS_PER_SEC / 1000));
       line += ",\"search\":";
       line.append(counts.begin(), counts.end());
       while (!line.empty() && (line.back() == '\n')) { line.pop_back(); }
