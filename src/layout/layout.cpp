@@ -98,6 +98,10 @@ void search_changes(Chart const &c,
                     std::vector<uint8_t> &route,
                     std::vector<uint8_t> &resized);
 uint32_t search_argmin(std::vector<Cost> const &cost, std::vector<uint8_t> const &viable);
+// Orders `rest`, kick indices, by `cost` plus `jit`, ties keeping their order.
+void kick_order(std::vector<uint32_t> &rest,
+                std::vector<Cost> const &cost,
+                std::vector<int64_t> const &jit);
 // Writes to `key` every input of a Level 1 search: the objective, the row, the budget,
 // `refold`, the seed pins in order, and `scope`.
 void search_key(scav_profile const &objective,
@@ -2884,6 +2888,14 @@ Row search_row(scav_profile const &p, uint32_t index) {
   return out;
 }
 
+void kick_order(std::vector<uint32_t> &rest,
+                std::vector<Cost> const &cost,
+                std::vector<int64_t> const &jit) {
+  scav_insertion_sort(rest.data(), rest.data() + rest.size(), [&](uint32_t a, uint32_t b) {
+    return cost_less(jittered(cost[a], jit[a]), jittered(cost[b], jit[b]));
+  });
+}
+
 // The viable row of least cost, lowest index among equals; 0 when none is viable.
 uint32_t search_argmin(std::vector<Cost> const &cost, std::vector<uint8_t> const &viable) {
   uint32_t best{ 0 };
@@ -3385,10 +3397,9 @@ bool layout_run(Chart &c,
       for (uint32_t const j : winners) {
         if (j != single) { vec_push_back(rest, j); }
       }
-      scav_insertion_sort(
-          rest.data(),
-          rest.data() + rest.size(),
-          [&](uint32_t a, uint32_t b) { return cost_less(tried[a].cost, tried[b].cost); });
+      std::vector<Cost> tried_cost(tried.size());
+      for (uint32_t j = 0; j < tried.size(); ++j) { tried_cost[j] = tried[j].cost; }
+      kick_order(rest, tried_cost, jit);
       for (uint32_t const j : rest) {
         std::vector<uint8_t> redo(c.submachines.size(), 0);
         if (kick_frame[j] < redo.size()) { redo[kick_frame[j]] = 1; }

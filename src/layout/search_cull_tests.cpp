@@ -26,6 +26,9 @@ namespace scav {
 
 void search_table(scav_profile const &p, std::vector<uint32_t> &rows);
 Row search_row(scav_profile const &p, uint32_t index);
+void kick_order(std::vector<uint32_t> &rest,
+                std::vector<Cost> const &cost,
+                std::vector<int64_t> const &jit);
 void search_changes(Chart const &c,
                     SizedLayout const &was,
                     Routes const &was_routes,
@@ -483,6 +486,19 @@ TEST_CASE("search: a traced culled search draws what the untraced one ships") {
   Laid const shipped{ lay("dock.scav", culled(), true) };
   CHECK(layout_coordinate_hash(traced) == shipped.coordinate);
   CHECK(layout_structural_hash(traced) == shipped.structural);
+}
+
+TEST_CASE("search: kicks stacked after a round's pick rank by cost plus jitter") {
+  std::vector<Cost> const cost{ { .t0_violations = 0, .t1_hints = 0, .t2 = 100 },
+                                { .t0_violations = 0, .t1_hints = 0, .t2 = 101 },
+                                { .t0_violations = 0, .t1_hints = 0, .t2 = 102 },
+                                { .t0_violations = 0, .t1_hints = 0, .t2 = 101 } };
+  std::vector<uint32_t> rest{ 3, 0, 1, 2 };
+  kick_order(rest, cost, { 0, 0, 0, 0 });
+  CHECK(rest == std::vector<uint32_t>{ 0, 3, 1, 2 });  // ties keep their order
+  rest = { 0, 1, 2, 3 };
+  kick_order(rest, cost, { 5, 0, 0, 3 });
+  CHECK(rest == std::vector<uint32_t>{ 1, 2, 3, 0 });
 }
 
 TEST_CASE("search: a jitter seed draws one drawing at every thread count") {
