@@ -376,11 +376,22 @@ bool on_drawn_edge(SizedLayout const &z,
   return false;
 }
 
-// Marks both transitions of a charged pair in `party`, where given.
-void blame(std::vector<uint8_t> *party, uint32_t a, uint32_t b) {
-  if (party == nullptr) { return; }
-  if (a < party->size()) { (*party)[a] = 1; }
-  if (b < party->size()) { (*party)[b] = 1; }
+// Where each transition is charged, each where given: `party` set to 1, and `amount`
+// raised by `weight` times the term's share.
+struct Charged {
+  std::vector<uint8_t> *party{ nullptr };
+  std::vector<Wide> *amount{ nullptr };
+  Wide weight{ 0 };
+};
+
+// Charges `by` of a term to each of `a` and `b` that names a transition.
+void blame(Charged const &to, uint32_t a, uint32_t b, Wide by) {
+  for (uint32_t const t : { a, b }) {
+    if ((to.party != nullptr) && (t < to.party->size())) { (*to.party)[t] = 1; }
+    if ((to.amount != nullptr) && (t < to.amount->size())) {
+      (*to.amount)[t] += to.weight * by;
+    }
+  }
 }
 
 // The length each pair shares on one line, per `(axis, coordinate)` bucket, less the
@@ -388,7 +399,7 @@ void blame(std::vector<uint8_t> *party, uint32_t a, uint32_t b) {
 Wide corridor_over(Routes const &r,
                    std::vector<Piece> const &pieces,
                    std::vector<Lane> const &lanes,
-                   std::vector<uint8_t> *party,
+                   Charged const &to,
                    int32_t *runs) {
   Wide total{ 0 };
   for (uint32_t lo = 0; lo < lanes.size();) {
@@ -415,7 +426,7 @@ Wide corridor_over(Routes const &r,
         Trunk const pair{ trunk_of(r.points, ru, rv, TRUNK_TAIL, false) };
         if (trunk_piece(pair, ru.len, u.k) && trunk_piece(pair, rv.len, v.k)) { continue; }
         total += shared;
-        blame(party, u.trans, v.trans);
+        blame(to, u.trans, v.trans, shared);
       }
     }
     lo = hi;
@@ -428,7 +439,7 @@ Wide corridor_over(Routes const &r,
 Wide crowding_over(std::vector<Piece> const &pieces,
                    std::vector<Lane> const &lanes,
                    int32_t em,
-                   std::vector<uint8_t> *party) {
+                   Charged const &to) {
   if (em <= 0) { return 0; }
   Wide scaled{ 0 };
   for (uint32_t i = 0; i < lanes.size(); ++i) {
@@ -443,8 +454,9 @@ Wide crowding_over(std::vector<Piece> const &pieces,
       Wide const along{ imin(Wide{ u.hi }, Wide{ v.hi }) -
                         imax(Wide{ u.lo }, Wide{ v.lo }) };
       if (along <= 0) { continue; }
-      scaled += along * (Wide{ em } - apart);
-      blame(party, pieces[u.piece].trans, pieces[v.piece].trans);
+      Wide const crowd{ along * (Wide{ em } - apart) };
+      scaled += crowd;
+      blame(to, pieces[u.piece].trans, pieces[v.piece].trans, crowd / em);
     }
   }
   return scaled / em;
@@ -1134,11 +1146,11 @@ void cost_grid_query(ChildGrid const &g,
 }
 
 [[maybe_unused]] Wide cost_corridor(Routes const &r, std::vector<Piece> const &pieces) {
-  return corridor_over(r, pieces, lanes_of(pieces), nullptr, nullptr);
+  return corridor_over(r, pieces, lanes_of(pieces), {}, nullptr);
 }
 
 [[maybe_unused]] Wide cost_crowding(std::vector<Piece> const &pieces, int32_t em) {
-  return crowding_over(pieces, lanes_of(pieces), em, nullptr);
+  return crowding_over(pieces, lanes_of(pieces), em, {});
 }
 
 [[maybe_unused]] int32_t cost_path_turns(scav_rect const &s,
@@ -1180,9 +1192,16 @@ CostTerms cost_terms(CostContext const &ctx,
                      Routes const &r,
                      scav_spaces const &s,
                      scav_profile const &p,
-                     std::vector<uint8_t> *party) {
+                     std::vector<uint8_t> *party,
+                     std::vector<Wide> *charge) {
   CostTerms t;
   if (party != nullptr) { vec_assign(*party, c.transitions.size(), 0); }
+  if (charge != nullptr) { vec_assign(*charge, c.transitions.size(), 0); }
+  Wide const em{ imax(Wide{ p.font_size_grid }, Wide{ 1 }) };
+  // Per term: a count is charged its weight times the em, a length its weight.
+  auto const by = [&](int32_t weight) {
+    return Charged{ .party = party, .amount = charge, .weight = weight };
+  };
   if (!geometry_complete(c, z, r)) { return t; }
   t.aspect = (Wide{ z.chart.w } * p.dar_den) - (Wide{ z.chart.h } * p.dar_num);
   if (t.aspect < 0) { t.aspect = -t.aspect; }
@@ -1216,10 +1235,11 @@ CostTerms cost_terms(CostContext const &ctx,
                                       r.points[route.off + k + 2]) };
         if (in != out) {
           ++t.bends;
-          if (party != nullptr) { (*party)[tr] = 1; }
+          blame(by(p.w_bends), tr, INVALID, em);
           if (crosses_through &&
               in_transit(c, z, c.transitions[tr], top, r.points[route.off + k + 1])) {
             ++t.transit_bends;
+            blame(by(p.w_transit_bends), tr, INVALID, em);
           }
         }
         // The reverse of `in` is `8 - in`; odd codes are axis-aligned.
@@ -1244,8 +1264,8 @@ CostTerms cost_terms(CostContext const &ctx,
   lanes_of(pieces, sc.key, sc.spare, sc.lanes);
   std::vector<Lane> const &lanes{ sc.lanes };
   t.crossings = crossings_over(pieces, lanes, crossings_of, sc.is_loose);
-  t.corridor = corridor_over(r, pieces, lanes, party, &t.shared_run);
-  t.crowding = crowding_over(pieces, lanes, p.font_size_grid, party);
+  t.corridor = corridor_over(r, pieces, lanes, by(p.w_corridor), &t.shared_run);
+  t.crowding = crowding_over(pieces, lanes, p.font_size_grid, by(p.w_crowding));
 
   // `excess_len` is what a route runs past the larger of its direct distance and its
   // carried boxes, times one plus its crossings; `length` sums every route.
@@ -1269,9 +1289,12 @@ CostTerms cost_terms(CostContext const &ctx,
     Wide const direct{ length_of(r.points[route.off],
                                  r.points[route.off + route.len - 1]) };
     Wide const excess{ actual - imax(direct, carried[tr]) };
-    if (excess > 0) { t.excess_len += excess * (1 + crossings_of[tr]); }
-    if ((party != nullptr) && ((excess > 0) || (crossings_of[tr] != 0))) {
-      (*party)[tr] = 1;
+    if (excess > 0) {
+      t.excess_len += excess * (1 + crossings_of[tr]);
+      blame(by(p.w_excess_len), tr, INVALID, excess * (1 + crossings_of[tr]));
+    }
+    if (crossings_of[tr] != 0) {
+      blame(by(p.w_crossings), tr, INVALID, em * crossings_of[tr]);
     }
   }
 
@@ -1319,7 +1342,7 @@ CostTerms cost_terms(CostContext const &ctx,
       grid_visit(placed, box, 0, [&](uint32_t j) {
         if ((j > i) && overlaps(box, r.placed[j])) {
           ++t.label;
-          blame(party, subject_of(i), subject_of(j));
+          blame(by(p.w_label), subject_of(i), subject_of(j), em);
         }
         return false;
       });
@@ -1350,7 +1373,7 @@ CostTerms cost_terms(CostContext const &ctx,
         uint32_t const st{ state_of[at] };
         if ((encloses[st] == 0) && (st != host) && overlaps(box, state_rect[at])) {
           ++t.label_over_box;
-          blame(party, subject, INVALID);
+          blame(by(0), subject, INVALID, 0);
         }
         return false;
       });
@@ -1364,12 +1387,12 @@ CostTerms cost_terms(CostContext const &ctx,
       };
       if ((host != INVALID) && (c.states[host].live != 0) && banded(host)) {
         ++t.label_over_box;
-        blame(party, subject, INVALID);
+        blame(by(0), subject, INVALID, 0);
       }
       for (uint32_t const st : common) {
         if ((c.states[st].live != 0) && banded(st)) {
           ++t.label;
-          blame(party, subject, INVALID);
+          blame(by(p.w_label), subject, INVALID, em);
         }
       }
       // -1 until a leg of that kind is seen; `label_near` counts only a subject with both
@@ -1381,13 +1404,13 @@ CostTerms cost_terms(CostContext const &ctx,
           own = (own < 0) ? away : imin(own, away);
           if (overlaps(box, seg_box[j])) {  // its own line through it
             ++t.label_over_route;
-            blame(party, subject, INVALID);
+            blame(by(0), subject, INVALID, 0);
           }
         }
       }
       if (own > label_leader(p)) {
         ++t.label_far;
-        blame(party, subject, INVALID);
+        blame(by(0), subject, INVALID, 0);
       }
       // Search margin `own + height - 1`, the farthest a foreign leg still adds to
       // `label_near`; 0 with no own leg.
@@ -1401,7 +1424,7 @@ CostTerms cost_terms(CostContext const &ctx,
         other = (other < 0) ? away : imin(other, away);
         if (overlaps(box, seg_box[j])) {
           ++t.label_over_route;
-          blame(party, subject, pieces[j].trans);
+          blame(by(0), subject, pieces[j].trans, 0);
         }
         return false;
       });
@@ -1409,7 +1432,7 @@ CostTerms cost_terms(CostContext const &ctx,
         Wide const shortfall{ (own + height) - other };
         if (shortfall > 0) {
           t.label_near += shortfall;
-          blame(party, subject, nearest);
+          blame(by(p.w_label_near), subject, nearest, shortfall);
         }
       }
       for (uint32_t const st : common) { encloses[st] = 0; }

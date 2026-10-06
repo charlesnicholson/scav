@@ -32,6 +32,9 @@ void write_error(std::string_view what, std::string_view path) {
 
 namespace {
 
+// `--search` values by the profile's `search_cull`.
+constexpr std::array<std::string_view, 2> SEARCHES{ "full", "culled" };
+
 // True when all of `arg` is two colon-separated ordinals, read into `a` and `b`.
 bool ordinal_pair(std::string_view arg, uint32_t &a, uint32_t &b) {
   size_t const colon{ arg.find(':') };
@@ -86,9 +89,13 @@ bool read_value(std::string_view flag, std::string_view value, LayoutArgs &out) 
     return true;
   }
   if (flag == "--search") {
-    if ((value != "full") && (value != "culled")) { return false; }
-    out.culled = value == "culled";
-    return true;
+    for (size_t k = 0; k < SEARCHES.size(); ++k) {
+      if (value == SEARCHES[k]) {
+        out.search = static_cast<int32_t>(k);
+        return true;
+      }
+    }
+    return false;
   }
   if (flag == "--jitter-seed") {
     std::from_chars_result const got{
@@ -177,7 +184,7 @@ ArgRead read_layout_arg(int argc, char **argv, int &i, LayoutArgs &out) {
 
 void apply_layout_args(LayoutArgs const &args, scav_profile &p) {
   if (args.no_search) { p.portfolio_k = 0; }
-  p.search_cull = args.culled ? 1 : 0;
+  p.search_cull = args.search;
   p.jitter_seed = args.jitter_seed;
 }
 
@@ -198,7 +205,11 @@ void append_layout_args(std::string &out,
     out += args.profile;
     out += ' ';
   }
-  if (args.culled) { out += "--search culled "; }
+  if (args.search != 0) {
+    out += "--search ";
+    out += SEARCHES[static_cast<size_t>(args.search)];
+    out += ' ';
+  }
   if (args.jitter_seed != 0) {
     out += "--jitter-seed ";
     string_append_u32(out, static_cast<uint32_t>(args.jitter_seed));

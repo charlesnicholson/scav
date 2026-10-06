@@ -335,6 +335,53 @@ TEST_CASE(
   CHECK(party[3] != 0);
 }
 
+TEST_CASE("cost: charge is each transition's weighted terms, a pair's to both of it") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  for (uint32_t i = 0; i < 4; ++i) { build_trans(c, a, b, TransKind::Default, {}); }
+  scav_profile const p{ profile() };
+  Wide const em{ p.font_size_grid };
+
+  // A bent route, two crossing diagonals, and a clear route.
+  Routes const r{ routes_of(
+      c,
+      { { { .x = 0, .y = 0 }, { .x = 100, .y = 0 }, { .x = 100, .y = 100 } },
+        { { .x = 300, .y = 0 }, { .x = 400, .y = 100 } },
+        { { .x = 300, .y = 100 }, { .x = 400, .y = 0 } },
+        { { .x = 1000, .y = 1000 }, { .x = 1100, .y = 1000 } } }) };
+  SplitGraph const g{ decompose(c) };
+  std::vector<uint8_t> party;
+  std::vector<Wide> charge;
+  (void)cost_terms(cost_context(c, g), c, g, blank(c), r, {}, p, &party, &charge);
+  REQUIRE(charge.size() == 4);
+  // The bend, and 200 run where the direct distance is 141.
+  CHECK(charge[0] == (Wide{ p.w_bends } * em) + (Wide{ p.w_excess_len } * (200 - 141)));
+  CHECK(charge[1] == Wide{ p.w_crossings } * em);
+  CHECK(charge[2] == Wide{ p.w_crossings } * em);
+  CHECK(charge[3] == 0);
+
+  // A run of 300 shared on one line, then two routes half an em apart over 1000.
+  Routes const shared{ routes_of(
+      c,
+      { { { .x = 0, .y = 60 }, { .x = 500, .y = 60 } },
+        { { .x = 100, .y = 60 }, { .x = 400, .y = 60 } },
+        { { .x = 0, .y = 1000 }, { .x = 1000, .y = 1000 } },
+        { { .x = 0, .y = 1000 + (p.font_size_grid / 2) },
+          { .x = 1000, .y = 1000 + (p.font_size_grid / 2) } } }) };
+  CostTerms const t{
+    cost_terms(cost_context(c, g), c, g, blank(c), shared, {}, p, &party, &charge)
+  };
+  CHECK(t.corridor == 300);
+  CHECK(t.crowding == 500);
+  CHECK(charge[0] == Wide{ p.w_corridor } * 300);
+  CHECK(charge[1] == Wide{ p.w_corridor } * 300);
+  CHECK(charge[2] == Wide{ p.w_crowding } * 500);
+  CHECK(charge[3] == Wide{ p.w_crowding } * 500);
+  for (uint32_t i = 0; i < 4; ++i) { CHECK((party[i] != 0) == (charge[i] != 0)); }
+}
+
 TEST_CASE("cost: party marks every transition while the drawing breaks Tier 0") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };

@@ -70,6 +70,8 @@ CostContext cost_context(Chart const &c, SplitGraph const &g);
 
 // `ctx` is `cost_context(c, g)`. `party`, if given, is all 1 on a Tier 0 violation, else 1
 // per transition that bends or carries crossings, corridor, crowding, excess_len or label.
+// `charge`, if given, is per transition the weighted Tier 2 those terms charge it, scaled
+// by the em; a pair's term is charged to both.
 CostTerms cost_terms(CostContext const &ctx,
                      Chart const &c,
                      SplitGraph const &g,
@@ -77,7 +79,8 @@ CostTerms cost_terms(CostContext const &ctx,
                      Routes const &r,
                      scav_spaces const &s,
                      scav_profile const &p,
-                     std::vector<uint8_t> *party = nullptr);
+                     std::vector<uint8_t> *party = nullptr,
+                     std::vector<Wide> *charge = nullptr);
 
 // The same with a context built for this one call.
 CostTerms cost_terms(Chart const &c,
