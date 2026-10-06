@@ -154,15 +154,23 @@ TEST_CASE(
   CHECK(memo.arrangement(plain) == arranged);
 
   // Numbered against another ordering's encoding, a frame takes the number it would take
-  // anyway.
+  // anyway. A call to `other` between clears the thread's last numbering in `memo`.
   CandidateMemo::Blocks encoded;
   REQUIRE(memo.frame_ids(plain, fresh, nullptr, &encoded));
   CHECK(fresh == a);
   CHECK(encoded.ids == a);
+  REQUIRE(other.frame_ids(plain, fresh));
+  std::vector<uint32_t> alone;
+  REQUIRE(memo.frame_ids(moved, alone));
+  REQUIRE(other.frame_ids(plain, fresh));
   std::vector<uint32_t> like;
   REQUIRE(memo.frame_ids(moved, like, &encoded));
+  CHECK(like == alone);
   CHECK(like == b);
-  CHECK(memo.arrangement(moved, &encoded) == memo.arrangement(moved));
+  (void)other.arrangement(plain);
+  uint32_t const moved_alone{ memo.arrangement(moved) };
+  (void)other.arrangement(plain);
+  CHECK(memo.arrangement(moved, &encoded) == moved_alone);
 }
 
 TEST_CASE(
@@ -225,8 +233,13 @@ TEST_CASE(
   wider.node_sep += 1;
   uint32_t const wider_word{ memo.profile_word(wider) };
   CHECK(wider_word != profile);
+  // A drawing in `other` clears the thread's last numbering in `memo`.
+  CandidateMemo other{ f.c, f.g };
+  uint32_t const other_profile{ other.profile_word(f.p) };
+  auto const clear = [&]() { (void)other.drawing(plain, z, other_profile); };
   uint32_t const drawn{ memo.drawing(plain, z, profile) };
   REQUIRE(drawn != INVALID);
+  clear();
   CHECK(memo.drawing(plain, z, profile) == drawn);
   CHECK(memo.drawing(plain, z, wider_word) != drawn);
   CandidateMemo::Blocks kept;
@@ -237,8 +250,11 @@ TEST_CASE(
     SubmachineOrders o{ plain };
     SizedLayout w{ z };
     edit(o, w);
+    clear();
+    uint32_t const alone{ memo.drawing(o, w, profile) };
+    clear();
     uint32_t const out{ memo.drawing(o, w, profile, &kept) };
-    CHECK(memo.drawing(o, w, profile) == out);
+    CHECK(out == alone);
     return out;
   };
   // A nested frame and its first state, a state node, and a segment with a boundary node.
