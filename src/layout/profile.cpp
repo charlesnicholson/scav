@@ -60,7 +60,7 @@ constexpr scav_profile READABLE{
   .w_whitespace = 0,
   .portfolio_k = 1024,
   .portfolio_m = 16,  // every row of the search table
-  .search_cull = 0,
+  .search_cull = 1,
   .kick_rows = 4,
   .jitter_seed = 0,
   .sweep_count = 8,
@@ -116,7 +116,7 @@ constexpr scav_profile COMPACT{
   .w_whitespace = 0,
   .portfolio_k = 1024,
   .portfolio_m = 16,  // every row of the search table
-  .search_cull = 0,
+  .search_cull = 1,
   .kick_rows = 4,
   .jitter_seed = 0,
   .sweep_count = 8,

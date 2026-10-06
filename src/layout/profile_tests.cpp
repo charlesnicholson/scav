@@ -29,9 +29,9 @@ TEST_CASE("profile: both shipped profiles load and pass their own validation") {
     scav_profile const p{ named(name) };
     CHECK(profile_validate(p));
     CHECK(p.profile_version == 17);
-    // Both search every row of the Level 2 table, in full.
+    // Both run the culled search over every row of the Level 2 table.
     CHECK(p.portfolio_m == 16);
-    CHECK(p.search_cull == 0);
+    CHECK(p.search_cull == 1);
     CHECK(p.kick_rows == 4);
     CHECK(p.jitter_seed == 0);
   }

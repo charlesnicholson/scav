@@ -332,7 +332,7 @@ deduped and pruned. `deduped` varies by a few tenths
 of a percent between runs, since two threads can compute one key at once; the drawing
 does not.
 
-`--search culled` runs the culled search (PRD §11.10c) in place of the full one, and
+`--search full` runs the full search (PRD §11.10c) in place of the culled one, the default, and
 `--jitter-seed N` breaks near-equal
 moves and kicks by a hash of `N`. `tools/jitter.py --runs DIR` runs the corpus at both
 scales, for two searches (`--searches full,culled` by default), unperturbed and under

@@ -46,9 +46,10 @@ namespace {
 
 using namespace scav;
 
-scav_profile readable() {
+scav_profile readable() {  // the full search
   scav_profile p{};
   REQUIRE(profile_named("readable", p));
+  p.search_cull = 0;
   return p;
 }
 

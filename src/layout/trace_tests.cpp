@@ -454,6 +454,7 @@ TEST_CASE("trace: the search re-orders per move, and every move states its verdi
   LayoutTrace t;
   scav_layout_opts opts{};
   REQUIRE(profile_named("readable", opts.profile));
+  opts.profile.search_cull = 0;  // the full search
   opts.threads = 1;
   std::vector<scav_placed> placed;
   std::vector<Diagnostic> diags;
@@ -712,6 +713,7 @@ TEST_CASE("trace: the outline names each row's searches, every kick and what a r
   kicked(plain);
   scav_layout_opts opts{};
   REQUIRE(profile_named("readable", opts.profile));
+  opts.profile.search_cull = 0;  // the full search
   std::vector<scav_placed> placed;
   std::vector<Diagnostic> diags;
   REQUIRE(layout_run(plain, {}, opts, placed, diags));

@@ -2,7 +2,7 @@ axis.scav ba82f726 11467
 bottler.scav d5a7e776 24622
 brew.scav 2ac40705 7689
 dock.scav 7df820e2 6396
-elevator.scav 168b1eb7 16254
+elevator.scav ed1bdd01 16266
 estop.scav 57b225e3 2513
 kiln.scav 33edf014 15452
 led.scav e8e46c8f 2519

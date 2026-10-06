@@ -45,7 +45,7 @@ struct LayoutArgs {
   uint32_t row{ INVALID };
   SearchPins pins;
   int32_t jitter_seed{ 0 };
-  int32_t search{ 0 };  // the profile's `search_cull`
+  int32_t search{ -1 };  // the profile's `search_cull`; -1 keeps the profile's
   bool no_search{ false };
   bool no_text{ false };
   bool given{ false };  // any of the flags below appeared
