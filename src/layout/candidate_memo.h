@@ -206,7 +206,7 @@ class CandidateMemo {
 
   // Tables are striped by key hash into shards under their own locks; a number is the
   // shard's `base` plus the key's index, shifted by `SHARD_BITS`, or'd with the shard.
-  static constexpr uint32_t SHARD_BITS{ 8 };
+  static constexpr uint32_t SHARD_BITS{ 6 };
   static constexpr uint32_t SHARDS{ 1U << SHARD_BITS };
   struct IndexShard {
     Mutex lock;
