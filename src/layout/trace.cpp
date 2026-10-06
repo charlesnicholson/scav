@@ -1,7 +1,6 @@
 // The trace sink and its JSON serialization.
 
 #include "layout/trace.h"
-#include "scav_thread.h"
 #include "scav_vec.h"
 
 #include <array>
@@ -182,51 +181,6 @@ LayoutTrace *trace_sink() { return g_sink; }
 void trace_sink_set(LayoutTrace *t) { g_sink = t; }
 LayoutTrace *trace_outline() { return g_outline; }
 void trace_outline_set(LayoutTrace *t) { g_outline = t; }
-
-namespace {
-
-struct StatsSink {
-  Mutex lock;
-  SearchStats *to{ nullptr };
-};
-
-// Allocated on first use and never destroyed.
-StatsSink &stats_sink() {
-  static StatsSink *const INSTANCE{ new StatsSink };
-  return *INSTANCE;
-}
-
-}  // namespace
-
-void search_stats_set(SearchStats *s) {
-  StatsSink &sink{ stats_sink() };
-  ScopedLock const held{ sink.lock };
-  sink.to = s;
-}
-
-void search_stats_add(SearchStats const &add) {
-  StatsSink &sink{ stats_sink() };
-  ScopedLock const held{ sink.lock };
-  SearchStats *const to{ sink.to };
-  if (to == nullptr) { return; }
-  for (uint32_t k = 0; k < TRACE_MOVES; ++k) {
-    to->offered[k] += add.offered[k];
-    to->deduped[k] += add.deduped[k];
-    to->taken[k] += add.taken[k];
-    to->culled[k] += add.culled[k];
-    to->skipped[k] += add.skipped[k];
-    to->pruned[k] += add.pruned[k];
-    to->stopped[k] += add.stopped[k];
-  }
-  to->drawn += add.drawn;
-  to->faced += add.faced;
-  to->searches += add.searches;
-  to->recalled += add.recalled;
-  to->aliased += add.aliased;
-  to->deferred += add.deferred;
-  to->relaid += add.relaid;
-  to->memo_bytes = (add.memo_bytes > to->memo_bytes) ? add.memo_bytes : to->memo_bytes;
-}
 
 void search_stats_to_json(SearchStats const &st, std::vector<char> &out) {
   Json j{ out };

@@ -308,12 +308,6 @@ struct SearchStats {
   uint64_t relaid{ 0 };      // bounds laid out afresh to set a don't-look bit
 };
 
-// The process-wide counts sink, shared by every thread; null when nothing counts.
-void search_stats_set(SearchStats *s);
-
-// Adds `add` to the sink, if one is set; `memo_bytes` takes the larger.
-void search_stats_add(SearchStats const &add);
-
 // One JSON object: the totals, then per move kind its offered, deduped, pruned, stopped,
 // taken, culled and skipped counts.
 void search_stats_to_json(SearchStats const &st, std::vector<char> &out);

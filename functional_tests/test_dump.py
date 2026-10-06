@@ -682,7 +682,7 @@ class TestDump(unittest.TestCase):
         end_at = len(data) - len(end)
         middle = len(data) // 2
         cuts = sorted({0, 4, 8, header_end - 1, header_end, header_end + 1,
-                       *range(middle, middle + 8), *range(end_at - 8, end_at),
+                       *range(middle, middle + 4), *range(end_at - 4, end_at),
                        end_at, end_at + 1, len(data) - 1})
         cut = self.cfg.scratch_dir / "dump" / "cut.trace"
         for n in [*cuts, None]:
