@@ -166,21 +166,16 @@ class CandidateMemo {
 
  private:
   // An entry's unlabelled then labelled score, `t0` a Tier-0 count or a negative tag, and
-  // the Tier 2 each reaches, `bound_hi` negative while unset; the first bounds both.
+  // the Tier 2 each reaches, -1 while unset; the first bounds both.
   struct ScoreRecord {
     std::array<int32_t, 2> t0;
-    std::array<uint32_t, 2> t2_hi;
-    std::array<uint32_t, 2> t2_lo;
-    std::array<int32_t, 2> bound_hi;
-    std::array<uint32_t, 2> bound_lo;
+    std::array<int64_t, 2> t2;
+    std::array<int64_t, 2> bound;
   };
   static_assert(sizeof(ScoreRecord) == 40);
 
   // Writes `r`'s score `k` (0 unlabelled, 1 labelled) to `out`; false while it is unset.
   static bool read(ScoreRecord const &r, uint32_t k, MemoScore &out);
-  // `r`'s bound `k`, -1 while unset; `raise_bound` lifts it to `t2`.
-  static int64_t bound_of(ScoreRecord const &r, uint32_t k);
-  static void raise_bound(ScoreRecord &r, uint32_t k, int64_t t2);
   // Fills `out` with `r`'s answer to a request, as `find_score` gives it.
   static void answer(ScoreRecord const &r, bool labelled, Recalled &out);
 

@@ -614,19 +614,6 @@ void CandidateMemo::store_facing(uint32_t row,
   charge(added);
 }
 
-int64_t CandidateMemo::bound_of(ScoreRecord const &r, uint32_t k) {
-  if (r.bound_hi[k] < 0) { return -1; }
-  return static_cast<int64_t>((uint64_t{ static_cast<uint32_t>(r.bound_hi[k]) } << 32U) |
-                              uint64_t{ r.bound_lo[k] });
-}
-
-void CandidateMemo::raise_bound(ScoreRecord &r, uint32_t k, int64_t t2) {
-  if (t2 <= bound_of(r, k)) { return; }
-  auto const bits{ static_cast<uint64_t>(t2) };
-  r.bound_hi[k] = static_cast<int32_t>(bits >> 32U);
-  r.bound_lo[k] = static_cast<uint32_t>(bits);
-}
-
 void CandidateMemo::answer(ScoreRecord const &r, bool labelled, Recalled &out) {
   if (r.t0[0] == TAG_RETRIED) {
     out.entry = INVALID;
@@ -634,7 +621,7 @@ void CandidateMemo::answer(ScoreRecord const &r, bool labelled, Recalled &out) {
   }
   out.labelled = labelled || (r.t0[0] == TAG_UNSET) || (r.t0[0] == TAG_CLAIMED);
   out.found = read(r, out.labelled ? 1U : 0U, out.score);
-  out.route_bound = labelled ? imax(bound_of(r, 0), bound_of(r, 1)) : bound_of(r, 0);
+  out.route_bound = labelled ? imax(r.bound[0], r.bound[1]) : r.bound[0];
 }
 
 CandidateMemo::Recalled CandidateMemo::find_score(uint32_t drawn,
@@ -661,11 +648,7 @@ CandidateMemo::Recalled CandidateMemo::find_score(uint32_t drawn,
     if (index == INVALID) { return out; }
     out.entry = number(sh.base, index, shard);
     vec_push_back(sh.records,
-                  { .t0 = { TAG_UNSET, TAG_UNSET },
-                    .t2_hi = { 0, 0 },
-                    .t2_lo = { 0, 0 },
-                    .bound_hi = { -1, -1 },
-                    .bound_lo = { 0, 0 } });
+                  { .t0 = { TAG_UNSET, TAG_UNSET }, .t2 = { 0, 0 }, .bound = { -1, -1 } });
   }
   charge(KeyIndex::ENTRY_BYTES + sizeof(ScoreRecord) +
          (uint64_t{ len } * sizeof(uint32_t)));
@@ -738,8 +721,7 @@ bool CandidateMemo::read(ScoreRecord const &r, uint32_t k, MemoScore &out) {
   out.degraded = t0 == TAG_DEGRADED;
   if (t0 >= 0) {
     out.cost.t0_violations = t0;
-    out.cost.t2 =
-        static_cast<int64_t>((uint64_t{ r.t2_hi[k] } << 32U) | uint64_t{ r.t2_lo[k] });
+    out.cost.t2 = r.t2[k];
   }
   return true;
 }
@@ -756,7 +738,7 @@ void CandidateMemo::set_score(uint32_t e, bool labelled, MemoScore const &s) {
   } else if (s.viable) {
     t0 = s.inflated ? TAG_INFLATED : TAG_DEGRADED;
   }
-  auto const t2{ static_cast<uint64_t>(scored ? s.cost.t2 : 0) };
+  int64_t const t2{ scored ? s.cost.t2 : 0 };
   uint32_t const k{ labelled ? 1U : 0U };
   ScoreShard &sh{ scores[e & (SHARDS - 1)] };
   ScopedLock const held{ sh.lock };
@@ -764,8 +746,7 @@ void CandidateMemo::set_score(uint32_t e, bool labelled, MemoScore const &s) {
   if ((index == INVALID) || (sh.records[index].t0[0] == TAG_RETRIED)) { return; }
   ScoreRecord &r{ sh.records[index] };
   r.t0[k] = t0;
-  r.t2_hi[k] = static_cast<uint32_t>(t2 >> 32U);
-  r.t2_lo[k] = static_cast<uint32_t>(t2);
+  r.t2[k] = t2;
 }
 
 void CandidateMemo::set_route_bound(uint32_t e, int64_t t2) {
@@ -773,7 +754,9 @@ void CandidateMemo::set_route_bound(uint32_t e, int64_t t2) {
   ScoreShard &sh{ scores[e & (SHARDS - 1)] };
   ScopedLock const held{ sh.lock };
   uint32_t const index{ index_of(e, sh.base, sh.records.size()) };
-  if (index != INVALID) { raise_bound(sh.records[index], 0, t2); }
+  if (index != INVALID) {
+    sh.records[index].bound[0] = imax(sh.records[index].bound[0], t2);
+  }
 }
 
 Claim CandidateMemo::claim(uint32_t e, bool labelled, MemoScore &out) {
@@ -801,7 +784,7 @@ void CandidateMemo::release(uint32_t e, bool labelled, int64_t t2) {
   ScoreRecord &r{ sh.records[index] };
   uint32_t const k{ labelled ? 1U : 0U };
   if (r.t0[k] == TAG_CLAIMED) { r.t0[k] = TAG_UNSET; }
-  raise_bound(r, k, t2);
+  r.bound[k] = imax(r.bound[k], t2);
 }
 
 void CandidateMemo::set_retried(uint32_t e) {
