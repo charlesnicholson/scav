@@ -1516,6 +1516,64 @@ TEST_CASE("route: a stop ends routing once routed turns lift its bound to it") {
   CHECK(held.stopped);
 }
 
+namespace {
+
+// Pairs of one-rank edges of a frame of `o` whose ends interleave between their ranks.
+int64_t layered_crossings(SubmachineOrders const &o) {
+  int64_t out{ 0 };
+  for (Span const es : o.sub_edges) {
+    for (uint32_t i = 0; i < es.len; ++i) {
+      for (uint32_t j = i + 1; j < es.len; ++j) {
+        std::array<OrderEdge, 2> const e{ o.edges[es.off + i], o.edges[es.off + j] };
+        std::array<uint32_t, 2> low{};   // north end per edge
+        std::array<uint32_t, 2> high{};  // south end per edge
+        bool spans{ true };
+        for (uint32_t k = 0; k < 2; ++k) {
+          OrderNode const &a{ o.nodes[e[k].src] };
+          OrderNode const &b{ o.nodes[e[k].dst] };
+          bool const down{ a.rank < b.rank };
+          spans = spans && (((down ? a.rank : b.rank) + 1) == (down ? b.rank : a.rank));
+          low[k] = down ? e[k].src : e[k].dst;
+          high[k] = down ? e[k].dst : e[k].src;
+        }
+        bool const shared{ (low[0] == low[1]) || (high[0] == high[1]) };
+        if (!spans || shared || (o.nodes[low[0]].rank != o.nodes[low[1]].rank)) {
+          continue;
+        }
+        bool const north{ o.nodes[low[0]].pos < o.nodes[low[1]].pos };
+        bool const south{ o.nodes[high[0]].pos < o.nodes[high[1]].pos };
+        out += (north != south) ? 1 : 0;
+      }
+    }
+  }
+  return out;
+}
+
+}  // namespace
+
+TEST_CASE("route: crossings the laid ordering forces do not bound the routed ones") {
+  // estop with `Tripped` pinned to rank 2 and `Tripped -> Latched` reversed: two edges
+  // interleave between ranks, and the routes go round each other without crossing.
+  scav_profile p{};
+  REQUIRE(profile_named("readable", p));
+  Router const *const router{ router_at(0) };
+  REQUIRE(router != nullptr);
+  Chart c;
+  load_corpus_chart("estop.scav", c);
+  SplitGraph const g{ decompose(c) };
+  SearchPins const pins{ .ranks = { { .state = StateId{ 1 }, .rank = 2 } },
+                         .reverses = { { .trans = TransId{ 1 }, .leg = 0 } } };
+  SubmachineOrders const o{ order_submachines(c, g, {}, p, 1, pins) };
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  REQUIRE(size_layout(c, g, o, {}, p, z, diags));
+  Routes const r{ route_transitions(c, g, o, z, {}, p, *router, 1) };
+  CostTerms const t{ cost_terms(c, g, z, r, {}, p) };
+  CHECK(layered_crossings(o) == 1);
+  CHECK(t.crossings == 0);
+  CHECK(cost_of(t, p).t0_violations == 0);
+}
+
 TEST_CASE("route: a face with no effect at an end changes nothing it draws") {
   // Unmarked faces, at ends with an empty mask and at seated ends, both occur and change
   // nothing; some marked face changes the route.
