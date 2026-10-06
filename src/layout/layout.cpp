@@ -56,6 +56,7 @@ uint32_t layout_test_search_memo_hits();
 uint32_t layout_test_search_memo_mismatches();
 void layout_test_candidate_memo(bool on, bool verify);
 void layout_test_candidate_memo_budget(uint64_t bytes);
+void layout_test_candidate_memo_empty(uint32_t every);
 uint64_t layout_test_candidate_memo_deduped();
 uint64_t layout_test_candidate_memo_drawn();
 uint64_t layout_test_candidate_memo_faced();
@@ -73,6 +74,9 @@ std::vector<Cost> const &layout_test_schedule_kept();
 void layout_test_dont_look_verify(bool on);
 uint64_t layout_test_dont_look_checked();
 uint64_t layout_test_dont_look_mismatches();
+void layout_test_bound_replay(bool on);
+uint64_t layout_test_bound_replayed();
+uint64_t layout_test_bound_replay_mismatches();
 #endif
 
 SCAV_INTERNAL_BEGIN
@@ -954,6 +958,8 @@ uint64_t test_prefix_mismatches{ 0 };
 // against a lay-out without it. The counters tally answers and mismatches.
 bool test_candidate_memo{ true };
 bool test_candidate_memo_verify{ false };
+uint32_t test_candidate_memo_empty{ 0 };  // empty it before every this-many labellings
+uint32_t test_candidate_memo_labellings{ 0 };
 uint64_t test_candidate_memo_budget{ CandidateMemo::BUDGET };
 Mutex test_candidate_memo_lock;
 uint64_t test_candidate_memo_deduped{ 0 };
@@ -1873,6 +1879,12 @@ bool test_dont_look_verify{ false };
 Mutex test_dont_look_lock;
 uint64_t test_dont_look_checked{ 0 };
 uint64_t test_dont_look_mismatches{ 0 };
+
+// Test switch: score each bounded round's moves again after its labelling and set their
+// bits again; the counters tally moves scored again and bits that differ.
+bool test_bound_replay{ false };
+uint64_t test_bound_replayed{ 0 };
+uint64_t test_bound_replay_mismatches{ 0 };
 #endif
 
 // Suspends this thread's trace sink for its scope.
@@ -2442,9 +2454,27 @@ Improved run_search(Chart const &c,
         return scored;
       };
       score_round(n, threads, again, bound, deferred);
+#ifdef SCAV_TESTING
+      if ((test_candidate_memo_empty != 0) && (access.table != nullptr)) {
+        bool due{ false };
+        {
+          ScopedLock const locked{ test_candidate_memo_lock };
+          due = ((++test_candidate_memo_labellings) % test_candidate_memo_empty) == 0;
+        }
+        if (due) { access.table->empty(); }
+      }
+#endif
       win = least_by_bound(n, out.cost, jit, got, order, exact);
       kept_n = 0;
 #ifdef SCAV_TESTING
+      for (uint32_t i = 0; test_bound_replay && culled_search && (i < n); ++i) {
+        MemoUse use;
+        Scored const rescored{ score(i, false, use, nullptr) };
+        uint8_t const bit{ bound_idle(i, rescored, use.deduped && use.labelled, use) };
+        ScopedLock const locked{ test_dont_look_lock };
+        ++test_bound_replayed;
+        test_bound_replay_mismatches += (bit != dont_look_now[i]) ? 1U : 0U;
+      }
       if (test_label_bound_verify) {
         verify_bounded_round(n,
                              threads,
@@ -3701,6 +3731,11 @@ void layout_test_search_memo(bool on) { test_search_memo = on; }
 void layout_test_candidate_memo_budget(uint64_t bytes) {
   test_candidate_memo_budget = bytes;
 }
+void layout_test_candidate_memo_empty(uint32_t every) {
+  ScopedLock const held{ test_candidate_memo_lock };
+  test_candidate_memo_empty = every;
+  test_candidate_memo_labellings = 0;
+}
 void layout_test_candidate_memo(bool on, bool verify) {
   test_candidate_memo = on;
   test_candidate_memo_verify = verify;
@@ -3775,6 +3810,20 @@ uint64_t layout_test_dont_look_checked() {
 uint64_t layout_test_dont_look_mismatches() {
   ScopedLock const held{ test_dont_look_lock };
   return test_dont_look_mismatches;
+}
+void layout_test_bound_replay(bool on) {
+  ScopedLock const held{ test_dont_look_lock };
+  test_bound_replay = on;
+  test_bound_replayed = 0;
+  test_bound_replay_mismatches = 0;
+}
+uint64_t layout_test_bound_replayed() {
+  ScopedLock const held{ test_dont_look_lock };
+  return test_bound_replayed;
+}
+uint64_t layout_test_bound_replay_mismatches() {
+  ScopedLock const held{ test_dont_look_lock };
+  return test_bound_replay_mismatches;
 }
 #endif
 

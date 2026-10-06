@@ -39,6 +39,10 @@ uint64_t layout_test_dont_look_checked();
 uint64_t layout_test_dont_look_mismatches();
 void layout_test_label_bound(bool on, bool verify);
 void layout_test_search_memo(bool on);
+void layout_test_candidate_memo_empty(uint32_t every);
+void layout_test_bound_replay(bool on);
+uint64_t layout_test_bound_replayed();
+uint64_t layout_test_bound_replay_mismatches();
 
 }  // namespace scav
 
@@ -68,6 +72,8 @@ struct SwitchGuard {
     layout_test_dont_look_verify(false);
     layout_test_label_bound(true, false);
     layout_test_search_memo(true);
+    layout_test_candidate_memo_empty(0);
+    layout_test_bound_replay(false);
   }
 };
 
@@ -407,6 +413,46 @@ TEST_CASE("search: the culled search reaches one drawing with the label bound on
     check_same_drawing(whole, bounded);
     CHECK(whole.offered == bounded.offered);
     CHECK(whole.skipped == bounded.skipped);
+  }
+}
+
+TEST_CASE(
+    "search: a candidate memo emptied before labelling leaves the culled search as it "
+    "is") {
+  // Labelling then lays out afresh moves the bound pass answered from the memo.
+  SwitchGuard const guard;
+  layout_test_search_memo(false);
+  for (char const *name : { "brew.scav", "dock.scav", "kiln.scav" }) {
+    std::string const chart{ name };
+    CAPTURE(chart);
+    Laid const want{ lay(name, culled(), true, 1) };
+    for (uint32_t const every : { 1U, 3U }) {
+      CAPTURE(every);
+      layout_test_candidate_memo_empty(every);
+      Laid const got{ lay(name, culled(), true, 1) };
+      check_same_drawing(got, want);
+      CHECK(got.offered == want.offered);
+      CHECK(got.taken == want.taken);
+      CHECK(got.skipped == want.skipped);
+    }
+    layout_test_candidate_memo_empty(0);
+  }
+}
+
+TEST_CASE("search: a bound pass scored again after its labelling sets the same bits") {
+  SwitchGuard const guard;
+  layout_test_search_memo(false);
+  for (uint32_t const every : { 0U, 3U }) {
+    for (char const *name : { "brew.scav", "dock.scav", "kiln.scav" }) {
+      CAPTURE(every);
+      std::string const chart{ name };
+      CAPTURE(chart);
+      layout_test_candidate_memo_empty(every);
+      layout_test_bound_replay(true);
+      (void)lay(name, culled(), true, 1);
+      CHECK(layout_test_bound_replayed() > 0);
+      CHECK(layout_test_bound_replay_mismatches() == 0);
+    }
   }
 }
 

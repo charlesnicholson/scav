@@ -116,7 +116,10 @@ struct Laid {
 
 // With `labelled`, a path box for every routed transition, so a layout places labels;
 // with `culled`, the culled search.
-Laid lay_out(char const *name, bool labelled = false, bool culled = false) {
+Laid lay_out(char const *name,
+             bool labelled = false,
+             bool culled = false,
+             uint32_t threads = 0) {
   std::string path{ SCAV_TEST_DATA_DIR "/charts/" };
   path += name;
   Loader loader;
@@ -139,7 +142,7 @@ Laid lay_out(char const *name, bool labelled = false, bool culled = false) {
   std::vector<scav_placed> placed;
   scav_profile p{ readable() };
   p.search_cull = culled ? 1 : 0;
-  scav_layout_opts const opts{ .profile = p, .router = 0, .threads = 0 };
+  scav_layout_opts const opts{ .profile = p, .router = 0, .threads = threads };
   Laid out;
   out.ok = layout_run(c, s, opts, placed, diags);
   out.structural = layout_structural_hash(c);

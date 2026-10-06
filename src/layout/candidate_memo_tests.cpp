@@ -481,6 +481,36 @@ TEST_CASE("candidate memo: a released claim leaves the score unset and the bound
   CHECK(back.route_bound == 70);
 }
 
+TEST_CASE("candidate memo: a labelled release bounds only labelled requests") {
+  Fixture const f;
+  CandidateMemo memo{ f.c, f.g };
+  SubmachineOrders const plain{ f.order() };
+  uint32_t const drawn{ memo.drawing(plain, f.size(plain), memo.profile_word(f.p)) };
+  REQUIRE(drawn != INVALID);
+  std::vector<uint32_t> const none;
+  uint32_t const e{ memo.find_score(drawn, none, false).entry };
+  REQUIRE(e != INVALID);
+  MemoScore got;
+  REQUIRE(memo.claim(e, true, got) == Claim::Taken);
+  memo.release(e, true, 90);
+  CHECK(memo.recall(e, false).route_bound == -1);
+  CHECK(memo.find_score(drawn, none, false).route_bound == -1);
+  CHECK(memo.recall(e, true).route_bound == 90);
+  CHECK(memo.find_score(drawn, none, true).route_bound == 90);
+  memo.set_route_bound(e, 40);
+  CHECK(memo.recall(e, false).route_bound == 40);
+  CHECK(memo.recall(e, true).route_bound == 90);
+  // An unlabelled release bounds both requests.
+  REQUIRE(memo.claim(e, false, got) == Claim::Taken);
+  memo.release(e, false, 60);
+  CHECK(memo.recall(e, false).route_bound == 60);
+  CHECK(memo.recall(e, true).route_bound == 90);
+  REQUIRE(memo.claim(e, false, got) == Claim::Taken);
+  memo.release(e, false, 120);
+  CHECK(memo.recall(e, false).route_bound == 120);
+  CHECK(memo.recall(e, true).route_bound == 120);
+}
+
 TEST_CASE("candidate memo: a route bound comes back beside a score it does not answer") {
   Fixture const f;
   CandidateMemo memo{ f.c, f.g };
