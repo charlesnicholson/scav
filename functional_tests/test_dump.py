@@ -587,6 +587,60 @@ class TestDump(unittest.TestCase):
         self.assertEqual(f"scav: cannot write the trace '{path}'\n", result.stderr)
         self.assertFalse(path.exists())
 
+    def test_trace_prints_nothing_for_a_cut_trace_file(self) -> None:
+        """A real trace cut anywhere, mid-record and just before its end record among
+        the cuts, prints nothing to stdout, however much of it decodes first."""
+        states = 1000
+        chart = self.write("chain.scav", "chart g {\n"
+                           + "".join(f"  state S{i},\n" for i in range(states))
+                           + "".join(f"  trans S{i} -> S{i + 1},\n"
+                                     for i in range(states - 1))
+                           + "}\n")
+        whole = self.cfg.scratch_dir / "dump" / "chain.trace"
+        whole.unlink(missing_ok=True)
+        made = self.run_dump("--layout", "--no-text", "--portfolio-row", "0",
+                             "--no-search", "--trace", "--trace-file", whole, chart)
+        self.assertEqual(0, made.returncode, made.stderr)
+        read = self.run_trace(whole)
+        self.assertEqual(0, read.returncode, read.stderr)
+        self.assertGreater(len(read.stdout), 1 << 19)
+        data = whole.read_bytes()
+
+        def varint(at: int) -> tuple[int, int]:
+            """The varint at `at` and the offset after it."""
+            value, shift = 0, 0
+            while data[at] & 0x80:
+                value |= (data[at] & 0x7F) << shift
+                at, shift = at + 1, shift + 7
+            return value | (data[at] << shift), at + 1
+
+        def encoded(value: int) -> bytes:
+            out = bytearray()
+            while value >= 0x80:
+                out.append((value & 0x7F) | 0x80)
+                value >>= 7
+            return bytes(out + bytes([value]))
+
+        # Magic, version, then the length of the rest of the header.
+        _, at = varint(8)
+        length, at = varint(at)
+        header_end = at + length
+        end = bytes([0xFF]) + encoded(len(json.loads(read.stdout)))
+        self.assertTrue(data.endswith(end))
+        end_at = len(data) - len(end)
+        middle = len(data) // 2
+        cuts = sorted({0, 4, 8, header_end - 1, header_end, header_end + 1,
+                       *range(middle, middle + 8), *range(end_at - 8, end_at),
+                       end_at, end_at + 1, len(data) - 1})
+        cut = self.cfg.scratch_dir / "dump" / "cut.trace"
+        for n in [*cuts, None]:
+            with self.subTest(cut=n):
+                cut.write_bytes(data[:n] if n is not None else data + b"\0")
+                result = self.run_trace(cut)
+                self.assertEqual(2, result.returncode)
+                self.assertEqual("", result.stdout)
+                self.assertEqual(f"scav: not a whole trace file '{cut}'\n", result.stderr)
+
     def test_trace_prints_only_a_whole_trace_file(self) -> None:
         chart = self.write("not_a.trace", "chart g {\n  state A,\n}\n")
         result = self.run_trace(chart)

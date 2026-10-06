@@ -127,14 +127,23 @@ bool trace_layout(Chart &c,
   return written && trace_decode_end(json);
 }
 
+// Checks the whole file, then prints it; a file that is not one whole trace prints
+// nothing.
 int run_trace(char const *path) {
   std::FILE *const f{ std::fopen(path, "rb") };
+  TraceDecoder check;
+  if ((f == nullptr) || !feed_file(f, check) || !trace_decode_end(check)) {
+    if (f != nullptr) { std::ignore = std::fclose(f); }
+    write_error("not a whole trace file", path);
+    return EXIT_UNUSABLE;
+  }
   TraceDecoder json;
   json.write = write_stdout;
-  bool const printed{ (f != nullptr) && feed_file(f, json) && trace_decode_end(json) };
-  if (f != nullptr) { std::ignore = std::fclose(f); }
+  bool const printed{ (std::fseek(f, 0, SEEK_SET) == 0) && feed_file(f, json) &&
+                      trace_decode_end(json) };
+  std::ignore = std::fclose(f);
   if (!printed) {
-    write_error("not a whole trace file", path);
+    write_error("cannot write the trace", "-");
     return EXIT_UNUSABLE;
   }
   return EXIT_CLEAN;
