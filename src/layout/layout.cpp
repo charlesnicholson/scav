@@ -2759,8 +2759,8 @@ bool test_no_search{ false };               // forces a zero move budget
 bool test_row_alias{ true };                // rows whose canonical rows match search once
 uint32_t test_search_memo_hits{ 0 };        // under the layout's memo lock
 uint32_t test_search_memo_mismatches{ 0 };  // under the layout's memo lock
-// Per row of the last searched layout: each schedule's cost, and the one kept.
-std::vector<Cost> test_schedule_first, test_schedule_second, test_schedule_kept;
+// Per row of this thread's last searched layout: each schedule's cost, and the one kept.
+thread_local std::vector<Cost> test_schedule_first, test_schedule_second, test_schedule_kept;
 
 bool same_result(Improved const &a, Improved const &b) {
   return (a.viable == b.viable) && same_cost(a.cost, b.cost) &&
