@@ -599,7 +599,6 @@ TEST_CASE("candidate memo: past its budget it empties, and issues no number twic
   Fixture const f;
   // A budget one entry fills: every insert past the first empties the tables.
   CandidateMemo memo{ f.c, f.g, 1 };
-  uint32_t const row{ memo.row_word(f.row) };
   SubmachineOrders const plain{ f.order() };
   uint32_t const drawn{ memo.drawing(plain, f.size(plain), memo.profile_word(f.p)) };
   REQUIRE(drawn != INVALID);
@@ -619,13 +618,40 @@ TEST_CASE("candidate memo: past its budget it empties, and issues no number twic
   REQUIRE(again != INVALID);
   CHECK(again != e);
   CHECK_FALSE(memo.find_score(drawn, none, true).found);
-  // A link to an entry since emptied away reads nothing.
   uint32_t const plain_at{ memo.arrangement(plain) };
   REQUIRE(plain_at != INVALID);
-  memo.link(memo.find_ordering(row, plain_at, none).key, again);
-  CHECK_FALSE(memo.recall(memo.find_ordering(row, plain_at, none).entry, true).found);
   uint32_t const moved{ memo.arrangement(f.order(f.moved_rank())) };
   REQUIRE(moved != INVALID);
   CHECK(moved != plain_at);
   CHECK(memo.peak_bytes() > 0);
+}
+
+TEST_CASE("candidate memo: a link to an entry since emptied away reads nothing") {
+  Fixture const f;
+  CandidateMemo memo{ f.c, f.g };
+  uint32_t const row{ memo.row_word(f.row) };
+  SubmachineOrders const plain{ f.order() };
+  uint32_t const drawn{ memo.drawing(plain, f.size(plain), memo.profile_word(f.p)) };
+  uint32_t const plain_at{ memo.arrangement(plain) };
+  REQUIRE(drawn != INVALID);
+  REQUIRE(plain_at != INVALID);
+  std::vector<uint32_t> const none;
+  uint32_t const old{ memo.find_score(drawn, none, true).entry };
+  REQUIRE(old != INVALID);
+  memo.empty();
+  // The same key takes a new entry at the old one's shard and index, and a score.
+  uint32_t const now{ memo.find_score(drawn, none, true).entry };
+  REQUIRE(now != INVALID);
+  CHECK(now != old);
+  memo.set_score(
+      now,
+      true,
+      { .cost = { .t0_violations = 0, .t1_hints = 0, .t2 = 9 }, .viable = true });
+  REQUIRE(memo.recall(now, true).found);
+  uint32_t const key{ memo.find_ordering(row, plain_at, none).key };
+  REQUIRE(key != INVALID);
+  memo.link(key, old);
+  CandidateMemo::Linked const linked{ memo.find_ordering(row, plain_at, none) };
+  CHECK(linked.entry == old);
+  CHECK_FALSE(memo.recall(linked.entry, true).found);
 }

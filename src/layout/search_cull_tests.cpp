@@ -486,15 +486,15 @@ TEST_CASE("search: a traced culled search draws what the untraced one ships") {
 }
 
 TEST_CASE("search: a jitter seed draws one drawing at every thread count") {
-  // Seed 0 is the unperturbed search; a seed breaks near-ties the same way on any thread.
+  // A seed breaks near-ties the same way on any thread; seed 7 moves kiln.
   for (bool const cull : { false, true }) {
     CAPTURE(cull);
     scav_profile p{ cull ? culled() : readable() };
+    REQUIRE(p.jitter_seed == 0);
     Laid const plain{ lay("kiln.scav", p, false) };
-    p.jitter_seed = 0;
-    check_same_drawing(lay("kiln.scav", p, false), plain);
     p.jitter_seed = 7;
     Laid const one{ lay("kiln.scav", p, false, 1) };
+    CHECK(one.pins != plain.pins);
     check_same_drawing(lay("kiln.scav", p, false, 0), one);
   }
 }

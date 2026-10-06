@@ -204,7 +204,7 @@ int64_t timed(Chart &c, uint32_t threads) {
 }  // namespace
 
 TEST_CASE("determinism: the corpus lays out to one answer at every thread count") {
-  // Four Level 2 rows: both box packers, each with and without compaction.
+  // Rows 0-3; the culled search lays out rows 0 and 1, which compact nothing.
   scav_profile p{ readable() };
   p.portfolio_m = 4;
   // A move budget of 24, below the shipped 1024; the next case runs the shipped depth.
