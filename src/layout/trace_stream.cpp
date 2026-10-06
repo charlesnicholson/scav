@@ -549,7 +549,7 @@ void trace_put(LayoutTrace &t, TraceEvent const &e) {
 TraceStream::TraceStream(Chart const &c, TraceTo const &to)
     : json(json_out(to.write, to.ctx)),
       to_file(to.path != nullptr),
-      open(!to_file || atomic_file_open(file, to.path)),
+      open(to_file ? atomic_file_open(file, to.path) : (to.write != nullptr)),
       queue(to_file ? atomic_file_write : json_write,
             to_file ? static_cast<void *>(&file) : static_cast<void *>(&json),
             TRACE_QUEUE_DEPTH),

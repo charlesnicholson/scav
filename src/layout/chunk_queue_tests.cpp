@@ -69,8 +69,7 @@ TEST_CASE("chunk queue: closing with nothing pushed writes nothing") {
   CHECK(seen.calls == 0U);
 }
 
-// The writer sleeps per chunk, so a producer that never waited would run `depth` or more
-// chunks ahead of it.
+// The writer sleeps 2 ms per chunk.
 TEST_CASE("chunk queue: a slow writer blocks the producer and bounds the chunks alive") {
   constexpr uint32_t DEPTH{ 3 };
   constexpr uint32_t CHUNKS{ 40 };
@@ -112,13 +111,12 @@ TEST_CASE("chunk queue: a slow writer blocks the producer and bounds the chunks 
   }
   CHECK(slow.seen.bytes == want);
   CHECK(slow.most <= DEPTH + 1U);
-  // Storage is recycled: the queue's slots and the producer's chunk, nothing more.
+  // Storage is recycled: the writer sees at most the slots and the producer's chunk.
   CHECK(slow.seen.buffers.size() <= DEPTH + 1U);
   if (threaded) { CHECK(waited >= CHUNKS - DEPTH - 1U); }
 }
 
-// The writer holds its first chunk until the test opens a gate, so the queue fills and
-// the producer must stop at exactly `depth` pushes.
+// The writer holds its first chunk until the test opens a gate.
 TEST_CASE("chunk queue: a producer stops at depth chunks until the writer frees one") {
   constexpr uint32_t DEPTH{ 3 };
   struct Gated {
@@ -135,7 +133,6 @@ TEST_CASE("chunk queue: a producer stops at depth chunks until the writer frees 
   };
   ChunkQueue q{ write, &gated, DEPTH };
   if (!q.threaded()) {
-    // Without a writer thread the producer itself would wait at the gate.
     gated.open.store(true);
     CHECK(q.close());
     return;

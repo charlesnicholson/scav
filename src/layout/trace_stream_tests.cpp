@@ -1,5 +1,4 @@
-// The trace's binary encoding: round trips, streaming decode, malformed streams, and a
-// reader that knows only the header. Then streams: the file's atomic replacement, failed
+// The trace's encoding, decoding and header; then streams: the file's replacement, failed
 // writes, and traced runs whose streamed JSON is their in-memory trace's.
 
 #include "layout/trace_stream.h"
@@ -27,8 +26,7 @@ namespace {
 
 using namespace scav;
 
-// Field values by set: each field of an event takes the set after its predecessor's, so
-// neighbouring fields differ and every field meets every extreme across the sets.
+// Field values by set; field `j` of an event made at set `s` takes set `s + j`.
 struct Values {
   uint32_t u;
   int32_t i;
@@ -51,8 +49,7 @@ constexpr std::array<Values, 7> VALUES{ {
     { 128, -65, -int64_t{ 4294967297 }, 127 },
 } };
 
-// Calls `f` on every payload field of `e`'s kind, `pass` and `frame` first: the test's own
-// statement of which union member each kind carries, read off the emit sites.
+// Calls `f` on `pass`, `frame`, then each field of the union member `e.kind` carries.
 template <typename F>
 void each_field(TraceEvent &e, F &&f) {
   f(e.pass);
@@ -700,6 +697,9 @@ TEST_CASE("trace stream: a file that cannot be created takes no events") {
   trace_put(s.sink(), make(static_cast<uint32_t>(TraceKind::NetPlanned), 1));
   CHECK_FALSE(s.finish());
   CHECK_FALSE(exists(path));
+  TraceStream neither{ c, { .path = nullptr, .write = nullptr, .ctx = nullptr } };
+  CHECK_FALSE(neither.opened());
+  CHECK_FALSE(neither.finish());
 }
 
 TEST_CASE("trace stream: JSON whose write fails fails the stream") {

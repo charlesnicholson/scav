@@ -284,8 +284,8 @@ struct TraceFrame {
 // Chart `c`'s state names by id, empty for a nameless state.
 std::vector<std::string> trace_state_names(Chart const &c);
 
-// Appends `e` as one line's JSON object, without separator or newline, with ordinal `i`
-// and states named from `states`.
+// Appends `e` as one line's JSON object with ordinal `i`, naming states from `states`;
+// the caller writes the separators and newlines between lines.
 void trace_event_json(TraceEvent const &e,
                       uint64_t i,
                       std::vector<std::string> const &states,

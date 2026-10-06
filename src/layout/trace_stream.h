@@ -90,7 +90,7 @@ class TraceStream {
   TraceStream(TraceStream const &) = delete;
   TraceStream &operator=(TraceStream const &) = delete;
 
-  [[nodiscard]] bool opened() const { return open; }  // false when no file was created
+  [[nodiscard]] bool opened() const { return open; }  // false when `to` cannot be written
   LayoutTrace &sink() { return trace; }               // streams each event put to it
   bool finish();  // ends the stream; true when the whole trace reached `to`
 

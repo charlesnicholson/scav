@@ -207,18 +207,16 @@ enum class TraceScope : uint32_t {
 // Receives a trace's JSON text in order; false stops the trace.
 using TraceWrite = bool (*)(void *ctx, char const *text, size_t n);
 
-// Where `layout_trace` streams a trace: with `path` set, its binary encoding into that
-// file, which appears or is replaced once the whole trace is written; else JSON to
-// `write`.
+// Where `layout_trace` streams: in binary to the file `path`, which appears whole or not
+// at all; with no `path`, as JSON to `write`.
 struct TraceTo {
   char const *path{ nullptr };
   TraceWrite write{ nullptr };
   void *ctx{ nullptr };
 };
 
-// Runs `layout_run` from `pins` with a decision trace attached and streams the trace to
-// `to` in bounded memory. Debug output, unhashed. `streamed` is false when the whole
-// trace did not reach `to`; a file that cannot be created runs nothing.
+// Runs `layout_run` from `pins`, streaming its decision trace to `to` in bounded memory.
+// `streamed` is true when the whole trace reached `to`; an unwritable `to` runs nothing.
 bool layout_trace(Chart &c,
                   scav_spaces const &s,
                   scav_layout_opts const &o,

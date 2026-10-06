@@ -89,9 +89,8 @@ int dispatch(int argc, char **argv) {
         return usage();
       }
     }
-    // `--layout` gates layout flags, `--trace` and `--search-stats`; `--trace` gates its
-    // two scopes and its file. Exclusive: the two scopes, stats and trace, hash and json
-    // or layout.
+    // `--layout` gates layout flags, `--trace` and `--search-stats`; `--trace` its scopes
+    // and file. Exclusive: the two scopes, stats and trace, hash and json or layout.
     if ((path == nullptr) || (hash && (json || layout)) ||
         ((trace_search || trace_outline || (trace_file != nullptr)) && !trace) ||
         (trace_search && trace_outline) || (search_stats && trace) ||
