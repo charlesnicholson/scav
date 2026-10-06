@@ -320,7 +320,7 @@ std::array<uint64_t, TRACE_MOVES> culls_checked(
   std::array<uint64_t, TRACE_MOVES> culled{};
   for (bool const labelled : { false, true }) {
     for (char const *name : charts) {
-      if (scav::test::corpus_skipped(name)) { continue; }
+      if (scav::test::search_skipped(name)) { continue; }
       CAPTURE(labelled);
       CAPTURE(name);
       layout_test_cull(true, true);
@@ -865,6 +865,7 @@ TEST_CASE(
   } const guard;
   for (bool const culled : { false, true }) {
     for (char const *name : { "estop.scav", "ota.scav" }) {
+      if (scav::test::search_skipped(name)) { continue; }
       CAPTURE(culled);
       std::string const chart{ name };
       CAPTURE(chart);

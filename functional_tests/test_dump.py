@@ -592,8 +592,12 @@ class TestDump(unittest.TestCase):
         argv = [str(self.exe), verb, *[str(a) for a in args]]
         print(f"+ {' '.join(argv)}  (files capped at {cap} bytes)", flush=True)
         with open(stdout or os.devnull, "w", encoding="utf-8") as out:
-            return subprocess.run(argv, stdout=out, stderr=subprocess.PIPE, text=True,
+            done = subprocess.run(argv, stdout=out, stderr=subprocess.PIPE, text=True,
                                   cwd=self.cfg.repo_root, preexec_fn=limit)
+        # A coverage build's profile is a file the cap also stops.
+        done.stderr = "".join(line for line in done.stderr.splitlines(keepends=True)
+                              if not line.startswith("LLVM Profile Error"))
+        return done
 
     @unittest.skipIf(os.name == "nt", "file size limits are POSIX")
     def test_a_trace_file_replaces_the_old_one_only_when_written_whole(self) -> None:

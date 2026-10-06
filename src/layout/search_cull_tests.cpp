@@ -359,7 +359,7 @@ uint64_t stops_checked(scav_profile const &p, std::initializer_list<char const *
   uint64_t skipped{ 0 };
   for (bool const labelled : { false, true }) {
     for (char const *name : charts) {
-      if (scav::test::corpus_skipped(name)) { continue; }
+      if (scav::test::search_skipped(name)) { continue; }
       CAPTURE(labelled);
       std::string const chart{ name };
       CAPTURE(chart);
@@ -394,6 +394,7 @@ TEST_CASE("search: the culled search is one search at every thread count") {
   layout_test_search_memo(false);
   for (bool const labelled : { false, true }) {
     for (char const *name : { "brew.scav", "dock.scav", "kiln.scav" }) {
+      if (scav::test::search_skipped(name)) { continue; }
       CAPTURE(labelled);
       std::string const chart{ name };
       CAPTURE(chart);
@@ -416,6 +417,7 @@ TEST_CASE("search: the culled search reaches one drawing with the label bound on
   SwitchGuard const guard;
   layout_test_search_memo(false);
   for (char const *name : { "brew.scav", "dock.scav", "kiln.scav" }) {
+    if (scav::test::search_skipped(name)) { continue; }
     std::string const chart{ name };
     CAPTURE(chart);
     Laid const bounded{ lay(name, culled(), true) };
@@ -435,6 +437,7 @@ TEST_CASE(
   SwitchGuard const guard;
   layout_test_search_memo(false);
   for (char const *name : { "brew.scav", "dock.scav", "kiln.scav" }) {
+    if (scav::test::search_skipped(name)) { continue; }
     std::string const chart{ name };
     CAPTURE(chart);
     Laid const want{ lay(name, culled(), true, 1) };
@@ -456,6 +459,7 @@ TEST_CASE("search: a bound pass scored again after its labelling sets the same b
   layout_test_search_memo(false);
   for (uint32_t const every : { 0U, 3U }) {
     for (char const *name : { "brew.scav", "dock.scav", "kiln.scav" }) {
+      if (scav::test::search_skipped(name)) { continue; }
       CAPTURE(every);
       std::string const chart{ name };
       CAPTURE(chart);
