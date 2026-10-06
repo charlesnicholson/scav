@@ -4,6 +4,7 @@
 
 #include "doctest.h"
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstddef>
@@ -182,11 +183,11 @@ TEST_CASE(
     return f->calls < 3U;  // the third chunk fails
   };
   ChunkQueue q{ write, &failing, 3 };
-  std::vector<bool> took;
+  std::array<bool, 12> took{};
   std::vector<uint8_t> chunk;
-  for (uint32_t k = 0; k < 12; ++k) {
+  for (uint32_t k = 0; k < took.size(); ++k) {
     chunk = chunk_bytes(k, 64);
-    took.push_back(q.push(chunk));
+    took[k] = q.push(chunk);
     CHECK(chunk.empty());
   }
   CHECK_FALSE(q.close());
