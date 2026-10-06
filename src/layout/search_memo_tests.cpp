@@ -62,6 +62,9 @@ void layout_test_row_alias(bool on);
 std::vector<Cost> const &layout_test_schedule_first();
 std::vector<Cost> const &layout_test_schedule_second();
 std::vector<Cost> const &layout_test_schedule_kept();
+void layout_test_degrade(bool on);
+uint64_t layout_test_degraded();
+uint64_t layout_test_taken_degraded();
 
 }  // namespace scav
 
@@ -770,6 +773,34 @@ void check_route_bound(std::array<char const *, N> const &charts) {
 }
 
 }  // namespace
+
+TEST_CASE(
+    "search: a seed with a degraded net is stored degraded, and no move onto it is "
+    "taken") {
+  // On one thread the first routing is row 0's seed; each routing of its drawing degrades.
+  struct Guard {
+    Guard() = default;
+    Guard(Guard const &) = delete;
+    Guard &operator=(Guard const &) = delete;
+    ~Guard() {
+      layout_test_degrade(false);
+      layout_test_candidate_memo(true, false);
+    }
+  } const guard;
+  for (bool const culled : { false, true }) {
+    for (char const *name : { "estop.scav", "ota.scav" }) {
+      CAPTURE(culled);
+      std::string const chart{ name };
+      CAPTURE(chart);
+      layout_test_degrade(true);
+      layout_test_candidate_memo(true, true);
+      REQUIRE(lay_out(name, false, culled, 1).ok);
+      CHECK(layout_test_degraded() > 1);  // moves reach the seed's drawing
+      CHECK(layout_test_candidate_memo_mismatches() == 0);
+      CHECK(layout_test_taken_degraded() == 0);
+    }
+  }
+}
 
 TEST_CASE("search: a move pruned by its route bound scores at least that bound") {
   check_route_bound(std::array<char const *, 3>{ "estop.scav", "led.scav", "dock.scav" });

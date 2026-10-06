@@ -74,6 +74,9 @@ std::vector<Cost> const &layout_test_schedule_kept();
 void layout_test_dont_look_verify(bool on);
 uint64_t layout_test_dont_look_checked();
 uint64_t layout_test_dont_look_mismatches();
+void layout_test_degrade(bool on);
+uint64_t layout_test_degraded();
+uint64_t layout_test_taken_degraded();
 void layout_test_bound_replay(bool on);
 uint64_t layout_test_bound_replayed();
 uint64_t layout_test_bound_replay_mismatches();
@@ -652,6 +655,36 @@ bool lay_facing(Candidate &out,
   return true;
 }
 
+#ifdef SCAV_TESTING
+// Test switch: armed, the first routing records its drawing and every routing of it counts
+// a net outside its region. The counters tally those routings and moves taken onto one.
+bool test_degrade{ false };
+Mutex test_degrade_lock;
+std::vector<int32_t> test_degrade_drawing;  // state rects then route points
+uint64_t test_degraded{ 0 };
+uint64_t test_taken_degraded{ 0 };
+
+// Counts a net of `out` outside its region where `out` routes the recorded drawing.
+void degrade_for_test(Candidate &out) {
+  if (!test_degrade) { return; }
+  std::vector<int32_t> words;
+  for (scav_rect const &r : out.sized.state) {
+    vec_insert(words, words.end(), { r.x, r.y, r.w, r.h });
+  }
+  for (scav_point const &p : out.routes.points) {
+    vec_insert(words, words.end(), { p.x, p.y });
+  }
+  ScopedLock const held{ test_degrade_lock };
+  if (test_degrade_drawing.empty()) {
+    test_degrade_drawing = std::move(words);
+  } else if (words != test_degrade_drawing) {
+    return;
+  }
+  ++out.routes.outside_region;
+  ++test_degraded;
+}
+#endif
+
 // Phase 3 for `out` over `laid` and `out.sized`: routes, retries at wider spacing while a
 // route is unreachable, and covers the chart.
 void lay_routes(Candidate &out,
@@ -681,6 +714,9 @@ void lay_routes(Candidate &out,
                     pins,
                     labels,
                     with.stop);
+#ifdef SCAV_TESTING
+  degrade_for_test(out);
+#endif
   if ((with.stop != nullptr) && with.stop->stopped) {
     out.viable = true;
     return;
@@ -1986,7 +2022,10 @@ Improved run_search(Chart const &c,
     if ((access.drawn == INVALID) || out.best.retried) { return; }
     table.box_faces(&held, held_faces);
     CandidateMemo::Recalled const at{ table.find_score(access.drawn, held_faces, true) };
-    table.set_score(at.entry, true, { .cost = out.cost, .viable = true });
+    table.set_score(
+        at.entry,
+        true,
+        { .cost = out.cost, .viable = true, .degraded = out.best.routes.degraded() != 0 });
     if (arranged != INVALID) {
       table.link(table.find_ordering(access.row, arranged, held_faces).key, at.entry);
     }
@@ -2614,6 +2653,12 @@ Improved run_search(Chart const &c,
                                 &held,
                                 { .reuse = &was, .fill = &base, .prefix = &incumbent });
     out.cost = best;
+#ifdef SCAV_TESTING
+    if (out.best.routes.degraded() != 0) {
+      ScopedLock const locked{ test_degrade_lock };
+      ++test_taken_degraded;
+    }
+#endif
     (void)cost_terms(scoring, c, g, out.best.sized, out.best.routes, s, objective, &party);
     remember_incumbent();
     if (culled_search) {
@@ -3810,6 +3855,21 @@ uint64_t layout_test_dont_look_checked() {
 uint64_t layout_test_dont_look_mismatches() {
   ScopedLock const held{ test_dont_look_lock };
   return test_dont_look_mismatches;
+}
+void layout_test_degrade(bool on) {
+  ScopedLock const held{ test_degrade_lock };
+  test_degrade = on;
+  test_degrade_drawing.clear();
+  test_degraded = 0;
+  test_taken_degraded = 0;
+}
+uint64_t layout_test_degraded() {
+  ScopedLock const held{ test_degrade_lock };
+  return test_degraded;
+}
+uint64_t layout_test_taken_degraded() {
+  ScopedLock const held{ test_degrade_lock };
+  return test_taken_degraded;
 }
 void layout_test_bound_replay(bool on) {
   ScopedLock const held{ test_dont_look_lock };
