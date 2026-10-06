@@ -563,16 +563,19 @@ TEST_CASE("trace stream: the header alone decodes every record") {
 
 namespace {
 
-// Every kind at every value set, repeated past two chunks of stream.
-std::vector<TraceEvent> many_events() {
+// Every kind at every value set, repeated until its records pass `bytes`.
+std::vector<TraceEvent> events_past(size_t bytes) {
   std::vector<TraceEvent> const one{ every_event() };
-  size_t const bytes{ stream_of(Chart{}, one).size() - stream_of(Chart{}, {}).size() };
+  size_t const each{ stream_of(Chart{}, one).size() - stream_of(Chart{}, {}).size() };
   std::vector<TraceEvent> out;
-  for (size_t k = 0; k * bytes < (5U * TRACE_CHUNK) / 2U; ++k) {
+  for (size_t k = 0; k * each < bytes; ++k) {
     out.insert(out.end(), one.begin(), one.end());
   }
   return out;
 }
+
+// Past two chunks of stream.
+std::vector<TraceEvent> many_events() { return events_past((5U * TRACE_CHUNK) / 2U); }
 
 // The chunks a sink took, and the one it refuses; 0 refuses none.
 struct Chunks {
@@ -667,7 +670,7 @@ TEST_CASE("trace stream: a decoder writes one JSON array, whatever the pieces it
 
 TEST_CASE("trace stream: a decoder writes in pieces of about TRACE_JSON_FLUSH") {
   Chart const c{ named_chart() };
-  std::vector<uint8_t> const bytes{ stream_of(c, many_events()) };
+  std::vector<uint8_t> const bytes{ stream_of(c, events_past(TRACE_JSON_FLUSH / 2U)) };
   std::vector<size_t> writes;
   std::string const json{ json_in_pieces(bytes, TRACE_CHUNK, &writes) };
   REQUIRE(writes.size() >= 3U);
@@ -694,7 +697,7 @@ TEST_CASE("trace stream: a decoder with no write checks the stream and writes no
 
 TEST_CASE("trace stream: a decoder whose write fails fails the decode") {
   Chart const c{ named_chart() };
-  std::vector<uint8_t> const bytes{ stream_of(c, many_events()) };
+  std::vector<uint8_t> const bytes{ stream_of(c, events_past(TRACE_JSON_FLUSH / 2U)) };
   TraceDecoder d;
   d.write = [](void * /*ctx*/, char const * /*text*/, size_t /*n*/) { return false; };
   CHECK_FALSE(trace_decode(d, bytes.data(), bytes.size()));
