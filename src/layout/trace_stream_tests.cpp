@@ -342,10 +342,16 @@ TEST_CASE("trace stream: a header another build wrote is told apart from a broke
     size_t keep;
     bool foreign;
   };
-  for (Case const &k : { Case{ "version", 8, 1, good.size(), true },
-                         Case{ "schema", schema, 0x20, good.size(), true },
-                         Case{ "magic", 0, 1, good.size(), false },
-                         Case{ "cut", 0, 0, good.size() - 1U, false } }) {
+  size_t const all{ good.size() };
+  for (Case const &k :
+       { Case{ .what = "version", .at = 8, .flip = 1, .keep = all, .foreign = true },
+         Case{ .what = "schema",
+               .at = schema,
+               .flip = 0x20,
+               .keep = all,
+               .foreign = true },
+         Case{ .what = "magic", .at = 0, .flip = 1, .keep = all, .foreign = false },
+         Case{ .what = "cut", .at = 0, .flip = 0, .keep = all - 1U, .foreign = false } }) {
     std::string const what{ k.what };
     CAPTURE(what);
     std::vector<uint8_t> bad{ good.begin(),

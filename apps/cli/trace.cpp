@@ -84,11 +84,11 @@ bool queue_chunk(void *ctx, uint8_t const *data, size_t n) {
 // refuses it.
 bool feed_file(std::FILE *f, TraceDecoder &d) {
   std::vector<uint8_t> buffer(TRACE_READ);
-  for (;;) {
+  while (std::feof(f) == 0) {
     size_t const got{ std::fread(buffer.data(), 1, buffer.size(), f) };
-    if (!trace_decode(d, buffer.data(), got) || (std::ferror(f) != 0)) { return false; }
-    if (got < buffer.size()) { return std::feof(f) != 0; }
+    if ((std::ferror(f) != 0) || !trace_decode(d, buffer.data(), got)) { return false; }
   }
+  return true;
 }
 
 }  // namespace
