@@ -1772,6 +1772,33 @@ What the review did find is that `ortho_spread_attachments` did not do what its 
 
 **On large charts a candidate that cannot win is close to the incumbent.** Its median score is 3–9% above the incumbent's while the bound reaches 44–76% of it. 4–26% of their moves meet an incumbent with Tier 0 above zero, and 13–29% of candidates fail Tier 0, which no bound on Tier 2 sees. Bends are the loose term: the seated bound reaches 58% of a route's turns. The router's own seats, placed before any search, would reach 86%: what is left is seats placed apart on their faces and routes around boxes. `[OWED]`: a bound by delta from the incumbent, exact for the transitions whose frame routing is reused.
 
+**Measured 2026-10-06: which terms prune before routing.** Every candidate the culled search sized at both scales against an incumbent with Tier 0 zero, 1.62M, scored by subsets of the bound's terms; the share whose weighted sum alone reaches the incumbent's Tier 2:
+
+| terms | real text | no text |
+|---|---|---|
+| area, length or bends alone | 0.0% | 0.0–0.1% |
+| area and length | 0.6% | 0.1% |
+| area and bends | 0.9% | 0.6% |
+| area, length and bends, waypoints counted | 4.7% | 3.9% |
+| the same, no waypoints | 4.0% | 3.3% |
+| the seated bound | 7.1% | 6.4% |
+
+No term carries the bound alone: it prunes where area, length and bends together come near the incumbent. Whitespace and adjacency weigh nothing on the corpus. The sized chart's aspect would add 1.6 and 1.4 points but bounds nothing: 12% and 23% of routed candidates end with a smaller aspect than they were sized with, the routes and labels growing the short side. Of what a routed loser costs past the seated bound, bends are 40% and 48%, crowding 16% and 17%, crossings 13% and 13%, aspect 11% and 6%, excess 8% and 6%, length 5% and 3%.
+
+**Crossings the ordering forces bound nothing.** Two edges whose ends interleave between adjacent ranks cross in a layered drawing; their routes need not. `estop` with `Tripped` on rank 2 and `Tripped → Latched` reversed interleaves one pair and routes round it, Tier 0 zero, without a crossing (a test pins it). 46% of sized candidates hold such a pair, the count exceeds the routed crossings on 1.1% of routed candidates, and in sum it is a seventh of them.
+
+**Dominance rules discard winners.** A move worse than the incumbent on chosen terms, discarded before it is routed or, for crossings, before it is costed; over the culled search's routed moves, which took 21,061 winners:
+
+| discard when | moves discarded | winners among them | instructions saved beyond the exact stops, est. |
+|---|---|---|---|
+| area and routed crossings both above the incumbent's | 23.1% | 165 | 0.04% |
+| sized area and seated bound bends both above | 24.1% | 361 | 8.3% |
+| sized area 10% above and seated bound bends above | 11.3% | 69 | 3.3% |
+| seated bound within 5% of the incumbent | 5.2% | 12 | 0.4% |
+| seated bound within 2% | 3.5% | 0 | 0.1% |
+
+The first is the rule as first proposed; the cost stop already ends every such move that cannot win, so what is left to discard is winners. The 10% rule is prototyped as `search_cull` 2 on branch `cull-rule`, held for a decision. Under the seed bar against the culled search it is worse on no chart-scale and better on `ota` with no text; geometric-mean `t2` ratio 1.0048, 1.0011, 0.9984 and 0.9980 unperturbed and under seeds 1–3; 1.10× fewer routed moves and 1.04× fewer instructions. Under real text it draws `elevator` compact with four crossings where the culled search draws a ribbon with none (+3.5%), and every other chart alike. With no area margin it is worse on four chart-scales and +1.1% to +2.1%.
+
 **Rows that differ only in knobs no sizing reads search as one. Landed 2026-10-05.** `size_row_reads` finds which row knobs any sizing of the chart can read, under any pins: the packer and compaction where a packing may hold two rects (two live regions, two components of a frame, or a frame that can fold into pieces), the owner's hole where such a packing lies inside a composite, and the fold rule where a frame has an edge and so can take two layers. A frame's components and edges are the same under every pin. Each row gets its canonical form, unread knobs at row 0's values; a row matching an earlier one lays out and searches as it, and a search repeating another row's canonical row and pins takes its result. `estop` and `led` own no composite, so their rows pair up: eight of sixteen in the full search, four of eight in the culled. Every other corpus chart reads every knob. A test lays both out with aliasing off and finds each row's cost at every stage, and the drawing, the same. Offered moves on `estop` with real text fall 720 → 464 in the culled search.
 
 **A drawing being routed by one thread is routed by no other. Landed 2026-10-05.** Before routing, a move claims its score entry. A move whose drawing another thread has claimed is left unscored in its round's parallel pass and scored after it, from the memo when the claimant has finished. Concurrent duplicates had been 5–18% of routed candidates on `estop`, `led`, `brew` and `dock`, from rounds of near-identical moves and from rows and kicks searching at once. On the pool, routed candidates now match those at one thread within three on the small charts and 0.3% on the rest.
