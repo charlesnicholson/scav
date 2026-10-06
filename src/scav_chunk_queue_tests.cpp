@@ -145,6 +145,7 @@ TEST_CASE(
     return f->calls < 3U;  // the third chunk fails
   };
   ChunkQueue q{ write, &failing, 3 };
+  bool const threaded{ q.threaded() };
   std::array<bool, 12> took{};
   for (uint32_t k = 0; k < took.size(); ++k) {
     std::vector<uint8_t> const chunk{ chunk_bytes(k, 64) };
@@ -152,8 +153,10 @@ TEST_CASE(
   }
   CHECK_FALSE(q.close());
   CHECK(failing.calls == 3U);
-  // The first two were written; from the seventh on, no slot frees before the failure.
+  // Three pushes fill the slots and two more take the slots the good writes free; the
+  // failing write frees the last as it fails. Unthreaded, the third push makes that write.
   CHECK(took[0]);
   CHECK(took[1]);
-  for (uint32_t k = 6; k < took.size(); ++k) { CHECK_FALSE(took[k]); }
+  CHECK(took[2] == threaded);
+  for (uint32_t k = 5; k < took.size(); ++k) { CHECK_FALSE(took[k]); }
 }

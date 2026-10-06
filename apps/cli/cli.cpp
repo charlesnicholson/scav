@@ -185,7 +185,7 @@ ArgRead read_layout_arg(int argc, char **argv, int &i, LayoutArgs &out) {
 void apply_layout_args(LayoutArgs const &args, scav_profile &p) {
   if (args.no_search) { p.portfolio_k = 0; }
   if (args.search >= 0) { p.search_cull = args.search; }
-  p.jitter_seed = args.jitter_seed;
+  if (args.jitter_seed >= 0) { p.jitter_seed = args.jitter_seed; }
 }
 
 void append_layout_args(std::string &out,
@@ -210,7 +210,7 @@ void append_layout_args(std::string &out,
     out += SEARCHES[static_cast<size_t>(args.search)];
     out += ' ';
   }
-  if (args.jitter_seed != 0) {
+  if (args.jitter_seed > 0) {
     out += "--jitter-seed ";
     string_append_u32(out, static_cast<uint32_t>(args.jitter_seed));
     out += ' ';
