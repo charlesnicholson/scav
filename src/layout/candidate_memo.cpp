@@ -2,6 +2,7 @@
 
 #include "layout/route.h"
 #include "scav_int.h"
+#include "scav_stable_sort.h"
 #include "scav_vec.h"
 
 #include <algorithm>
@@ -522,7 +523,7 @@ void CandidateMemo::box_faces(SearchPins const *pins, std::vector<uint32_t> &fac
       vec_push_back(faces, end | fp.face);
     }
   }
-  std::ranges::sort(faces);
+  scav_stable_sort(faces, [](uint32_t x, uint32_t y) { return x < y; });
 }
 
 namespace {
