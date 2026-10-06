@@ -578,6 +578,58 @@ class TestDump(unittest.TestCase):
                 self.assertEqual("", read.stderr)
                 self.assertEqual(printed.stdout[:end], read.stdout)
 
+    def run_capped(self, verb: str, *args: scavtest.Arg, stdout: Path | None = None,
+                   cap: int) -> subprocess.CompletedProcess[str]:
+        """`scav VERB ARGS` with every file it writes held to `cap` bytes, stdout into the
+        file `stdout` when given."""
+        import resource
+        import signal
+
+        def limit() -> None:
+            signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
+            resource.setrlimit(resource.RLIMIT_FSIZE, (cap, cap))
+
+        argv = [str(self.exe), verb, *[str(a) for a in args]]
+        print(f"+ {' '.join(argv)}  (files capped at {cap} bytes)", flush=True)
+        with open(stdout or os.devnull, "w", encoding="utf-8") as out:
+            return subprocess.run(argv, stdout=out, stderr=subprocess.PIPE, text=True,
+                                  cwd=self.cfg.repo_root, preexec_fn=limit)
+
+    @unittest.skipIf(os.name == "nt", "file size limits are POSIX")
+    def test_a_trace_file_replaces_the_old_one_only_when_written_whole(self) -> None:
+        flags = [*self.pinned(NETWORK), NETWORK.as_posix()]
+        path = self.cfg.scratch_dir / "dump" / "replaced.trace"
+        temp = path.with_name(path.name + ".tmp")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("previous", encoding="utf-8")
+        whole = self.run_dump("--layout", "--trace", "--trace-file", path, *flags)
+        self.assertEqual(0, whole.returncode, whole.stderr)
+        self.assertFalse(temp.exists())
+        size = path.stat().st_size
+        self.assertEqual(0, self.run_trace(path).returncode)
+        path.write_text("previous", encoding="utf-8")
+        cut = self.run_capped("dump", "--layout", "--trace", "--trace-file", path, *flags,
+                              cap=size // 2)
+        self.assertEqual(2, cut.returncode)
+        self.assertEqual(f"scav: cannot write the trace '{path}'\n", cut.stderr)
+        self.assertEqual("previous", path.read_text(encoding="utf-8"))
+        self.assertFalse(temp.exists())
+
+    @unittest.skipIf(os.name == "nt", "file size limits are POSIX")
+    def test_a_trace_whose_json_cannot_be_written_is_an_error(self) -> None:
+        flags = [*self.pinned(NETWORK), NETWORK.as_posix()]
+        path = self.cfg.scratch_dir / "dump" / "unwritten.trace"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.unlink(missing_ok=True)
+        self.assertEqual(0, self.run_dump("--layout", "--trace", "--trace-file", path,
+                                          *flags).returncode)
+        out = self.cfg.scratch_dir / "dump" / "unwritten.json"
+        for verb, args in (("dump", ["--layout", "--trace", *flags]), ("trace", [path])):
+            with self.subTest(verb=verb):
+                result = self.run_capped(verb, *args, stdout=out, cap=4096)
+                self.assertEqual(2, result.returncode)
+                self.assertEqual("scav: cannot write the trace '-'\n", result.stderr)
+
     def test_a_trace_file_that_cannot_be_written_is_an_error(self) -> None:
         path = self.cfg.scratch_dir / "dump" / "no_such_dir" / "vac.trace"
         result = self.run_dump("--json", "--layout", "--trace", "--trace-file", path,
