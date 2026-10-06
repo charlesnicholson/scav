@@ -14,8 +14,8 @@ import scavtest  # noqa: E402
 
 # Standard headers libscavlayout may include.
 ALLOWED_SYSTEM = {
-    "cstdint", "bit", "limits", "vector", "array", "utility", "type_traits",
-    "cstring", "algorithm",
+    "cstdint", "cstddef", "bit", "limits", "vector", "array", "utility", "type_traits",
+    "cstring", "atomic", "algorithm",
     # The C spelling of cstdint, for the header that must compile as C.
     "stdint.h",
 }

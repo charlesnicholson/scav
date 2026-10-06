@@ -4,6 +4,7 @@
 
 #include "layout/route.h"
 #include "layout/size.h"
+#include "layout/tests/trace_record.h"
 #include "layout/trace.h"
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
@@ -167,12 +168,12 @@ std::vector<TraceEvent> outline(char const *name, scav_profile const &p) {
   scav_layout_opts const opts{ .profile = p, .router = 0, .threads = 1 };
   std::vector<scav_placed> placed;
   std::vector<Diagnostic> diags;
-  LayoutTrace t;
+  TraceRecord t;
   trace_outline_set(&t);
   bool const ran{ layout_run(c, {}, opts, placed, diags) };
   trace_outline_set(nullptr);
   REQUIRE(ran);
-  return t.events;
+  return t.events();
 }
 
 }  // namespace
@@ -420,7 +421,7 @@ TEST_CASE("search: a traced culled search draws what the untraced one ships") {
   scav_layout_opts const opts{ .profile = culled(), .router = 0, .threads = 0 };
   std::vector<scav_placed> placed;
   std::vector<Diagnostic> diags;
-  TraceWrite const discard = [](void * /*ctx*/, char const * /*text*/, size_t /*n*/) {
+  TraceChunk const discard = [](void * /*ctx*/, uint8_t const * /*data*/, size_t /*n*/) {
     return true;
   };
   bool streamed{ false };
@@ -429,7 +430,8 @@ TEST_CASE("search: a traced culled search draws what the untraced one ships") {
                        opts,
                        placed,
                        diags,
-                       { .path = nullptr, .write = discard, .ctx = nullptr },
+                       discard,
+                       nullptr,
                        streamed,
                        INVALID,
                        TraceScope::Search));

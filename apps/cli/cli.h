@@ -98,6 +98,16 @@ int run_dump(char const *path,
              bool with_layout,
              DumpTrace const &trace,
              LayoutArgs const &args);
+// Runs `layout_trace`, streaming its trace through a writer thread into `trace.file`, or
+// as JSON to stdout; false when the trace was not written whole.
+bool trace_layout(Chart &c,
+                  scav_spaces const &s,
+                  scav_layout_opts const &o,
+                  std::vector<scav_placed> &placed,
+                  std::vector<Diagnostic> &diags,
+                  DumpTrace const &trace,
+                  LayoutArgs const &args,
+                  bool &laid);
 int run_trace(char const *path);
 int run_render(char const *path,
                char const *out_path,

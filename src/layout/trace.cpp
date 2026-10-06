@@ -7,7 +7,6 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
-#include <string>
 #include <vector>
 
 namespace scav {
@@ -65,6 +64,12 @@ char const *kick_how_name(uint16_t v) {
   return "?";
 }
 
+// State names by id, end to end: state `s`'s ends at `end[s]`.
+struct Names {
+  std::vector<char> const &text;
+  std::vector<uint32_t> const &end;
+};
+
 // Appends JSON to `out`, one typed append per value shape: number, string, point, state.
 struct Json {
   std::vector<char> &out;
@@ -110,21 +115,21 @@ struct Json {
 
   // Writes `state_id` and `state`: the name, or `#` and the id when nameless; `state` is
   // null for INVALID or out-of-range `v`.
-  void kstate(std::vector<std::string> const &states, uint32_t v) {
-    if ((v == INVALID) || (v >= states.size())) {
+  void kstate(Names const &states, uint32_t v) {
+    if ((v == INVALID) || (v >= states.end.size())) {
       key("state");
       raw("null");
       return;
     }
     kv("state_id", v);
     key("state");
-    std::string const &n{ states[v] };
+    uint32_t const from{ (v == 0) ? 0U : states.end[v - 1U] };
     raw("\"");
-    if (n.empty()) {
+    if (from == states.end[v]) {
       raw("#");
       num(v);
     } else {
-      raw(n.data(), n.size());
+      raw(states.text.data() + from, states.end[v] - from);
     }
     raw("\"");
   }
@@ -185,7 +190,7 @@ struct StatsSink {
   SearchStats *to{ nullptr };
 };
 
-// Never destroyed; pool threads may add after static destruction.
+// Allocated on first use and never destroyed.
 StatsSink &stats_sink() {
   static StatsSink *const INSTANCE{ new StatsSink };
   return *INSTANCE;
@@ -249,17 +254,12 @@ void search_stats_to_json(SearchStats const &st, std::vector<char> &out) {
   j.raw("}}\n");
 }
 
-std::vector<std::string> trace_state_names(Chart const &c) {
-  std::vector<std::string> out;
-  out.reserve(c.states.size());
-  for (State const &st : c.states) { out.emplace_back(chart_string(c, st.name)); }
-  return out;
-}
-
 void trace_event_json(TraceEvent const &e,
                       uint64_t i,
-                      std::vector<std::string> const &states,
+                      std::vector<char> const &names,
+                      std::vector<uint32_t> const &name_end,
                       std::vector<char> &out) {
+  Names const states{ .text = names, .end = name_end };
   Json j{ out };
   j.raw("  {\"i\":");
   j.num(static_cast<int64_t>(i));
@@ -466,17 +466,6 @@ void trace_event_json(TraceEvent const &e,
     case TraceKind::None: break;
   }
   j.raw("}");
-}
-
-void trace_to_json(LayoutTrace const &t, Chart const &c, std::vector<char> &out) {
-  std::vector<std::string> const states{ trace_state_names(c) };
-  Json j{ out };
-  j.raw("[\n");
-  for (size_t i = 0; i < t.events.size(); ++i) {
-    if (i != 0) { j.raw(",\n"); }
-    trace_event_json(t.events[i], i, states, out);
-  }
-  j.raw(t.events.empty() ? "]\n" : "\n]\n");
 }
 
 }  // namespace scav

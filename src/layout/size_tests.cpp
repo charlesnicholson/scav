@@ -6,6 +6,7 @@
 #include "layout/label.h"
 #include "layout/order.h"
 #include "layout/router.h"
+#include "layout/tests/trace_record.h"
 #include "layout/trace.h"
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
@@ -266,7 +267,7 @@ TEST_CASE("size: states joined inside one column share the widest one's centre l
 
   SizedLayout z;
   std::vector<Diagnostic> diags;
-  LayoutTrace t;
+  TraceRecord t;
   trace_sink_set(&t);
   bool const sized{ size_layout(
       c,
@@ -293,7 +294,7 @@ TEST_CASE("size: states joined inside one column share the widest one's centre l
   CHECK(z.state[bar.v].x == w.x);
   // One ColumnCentred event, for `N`, by its offset from `W`'s leading edge.
   uint32_t centred{ 0 };
-  for (TraceEvent const &e : t.events) {
+  for (TraceEvent const &e : t.events()) {
     if (e.kind != TraceKind::ColumnCentred) { continue; }
     ++centred;
     CHECK(e.shift.state == narrow.v);
@@ -378,7 +379,7 @@ TEST_CASE("size: a fold that stacks its pieces carries no label room onto the se
 
   SizedLayout z;
   std::vector<Diagnostic> diags;
-  LayoutTrace t;
+  TraceRecord t;
   trace_sink_set(&t);
   bool const sized{ size_layout(
       c,
@@ -398,7 +399,7 @@ TEST_CASE("size: a fold that stacks its pieces carries no label room onto the se
   trace_sink_set(nullptr);
   REQUIRE(sized);
   bool cut{ false };
-  for (TraceEvent const &e : t.events) {
+  for (TraceEvent const &e : t.events()) {
     if ((e.kind == TraceKind::FoldCut) && (e.fold.refused == 0)) {
       cut = true;
       CHECK(e.fold.carried == 0);
@@ -426,7 +427,7 @@ TEST_CASE("size: a fold never cuts a boundary node away from the node it joins")
 
   SizedLayout z;
   std::vector<Diagnostic> diags;
-  LayoutTrace t;
+  TraceRecord t;
   trace_sink_set(&t);
   bool const sized{ size_layout(
       c,
@@ -449,7 +450,7 @@ TEST_CASE("size: a fold never cuts a boundary node away from the node it joins")
   trace_sink_set(nullptr);
   REQUIRE(sized);
   bool refused{ false };
-  for (TraceEvent const &e : t.events) {
+  for (TraceEvent const &e : t.events()) {
     refused = refused || ((e.kind == TraceKind::FoldCut) && (e.fold.rank == 2) &&
                           (e.fold.refused != 0));
   }
@@ -867,7 +868,7 @@ TEST_CASE("size: a fold never cuts between an initial pseudostate and its target
 
   SizedLayout z;
   std::vector<Diagnostic> diags;
-  LayoutTrace t;
+  TraceRecord t;
   trace_sink_set(&t);
   bool const sized{ size_layout(
       c,
@@ -884,7 +885,7 @@ TEST_CASE("size: a fold never cuts between an initial pseudostate and its target
   REQUIRE(sized);
   // The fold refused a cut at rank 1, before `S0`.
   bool refused{ false };
-  for (TraceEvent const &e : t.events) {
+  for (TraceEvent const &e : t.events()) {
     refused = refused || ((e.kind == TraceKind::FoldCut) && (e.fold.rank == 1) &&
                           (e.fold.refused != 0));
   }
@@ -2234,7 +2235,7 @@ struct Traced {
 
 Traced traced(Sample const &x, scav_profile const &p, Fold fold) {
   Traced out;
-  LayoutTrace t;
+  TraceRecord t{ x.c };
   trace_sink_set(&t);
   std::vector<Diagnostic> diags;
   out.ok = size_layout(x.c,
@@ -2248,7 +2249,7 @@ Traced traced(Sample const &x, scav_profile const &p, Fold fold) {
                        Compaction::On,
                        fold);
   trace_sink_set(nullptr);
-  trace_to_json(t, x.c, out.trace);
+  out.trace = t.json();
   return out;
 }
 

@@ -95,8 +95,10 @@ add_executable(scav
   main.cpp
   render.cpp
   selftest.cpp
+  trace.cpp
   "${scav_corpus_table}"
   ${scav_corpus_sources}
+  "${PROJECT_SOURCE_DIR}/src/scav_chunk_queue.cpp"
   "${PROJECT_SOURCE_DIR}/src/scav_inflate.cpp"
 )
 scav_settings(scav)

@@ -10,7 +10,6 @@
 
 #include <array>
 #include <cstdint>
-#include <string>
 #include <vector>
 
 namespace scav {
@@ -229,16 +228,18 @@ struct TraceEvent {
   };
 };
 
-struct TraceWriter;
-
-// The sink the phases append to during a traced run.
+// The sink the phases append to during a traced run: events are encoded into `chunk`,
+// which goes to `sink` once it holds about TRACE_CHUNK bytes.
 struct LayoutTrace {
-  std::vector<TraceEvent> events;
-  TraceWriter *writer{ nullptr };  // when set, events are encoded to it instead
-  uint32_t frame{ INVALID };       // stamped onto each event that sets no frame
+  TraceChunk sink{ nullptr };
+  void *ctx{ nullptr };
+  std::vector<uint8_t> chunk;
+  uint64_t count{ 0 };        // events encoded
+  uint32_t frame{ INVALID };  // stamped onto each event that sets no frame
+  bool ok{ true };            // `sink` took every chunk
 };
 
-// Appends `e` to `t.events`, or encodes it to `t.writer`.
+// Encodes `e` into `t.chunk`, handing a full chunk to `t.sink`.
 void trace_put(LayoutTrace &t, TraceEvent const &e);
 
 // This thread's sink, null outside a traced run. A traced run forces `threads = 1`.
@@ -281,24 +282,18 @@ struct TraceFrame {
   TraceFrame &operator=(TraceFrame const &) = delete;
 };
 
-// Chart `c`'s state names by id, empty for a nameless state.
-std::vector<std::string> trace_state_names(Chart const &c);
-
-// Appends `e` as one line's JSON object with ordinal `i`, naming states from `states`;
-// the caller writes the separators and newlines between lines.
+// Appends `e` as one line's JSON object with ordinal `i`, naming states from a decoded
+// header's `names` and `name_end`; the caller writes the separators and newlines.
 void trace_event_json(TraceEvent const &e,
                       uint64_t i,
-                      std::vector<std::string> const &states,
+                      std::vector<char> const &names,
+                      std::vector<uint32_t> const &name_end,
                       std::vector<char> &out);
-
-// A JSON array, one event per line in order; `tools/trace.py` reads it.
-void trace_to_json(LayoutTrace const &t, Chart const &c, std::vector<char> &out);
 
 inline constexpr uint32_t TRACE_MOVES{ 8 };  // `TRACE_MOVE_*` values
 
-// A search's counts. Per `TRACE_MOVE_*`: moves offered, those the candidate memo answered,
-// those taken, those culled unoffered as changing nothing, and those the don't-look bits
-// left unscored in a round that took a move.
+// Per `TRACE_MOVE_*`: moves offered, answered by the candidate memo, taken, culled
+// unoffered as changing nothing, and left unscored by don't-look bits in a taking round.
 struct SearchStats {
   std::array<uint64_t, TRACE_MOVES> offered{}, deduped{}, taken{}, culled{}, skipped{};
   std::array<uint64_t, TRACE_MOVES> pruned{};   // route bound reached the incumbent

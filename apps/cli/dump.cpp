@@ -1019,19 +1019,7 @@ void append_json(std::string &out, Chart const &c) {
   });
 }
 
-bool write_stdout(void * /*ctx*/, char const *text, size_t n) {
-  return std::fwrite(text, 1, n, stdout) == n;
-}
-
 }  // namespace
-
-int run_trace(char const *path) {
-  if (!trace_file_json(path, write_stdout, nullptr)) {
-    write_error("not a whole trace file", path);
-    return EXIT_UNUSABLE;
-  }
-  return EXIT_CLEAN;
-}
 
 int run_dump(char const *path,
              bool hash_only,
@@ -1089,18 +1077,14 @@ int run_dump(char const *path,
       line += "}\n";
       write_stream(line, stdout);
     } else if (trace.trace) {
-      bool streamed{ false };
-      laid = layout_trace(net.chart,
-                          as_spaces(spaces),
-                          opts,
-                          placed,
-                          diags,
-                          { .path = trace.file, .write = write_stdout, .ctx = nullptr },
-                          streamed,
-                          args.row,
-                          trace.scope,
-                          &args.pins);
-      if (!streamed) {
+      if (!trace_layout(net.chart,
+                        as_spaces(spaces),
+                        opts,
+                        placed,
+                        diags,
+                        trace,
+                        args,
+                        laid)) {
         write_error("cannot write the trace", (trace.file != nullptr) ? trace.file : "-");
         return EXIT_UNUSABLE;
       }

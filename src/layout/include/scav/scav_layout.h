@@ -204,33 +204,48 @@ enum class TraceScope : uint32_t {
   Outline   // the whole search on one thread, its row and kick events only
 };
 
-// Receives a trace's JSON text in order; false stops the trace.
-using TraceWrite = bool (*)(void *ctx, char const *text, size_t n);
+// Receives a run's encoded trace in order, a chunk at a time, on the thread that called
+// `layout_trace`; false stops it.
+using TraceChunk = bool (*)(void *ctx, uint8_t const *data, size_t n);
 
-// Where `layout_trace` streams: in binary to the file `path`, which appears whole or not
-// at all; with no `path`, as JSON to `write`.
-struct TraceTo {
-  char const *path{ nullptr };
-  TraceWrite write{ nullptr };
-  void *ctx{ nullptr };
-};
-
-// Runs `layout_run` from `pins`, streaming its decision trace to `to` in bounded memory.
-// `streamed` is true when the whole trace reached `to`; an unwritable `to` runs nothing.
+// Runs `layout_run` from `pins`, handing its decision trace to `sink` in chunks as it
+// runs. `streamed` is true when `sink` took every chunk; a null `sink` runs nothing.
 bool layout_trace(Chart &c,
                   scav_spaces const &s,
                   scav_layout_opts const &o,
                   std::vector<scav_placed> &placed,
                   std::vector<Diagnostic> &diags,
-                  TraceTo const &to,
+                  TraceChunk sink,
+                  void *ctx,
                   bool &streamed,
                   uint32_t row = INVALID,
                   TraceScope scope = TraceScope::Shipped,
                   SearchPins const *pins = nullptr);
 
-// Writes the trace file at `path` to `write` as the JSON `layout_trace` writes; false when
-// the file cannot be read, is not a whole trace, or `write` fails.
-bool trace_file_json(char const *path, TraceWrite write, void *ctx);
+// Receives JSON text in order, inside `trace_decode` and `trace_decode_end` on the
+// caller's thread; false stops the decode.
+using TraceWrite = bool (*)(void *ctx, char const *text, size_t n);
+
+// Decodes `layout_trace`'s chunks, fed in pieces of any size, to the JSON array `scav dump
+// --trace` prints, written through `write`; a null `write` only checks the bytes.
+struct TraceDecoder {
+  TraceWrite write{ nullptr };
+  void *ctx{ nullptr };
+  std::vector<uint8_t> pending;    // fed bytes short of a whole record
+  std::vector<char> names;         // the header's state names, end to end
+  std::vector<uint32_t> name_end;  // per state, the end of its name in `names`
+  std::vector<char> text;          // JSON not yet written
+  uint64_t events{ 0 };            // records decoded
+  bool header{ false };
+  bool ended{ false };
+  bool failed{ false };
+};
+
+// Feeds `data[0..n)`; false once the bytes fed begin no trace or `write` fails.
+bool trace_decode(TraceDecoder &d, uint8_t const *data, size_t n);
+
+// Writes the rest of the JSON; false unless the bytes fed are one whole trace.
+bool trace_decode_end(TraceDecoder &d);
 
 // Runs `layout_run` from `pins` on the caller's threads and writes the search's counts as
 // one JSON object to `out`. `tuple` and `taken` are `layout_run`'s.

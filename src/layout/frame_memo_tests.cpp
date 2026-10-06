@@ -7,6 +7,7 @@
 #include "layout/pack.h"
 #include "layout/size.h"
 #include "layout/tests/pod_eq.h"
+#include "layout/tests/trace_record.h"
 #include "layout/trace.h"
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
@@ -92,7 +93,7 @@ SubmachineOrders ordered(Chart const &c,
                          scav_profile const &p,
                          SearchPins const &pins,
                          bool traced) {
-  LayoutTrace t;
+  TraceRecord t;
   if (traced) { trace_sink_set(&t); }
   SubmachineOrders o{ order_submachines(c, g, s, p, 1, pins) };
   trace_sink_set(nullptr);
@@ -113,7 +114,7 @@ Sized sized(Chart const &c,
             Compaction pack,
             Fold fold,
             bool traced) {
-  LayoutTrace t;
+  TraceRecord t;
   if (traced) { trace_sink_set(&t); }
   Sized out;
   std::vector<Diagnostic> diags;

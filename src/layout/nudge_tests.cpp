@@ -3,6 +3,7 @@
 #include "layout/nudge.h"
 
 #include "layout/geom.h"
+#include "layout/tests/trace_record.h"
 #include "layout/trace.h"
 
 #include "scav_int.h"
@@ -96,12 +97,12 @@ Tally nudge(scav_rect const &region,
             int32_t clear,
             std::vector<scav_span> const &nets,
             std::vector<scav_point> &points) {
-  LayoutTrace t;
+  TraceRecord t;
   trace_sink_set(&t);
   nudge_lanes(region, bounds, obstacles, gap, clear, 0, nets, points);
   trace_sink_set(nullptr);
   Tally n;
-  for (TraceEvent const &e : t.events) {
+  for (TraceEvent const &e : t.events()) {
     if (e.kind == TraceKind::LaneFound) {
       ++n.lanes;
       n.spread += e.found.spread;
