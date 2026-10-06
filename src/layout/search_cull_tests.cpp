@@ -146,11 +146,18 @@ Laid lay(char const *name, scav_profile const &p, bool labelled, uint32_t thread
   Laid out;
   SearchPins taken;
   SearchStats counted;
-  search_stats_set(&counted);
-  bool const ran{
-    layout_run(c, s, opts, placed, diags, nullptr, &out.tuple, INVALID, nullptr, &taken)
-  };
-  search_stats_set(nullptr);
+  bool const ran{ layout_run(c,
+                             s,
+                             opts,
+                             placed,
+                             diags,
+                             nullptr,
+                             &out.tuple,
+                             INVALID,
+                             nullptr,
+                             &taken,
+                             nullptr,
+                             &counted) };
   REQUIRE(ran);
   out.structural = layout_structural_hash(c);
   out.coordinate = layout_coordinate_hash(c);

@@ -1929,6 +1929,35 @@ uint64_t test_bound_replayed{ 0 };
 uint64_t test_bound_replay_mismatches{ 0 };
 #endif
 
+// One layout's search counts, added to by its threads; a null `to` counts nothing.
+struct RunStats {
+  SearchStats *to{ nullptr };
+  Mutex lock;
+};
+
+// Adds `add` to `run`'s counts; `memo_bytes` takes the larger.
+void stats_add(RunStats *run, SearchStats const &add) {
+  if ((run == nullptr) || (run->to == nullptr)) { return; }
+  ScopedLock const held{ run->lock };
+  SearchStats &to{ *run->to };
+  for (uint32_t k = 0; k < TRACE_MOVES; ++k) {
+    to.offered[k] += add.offered[k];
+    to.deduped[k] += add.deduped[k];
+    to.taken[k] += add.taken[k];
+    to.culled[k] += add.culled[k];
+    to.skipped[k] += add.skipped[k];
+    to.pruned[k] += add.pruned[k];
+    to.stopped[k] += add.stopped[k];
+  }
+  to.drawn += add.drawn;
+  to.faced += add.faced;
+  to.searches += add.searches;
+  to.recalled += add.recalled;
+  to.aliased += add.aliased;
+  to.deferred += add.deferred;
+  to.memo_bytes = imax(to.memo_bytes, add.memo_bytes);
+}
+
 // Suspends this thread's trace sink for its scope.
 struct TraceMuted {
   LayoutTrace *const was{ trace_sink() };
@@ -1952,7 +1981,8 @@ Improved run_search(Chart const &c,
                     bool refold,
                     SearchPins const &seed,
                     std::vector<uint8_t> const *scope,
-                    CandidateMemo *memo) {
+                    CandidateMemo *memo,
+                    RunStats *stats) {
   Improved out;
   SearchStats counted;  // this search's counts, added to the sink on return
   counted.searches = 1;
@@ -1984,7 +2014,7 @@ Improved run_search(Chart const &c,
   }
   out.viable = out.best.viable;
   if (!out.viable) {
-    search_stats_add(counted);
+    stats_add(stats, counted);
     return out;
   }
   CostContext const scoring{ cost_context(c, g) };
@@ -2678,7 +2708,7 @@ Improved run_search(Chart const &c,
                      resized);
     }
   }
-  search_stats_add(counted);
+  stats_add(stats, counted);
   return out;
 }
 
@@ -2757,7 +2787,8 @@ Improved search_moves(Chart const &c,
                       SearchPins const &seed,
                       std::vector<uint8_t> const *scope,
                       SearchMemo *memo,
-                      CandidateMemo *candidates) {
+                      CandidateMemo *candidates,
+                      RunStats *stats) {
   auto const search = [&]() {
     return run_search(c,
                       g,
@@ -2770,7 +2801,8 @@ Improved search_moves(Chart const &c,
                       refold,
                       seed,
                       scope,
-                      candidates);
+                      candidates,
+                      stats);
   };
   if ((memo == nullptr) || (trace_sink() != nullptr)) { return search(); }
   std::vector<uint32_t> key;
@@ -2790,7 +2822,7 @@ Improved search_moves(Chart const &c,
   if (hit) {
     SearchStats one;
     one.recalled = 1;
-    search_stats_add(one);
+    stats_add(stats, one);
     Improved out;
     uint32_t at{ 0 };
     out.viable = value[at++] != 0;
@@ -3004,8 +3036,11 @@ bool layout_run(Chart &c,
                 uint32_t row,
                 uint32_t *moves,
                 SearchPins *taken,
-                SearchPins const *pins) {
+                SearchPins const *pins,
+                SearchStats *stats) {
   MemoRun const scope;
+  RunStats counts;
+  counts.to = stats;
   if (inflations != nullptr) { *inflations = 0; }
   if (tuple != nullptr) { *tuple = 0; }
   scav_profile const &p{ o.profile };
@@ -3072,7 +3107,7 @@ bool layout_run(Chart &c,
     }
     aliased.aliased += (alias[i] != i) ? 1U : 0U;
   }
-  search_stats_add(aliased);
+  stats_add(&counts, aliased);
   auto const row_of = [&](uint32_t i) { return canonical[i]; };
   bool const culled_search{ p.search_cull != 0 };
   std::vector<Candidate> candidates(rows);
@@ -3168,7 +3203,8 @@ bool layout_run(Chart &c,
                              held[active[k]],
                              nullptr,
                              memo_at,
-                             move_memo_at);
+                             move_memo_at,
+                             &counts);
     });
     for (uint32_t i = 0; i < rows; ++i) {
       if ((twin[i] == INVALID) || !done[twin[i]].viable) { continue; }
@@ -3207,7 +3243,8 @@ bool layout_run(Chart &c,
                           start,
                           within,
                           memo_at,
-                          move_memo_at);
+                          move_memo_at,
+                          &counts);
     };
     // Searches `start` in the `redo` frames, then in turn in the frames enclosing them and
     // in the `redo` frames again, until a search improves nothing. `framed` gets the first
@@ -3548,7 +3585,7 @@ bool layout_run(Chart &c,
   write_columns(c, sized, routes, inputs_digest(s, o));
   SearchStats held_bytes;
   held_bytes.memo_bytes = (move_memo_at != nullptr) ? move_memo_at->peak_bytes() : 0;
-  search_stats_add(held_bytes);
+  stats_add(&counts, held_bytes);
   return true;
 }
 
@@ -3644,11 +3681,9 @@ bool layout_search_stats(Chart &c,
                          uint32_t *tuple,
                          SearchPins *taken) {
   SearchStats counted;
-  search_stats_set(&counted);
   bool const ran{
-    layout_run(c, s, o, placed, diags, nullptr, tuple, row, nullptr, taken, pins)
+    layout_run(c, s, o, placed, diags, nullptr, tuple, row, nullptr, taken, pins, &counted)
   };
-  search_stats_set(nullptr);
   search_stats_to_json(counted, out);
   return ran;
 }

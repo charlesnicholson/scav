@@ -206,11 +206,18 @@ std::array<uint64_t, 7> culled_search(char const *name,
   uint32_t row{ INVALID };
   uint32_t moves{ 0 };
   SearchStats counted;
-  search_stats_set(&counted);
-  bool const ran{
-    layout_run(c, as_spaces(spaces), opts, placed, diags, nullptr, &row, INVALID, &moves)
-  };
-  search_stats_set(nullptr);
+  bool const ran{ layout_run(c,
+                             as_spaces(spaces),
+                             opts,
+                             placed,
+                             diags,
+                             nullptr,
+                             &row,
+                             INVALID,
+                             &moves,
+                             nullptr,
+                             nullptr,
+                             &counted) };
   REQUIRE(ran);
   std::array<uint64_t, 7> out{
     layout_structural_hash(c), layout_coordinate_hash(c), row, moves, 0, 0, 0
