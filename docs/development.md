@@ -344,6 +344,24 @@ is more than 2% above every run of the other. `tools/shootout.py --runs DIR --ou
 from the same runs, with each panel's Tier 2, Tier 0, bends, crossings, candidates
 evaluated and search CPU; `--prefix` names the PNGs.
 
+## Tracing a layout
+
+`scav dump --layout --trace <chart>` prints the decisions behind the shipped drawing
+ahead of the model: a JSON array, one event per line (PRD §11.16). `--trace-search`
+traces every candidate of the whole search, `--trace-outline` only its row and kick
+events. A traced run streams in bounded memory: each event is encoded as it happens
+and a writer thread prints it, so `bottler`'s whole-search trace, 10.8 GB of JSON,
+peaks at 36 MiB.
+
+`--trace-file FILE` writes the trace in its binary encoding to FILE instead, a tenth
+of the JSON's size; FILE appears, or is replaced, only once the whole trace is
+written. `scav trace FILE` prints a kept file as the JSON `--trace` prints. The file
+is self-describing: its header names every event kind, each kind's fields and their
+types, and the chart's state names, so a reader needs only the file.
+
+`tools/trace.py` reads the JSON from scav's pipe one line at a time: `--trans N` the
+events behind one transition's route, `--search` the outline, `--raw` every event.
+
 ## The Unicode tables
 
 Text is normalized on read — BOM stripped, line endings folded to LF, UTF-8

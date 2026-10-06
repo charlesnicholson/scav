@@ -33,17 +33,39 @@ def find_scav(explicit=None):
     return found[0] if found else None
 
 
-def run(scav, chart, row, layout=(), outline=False):
-    """Runs `scav dump --json --layout --trace`; returns (trace, model dump)."""
-    argv = [str(scav), "dump", "--json", "--layout", "--trace", *layout, str(chart)]
-    if outline:
-        argv[5:5] = ["--trace-outline"]
-    if row is not None:
-        argv[4:4] = ["--portfolio-row", str(row)]
-    out = subprocess.run(argv, capture_output=True, text=True, check=True).stdout
-    # The trace array comes first and ends at the first line that is a bare `]`.
-    end = out.index("\n]\n") + 3
-    return json.loads(out[:end]), json.loads(out[end:])
+class Traced:
+    """`scav dump --json --layout --trace` read from its pipe as it runs: `events()` yields
+    each event as its line arrives, then `model()` parses the model dump after the trace."""
+
+    def __init__(self, scav, chart, row, layout=(), outline=False):
+        argv = [str(scav), "dump", "--json", "--layout", "--trace", *layout, str(chart)]
+        if outline:
+            argv[5:5] = ["--trace-outline"]
+        if row is not None:
+            argv[4:4] = ["--portfolio-row", str(row)]
+        self.proc = subprocess.Popen(argv, stdout=subprocess.PIPE, text=True)
+
+    def events(self):
+        # One event per line, comma-terminated but the last, between `[` and `]` lines.
+        if self.proc.stdout.readline() != "[\n":
+            return
+        for line in self.proc.stdout:
+            if line == "]\n":
+                return
+            yield json.loads(line.rstrip("\n").rstrip(","))
+
+    def model(self):
+        """The model dump; raises if scav failed."""
+        text = self.proc.stdout.read()
+        if self.proc.wait() != 0:
+            raise subprocess.CalledProcessError(self.proc.returncode, self.proc.args)
+        return json.loads(text)
+
+
+# The kinds `chain_for` reads.
+CHAIN_KINDS = frozenset({"edge_reversed", "route_degraded", "route_walled", "label_centred",
+                         "route_reseated", "route_crossed", "edge_chained", "gap_charged",
+                         "node_placed", "net_planned", "net_waypoint"})
 
 
 # `--trace` traces only the winning drawing; every event belongs to it.
@@ -207,16 +229,21 @@ def main():
         ap.error("one chart, or --stats")
     chart = charts[0]
 
-    events, model = run(scav, chart, args.row, layout, args.search)
+    traced = Traced(scav, chart, args.row, layout, args.search)
     if args.search and not args.raw:
-        print_outline(events)
+        print_outline(traced.events())
+        traced.model()
         return 0
     if args.raw:
-        for e in events:
+        for e in traced.events():
             print(json.dumps(e))
+        traced.model()
         return 0
 
-    shipped = events
+    # Only the per-transition chain reads events, and only these kinds of them.
+    shipped = [e for e in traced.events()
+               if args.trans is not None and e["kind"] in CHAIN_KINDS]
+    model = traced.model()
     states = model["states"]
     routes = model["geometry"]["route"]
 

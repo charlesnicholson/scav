@@ -545,6 +545,62 @@ class TestDump(unittest.TestCase):
         self.assertEqual(2, result.returncode)
         self.assertTrue(result.stderr.startswith("usage: scav <verb>"))
 
+    def run_trace(self, *args: scavtest.Arg) -> subprocess.CompletedProcess[str]:
+        argv = [str(self.exe), "trace", *[str(a) for a in args]]
+        print(f"+ {' '.join(argv)}", flush=True)
+        return subprocess.run(
+            argv,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=self.cfg.repo_root,
+        )
+
+    def test_a_trace_file_holds_the_trace_that_trace_prints(self) -> None:
+        """`--trace-file` keeps the trace out of stdout, and `scav trace` prints it as
+        `--trace` does, at every scope."""
+        flags = [*self.pinned(NETWORK), NETWORK.as_posix()]
+        path = self.cfg.scratch_dir / "dump" / "vac.trace"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        for scope in ([], ["--trace-search"], ["--trace-outline"]):
+            with self.subTest(scope=scope):
+                printed = self.run_dump("--json", "--layout", "--trace", *scope, *flags)
+                self.assertEqual(0, printed.returncode, printed.stderr)
+                end = printed.stdout.index("\n]\n") + 3
+                path.unlink(missing_ok=True)
+                kept = self.run_dump("--json", "--layout", "--trace", *scope,
+                                     "--trace-file", path, *flags)
+                self.assertEqual(0, kept.returncode, kept.stderr)
+                self.assertEqual(printed.stdout[end:], kept.stdout)
+                self.assertFalse(path.with_name(path.name + ".tmp").exists())
+                read = self.run_trace(path)
+                self.assertEqual(0, read.returncode, read.stderr)
+                self.assertEqual("", read.stderr)
+                self.assertEqual(printed.stdout[:end], read.stdout)
+
+    def test_a_trace_file_that_cannot_be_written_is_an_error(self) -> None:
+        path = self.cfg.scratch_dir / "dump" / "no_such_dir" / "vac.trace"
+        result = self.run_dump("--json", "--layout", "--trace", "--trace-file", path,
+                               *self.pinned(NETWORK), NETWORK.as_posix())
+        self.assertEqual(2, result.returncode)
+        self.assertEqual("", result.stdout)
+        self.assertEqual(f"scav: cannot write the trace '{path}'\n", result.stderr)
+        self.assertFalse(path.exists())
+
+    def test_trace_prints_only_a_whole_trace_file(self) -> None:
+        chart = self.write("not_a.trace", "chart g {\n  state A,\n}\n")
+        result = self.run_trace(chart)
+        self.assertEqual(2, result.returncode)
+        self.assertEqual("", result.stdout)
+        self.assertEqual(f"scav: not a whole trace file '{chart}'\n", result.stderr)
+        for args in ([], ["--json", chart], [chart, chart], ["-"]):
+            with self.subTest(args=args):
+                result = self.run_trace(*args)
+                self.assertEqual(2, result.returncode)
+                self.assertEqual("", result.stdout)
+                self.assertTrue(result.stderr.startswith("usage: scav <verb>"),
+                                result.stderr)
+
     # Usage =================================================================
 
     def test_bad_arguments_are_refused(self) -> None:
@@ -555,6 +611,12 @@ class TestDump(unittest.TestCase):
                      ["dump", "--layout"],
                      ["dump", "--trace", chart],
                      ["dump", "--layout", "--trace", "--trace", chart],
+                     ["dump", "--layout", "--trace-file", "x.trace", chart],
+                     ["dump", "--layout", "--search-stats", "--trace-file", "x.trace",
+                      chart],
+                     ["dump", "--layout", "--trace", "--trace-file", "a.trace",
+                      "--trace-file", "b.trace", chart],
+                     ["dump", "--layout", "--trace", "--trace-file"],
                      ["dump", "--json", "--json", chart],
                      ["dump", "--layout", "--layout", chart],
                      ["dump", "--hash", "--hash", chart],
