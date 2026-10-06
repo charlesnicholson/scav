@@ -154,15 +154,23 @@ TEST_CASE(
   CHECK(memo.arrangement(plain) == arranged);
 
   // Numbered against another ordering's encoding, a frame takes the number it would take
-  // anyway.
+  // anyway. A call to `other` between clears the thread's last numbering in `memo`.
   CandidateMemo::Blocks encoded;
   REQUIRE(memo.frame_ids(plain, fresh, nullptr, &encoded));
   CHECK(fresh == a);
   CHECK(encoded.ids == a);
+  REQUIRE(other.frame_ids(plain, fresh));
+  std::vector<uint32_t> alone;
+  REQUIRE(memo.frame_ids(moved, alone));
+  REQUIRE(other.frame_ids(plain, fresh));
   std::vector<uint32_t> like;
   REQUIRE(memo.frame_ids(moved, like, &encoded));
+  CHECK(like == alone);
   CHECK(like == b);
-  CHECK(memo.arrangement(moved, &encoded) == memo.arrangement(moved));
+  (void)other.arrangement(plain);
+  uint32_t const moved_alone{ memo.arrangement(moved) };
+  (void)other.arrangement(plain);
+  CHECK(memo.arrangement(moved, &encoded) == moved_alone);
 }
 
 TEST_CASE(
@@ -196,8 +204,7 @@ TEST_CASE(
   CHECK(key(row, plain, {}) == base);
   CHECK(key(row2, plain, {}) != base);
   CHECK(key(row, moved, {}) != base);
-  // The router reads no pin at a port end.
-  CHECK(key(row, plain, { ported }) == base);
+  CHECK(key(row, plain, { ported }) == base);  // the router reads no pin at a port end
   uint32_t const faced{ key(row, plain, { boxed }) };
   CHECK(faced != base);
   // The last pin naming an end decides it, and pins naming different ends commute.
@@ -225,8 +232,13 @@ TEST_CASE(
   wider.node_sep += 1;
   uint32_t const wider_word{ memo.profile_word(wider) };
   CHECK(wider_word != profile);
+  // A drawing in `other` clears the thread's last numbering in `memo`.
+  CandidateMemo other{ f.c, f.g };
+  uint32_t const other_profile{ other.profile_word(f.p) };
+  auto const clear = [&]() { (void)other.drawing(plain, z, other_profile); };
   uint32_t const drawn{ memo.drawing(plain, z, profile) };
   REQUIRE(drawn != INVALID);
+  clear();
   CHECK(memo.drawing(plain, z, profile) == drawn);
   CHECK(memo.drawing(plain, z, wider_word) != drawn);
   CandidateMemo::Blocks kept;
@@ -237,8 +249,11 @@ TEST_CASE(
     SubmachineOrders o{ plain };
     SizedLayout w{ z };
     edit(o, w);
+    clear();
+    uint32_t const alone{ memo.drawing(o, w, profile) };
+    clear();
     uint32_t const out{ memo.drawing(o, w, profile, &kept) };
-    CHECK(memo.drawing(o, w, profile) == out);
+    CHECK(out == alone);
     return out;
   };
   // A nested frame and its first state, a state node, and a segment with a boundary node.
@@ -465,6 +480,36 @@ TEST_CASE("candidate memo: a released claim leaves the score unset and the bound
   CHECK(back.route_bound == 70);
 }
 
+TEST_CASE("candidate memo: a labelled release bounds only labelled requests") {
+  Fixture const f;
+  CandidateMemo memo{ f.c, f.g };
+  SubmachineOrders const plain{ f.order() };
+  uint32_t const drawn{ memo.drawing(plain, f.size(plain), memo.profile_word(f.p)) };
+  REQUIRE(drawn != INVALID);
+  std::vector<uint32_t> const none;
+  uint32_t const e{ memo.find_score(drawn, none, false).entry };
+  REQUIRE(e != INVALID);
+  MemoScore got;
+  REQUIRE(memo.claim(e, true, got) == Claim::Taken);
+  memo.release(e, true, 90);
+  CHECK(memo.recall(e, false).route_bound == -1);
+  CHECK(memo.find_score(drawn, none, false).route_bound == -1);
+  CHECK(memo.recall(e, true).route_bound == 90);
+  CHECK(memo.find_score(drawn, none, true).route_bound == 90);
+  memo.set_route_bound(e, 40);
+  CHECK(memo.recall(e, false).route_bound == 40);
+  CHECK(memo.recall(e, true).route_bound == 90);
+  // An unlabelled release bounds both requests.
+  REQUIRE(memo.claim(e, false, got) == Claim::Taken);
+  memo.release(e, false, 60);
+  CHECK(memo.recall(e, false).route_bound == 60);
+  CHECK(memo.recall(e, true).route_bound == 90);
+  REQUIRE(memo.claim(e, false, got) == Claim::Taken);
+  memo.release(e, false, 120);
+  CHECK(memo.recall(e, false).route_bound == 120);
+  CHECK(memo.recall(e, true).route_bound == 120);
+}
+
 TEST_CASE("candidate memo: a route bound comes back beside a score it does not answer") {
   Fixture const f;
   CandidateMemo memo{ f.c, f.g };
@@ -553,7 +598,6 @@ TEST_CASE("candidate memo: past its budget it empties, and issues no number twic
   Fixture const f;
   // A budget one entry fills: every insert past the first empties the tables.
   CandidateMemo memo{ f.c, f.g, 1 };
-  uint32_t const row{ memo.row_word(f.row) };
   SubmachineOrders const plain{ f.order() };
   uint32_t const drawn{ memo.drawing(plain, f.size(plain), memo.profile_word(f.p)) };
   REQUIRE(drawn != INVALID);
@@ -573,13 +617,59 @@ TEST_CASE("candidate memo: past its budget it empties, and issues no number twic
   REQUIRE(again != INVALID);
   CHECK(again != e);
   CHECK_FALSE(memo.find_score(drawn, none, true).found);
-  // A link to an entry since emptied away reads nothing.
   uint32_t const plain_at{ memo.arrangement(plain) };
   REQUIRE(plain_at != INVALID);
-  memo.link(memo.find_ordering(row, plain_at, none).key, again);
-  CHECK_FALSE(memo.recall(memo.find_ordering(row, plain_at, none).entry, true).found);
   uint32_t const moved{ memo.arrangement(f.order(f.moved_rank())) };
   REQUIRE(moved != INVALID);
   CHECK(moved != plain_at);
   CHECK(memo.peak_bytes() > 0);
+}
+
+TEST_CASE("candidate memo: the tables never hold more than the budget") {
+  Fixture const f;
+  constexpr uint64_t BUDGET{ uint64_t{ 64 } << 10U };
+  CandidateMemo memo{ f.c, f.g, BUDGET };
+  uint32_t const row{ memo.row_word(f.row) };
+  std::vector<uint32_t> faces;
+  uint64_t most{ 0 };
+  for (uint32_t i = 0; i < 20000; ++i) {
+    faces.assign(1 + (i % 7), i);
+    (void)memo.find_score(i, faces, (i % 2) == 0);
+    (void)memo.find_ordering(row, i, faces);
+    uint64_t const held{ memo.held_bytes() };
+    most = (held > most) ? held : most;
+    REQUIRE(held <= BUDGET);
+  }
+  CHECK(most > (BUDGET / 2));
+  CHECK(memo.peak_bytes() >= most);
+}
+
+TEST_CASE("candidate memo: a link to an entry since emptied away reads nothing") {
+  Fixture const f;
+  CandidateMemo memo{ f.c, f.g };
+  uint32_t const row{ memo.row_word(f.row) };
+  SubmachineOrders const plain{ f.order() };
+  uint32_t const drawn{ memo.drawing(plain, f.size(plain), memo.profile_word(f.p)) };
+  uint32_t const plain_at{ memo.arrangement(plain) };
+  REQUIRE(drawn != INVALID);
+  REQUIRE(plain_at != INVALID);
+  std::vector<uint32_t> const none;
+  uint32_t const old{ memo.find_score(drawn, none, true).entry };
+  REQUIRE(old != INVALID);
+  memo.empty();
+  // The same key takes a new entry at the old one's shard and index, and a score.
+  uint32_t const now{ memo.find_score(drawn, none, true).entry };
+  REQUIRE(now != INVALID);
+  CHECK(now != old);
+  memo.set_score(
+      now,
+      true,
+      { .cost = { .t0_violations = 0, .t1_hints = 0, .t2 = 9 }, .viable = true });
+  REQUIRE(memo.recall(now, true).found);
+  uint32_t const key{ memo.find_ordering(row, plain_at, none).key };
+  REQUIRE(key != INVALID);
+  memo.link(key, old);
+  CandidateMemo::Linked const linked{ memo.find_ordering(row, plain_at, none) };
+  CHECK(linked.entry == old);
+  CHECK_FALSE(memo.recall(linked.entry, true).found);
 }

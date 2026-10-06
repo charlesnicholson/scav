@@ -305,6 +305,7 @@ struct SearchStats {
   uint64_t memo_bytes{ 0 };  // the most a layout's candidate memo held
   uint64_t aliased{ 0 };     // rows laid out and searched as an earlier row
   uint64_t deferred{ 0 };    // moves rescored after another thread routed their drawing
+  uint64_t relaid{ 0 };      // bounds laid out afresh to set a don't-look bit
 };
 
 // The process-wide counts sink, shared by every thread; null when nothing counts.

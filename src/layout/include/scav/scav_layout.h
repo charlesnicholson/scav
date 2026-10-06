@@ -173,6 +173,8 @@ struct SearchPins {
 // compaction, ratio source and fold; bounds `portfolio_m` and `layout_run`'s `row`.
 inline constexpr uint32_t LAYOUT_SEARCH_ROWS{ 16 };
 
+struct SearchStats;
+
 // Lays out and searches the first `portfolio_m` table rows, less the compaction rows when
 // `search_cull` is set; keeps the lowest `Cost`.
 // Writes the geometry columns and sizes `placed` to the path boxes. False leaves the
@@ -186,6 +188,7 @@ inline constexpr uint32_t LAYOUT_SEARCH_ROWS{ 16 };
 // `taken`: every pin the drawing rests on.
 // `pins`: a prior run's `taken`, seeding phase 1. With that run's row in `row` and
 // `portfolio_k` 0 it reproduces that run; a nonzero `portfolio_k` searches on from it.
+// `stats`: gains this run's search counts.
 bool layout_run(Chart &c,
                 scav_spaces const &s,
                 scav_layout_opts const &o,
@@ -196,7 +199,8 @@ bool layout_run(Chart &c,
                 uint32_t row = INVALID,
                 uint32_t *moves = nullptr,
                 SearchPins *taken = nullptr,
-                SearchPins const *pins = nullptr);
+                SearchPins const *pins = nullptr,
+                SearchStats *stats = nullptr);
 
 enum class TraceScope : uint32_t {
   Shipped,  // a single-threaded re-run of the winning row and pins, searching nothing

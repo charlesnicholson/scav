@@ -1,6 +1,5 @@
-// The culled search: its row table, the rows it kicks and refolds, its don't-look bits
-// against the whole last round, its independence of threads, the label bound and the
-// trace, and the jitter seed.
+// The culled search: its rows, kicks and refolds, its don't-look bits, its independence of
+// threads, the label bound, the trace and the jitter seed.
 
 #include "layout/route.h"
 #include "layout/size.h"
@@ -27,6 +26,9 @@ namespace scav {
 
 void search_table(scav_profile const &p, std::vector<uint32_t> &rows);
 Row search_row(scav_profile const &p, uint32_t index);
+void kick_order(std::vector<uint32_t> &rest,
+                std::vector<Cost> const &cost,
+                std::vector<int64_t> const &jit);
 void search_changes(Chart const &c,
                     SizedLayout const &was,
                     Routes const &was_routes,
@@ -40,6 +42,10 @@ uint64_t layout_test_dont_look_checked();
 uint64_t layout_test_dont_look_mismatches();
 void layout_test_label_bound(bool on, bool verify);
 void layout_test_search_memo(bool on);
+void layout_test_candidate_memo_empty(uint32_t every);
+void layout_test_bound_replay(bool on);
+uint64_t layout_test_bound_replayed();
+uint64_t layout_test_bound_replay_mismatches();
 
 }  // namespace scav
 
@@ -69,6 +75,8 @@ struct SwitchGuard {
     layout_test_dont_look_verify(false);
     layout_test_label_bound(true, false);
     layout_test_search_memo(true);
+    layout_test_candidate_memo_empty(0);
+    layout_test_bound_replay(false);
   }
 };
 
@@ -81,6 +89,7 @@ struct Laid {
   uint64_t offered{ 0 };
   uint64_t taken{ 0 };
   uint64_t skipped{ 0 };
+  uint64_t relaid{ 0 };
 };
 
 // Every pin as words, in `SearchPins` order.
@@ -138,11 +147,18 @@ Laid lay(char const *name, scav_profile const &p, bool labelled, uint32_t thread
   Laid out;
   SearchPins taken;
   SearchStats counted;
-  search_stats_set(&counted);
-  bool const ran{
-    layout_run(c, s, opts, placed, diags, nullptr, &out.tuple, INVALID, nullptr, &taken)
-  };
-  search_stats_set(nullptr);
+  bool const ran{ layout_run(c,
+                             s,
+                             opts,
+                             placed,
+                             diags,
+                             nullptr,
+                             &out.tuple,
+                             INVALID,
+                             nullptr,
+                             &taken,
+                             nullptr,
+                             &counted) };
   REQUIRE(ran);
   out.structural = layout_structural_hash(c);
   out.coordinate = layout_coordinate_hash(c);
@@ -152,6 +168,7 @@ Laid lay(char const *name, scav_profile const &p, bool labelled, uint32_t thread
     out.taken += counted.taken[k];
     out.skipped += counted.skipped[k];
   }
+  out.relaid = counted.relaid;
   return out;
 }
 
@@ -411,6 +428,55 @@ TEST_CASE("search: the culled search reaches one drawing with the label bound on
   }
 }
 
+TEST_CASE(
+    "search: a candidate memo emptied before labelling leaves the culled search as it "
+    "is") {
+  // Labelling then lays out afresh moves the bound pass answered from the memo.
+  SwitchGuard const guard;
+  layout_test_search_memo(false);
+  for (char const *name : { "brew.scav", "dock.scav", "kiln.scav" }) {
+    std::string const chart{ name };
+    CAPTURE(chart);
+    Laid const want{ lay(name, culled(), true, 1) };
+    for (uint32_t const every : { 1U, 3U }) {
+      CAPTURE(every);
+      layout_test_candidate_memo_empty(every);
+      Laid const got{ lay(name, culled(), true, 1) };
+      check_same_drawing(got, want);
+      CHECK(got.offered == want.offered);
+      CHECK(got.taken == want.taken);
+      CHECK(got.skipped == want.skipped);
+    }
+    layout_test_candidate_memo_empty(0);
+  }
+}
+
+TEST_CASE("search: a bound pass scored again after its labelling sets the same bits") {
+  SwitchGuard const guard;
+  layout_test_search_memo(false);
+  for (uint32_t const every : { 0U, 3U }) {
+    for (char const *name : { "brew.scav", "dock.scav", "kiln.scav" }) {
+      CAPTURE(every);
+      std::string const chart{ name };
+      CAPTURE(chart);
+      layout_test_candidate_memo_empty(every);
+      layout_test_bound_replay(true);
+      (void)lay(name, culled(), true, 1);
+      CHECK(layout_test_bound_replayed() > 0);
+      CHECK(layout_test_bound_replay_mismatches() == 0);
+    }
+  }
+}
+
+TEST_CASE("search: the bounds laid out afresh for the bits are counted") {
+  // Only a labelled score the culled search's bits cannot read is laid out again.
+  SwitchGuard const guard;
+  layout_test_search_memo(false);
+  CHECK(lay("brew.scav", culled(), true, 1).relaid > 0);
+  CHECK(lay("brew.scav", culled(), false, 1).relaid == 0);
+  CHECK(lay("brew.scav", readable(), true, 1).relaid == 0);
+}
+
 TEST_CASE("search: a traced culled search draws what the untraced one ships") {
   Chart traced{ loaded("dock.scav") };
   std::vector<scav_path_box> const boxes{ label_boxes(traced) };
@@ -441,16 +507,29 @@ TEST_CASE("search: a traced culled search draws what the untraced one ships") {
   CHECK(layout_structural_hash(traced) == shipped.structural);
 }
 
+TEST_CASE("search: kicks stacked after a round's pick rank by cost plus jitter") {
+  std::vector<Cost> const cost{ { .t0_violations = 0, .t1_hints = 0, .t2 = 100 },
+                                { .t0_violations = 0, .t1_hints = 0, .t2 = 101 },
+                                { .t0_violations = 0, .t1_hints = 0, .t2 = 102 },
+                                { .t0_violations = 0, .t1_hints = 0, .t2 = 101 } };
+  std::vector<uint32_t> rest{ 3, 0, 1, 2 };
+  kick_order(rest, cost, { 0, 0, 0, 0 });
+  CHECK(rest == std::vector<uint32_t>{ 0, 3, 1, 2 });  // ties keep their order
+  rest = { 0, 1, 2, 3 };
+  kick_order(rest, cost, { 5, 0, 0, 3 });
+  CHECK(rest == std::vector<uint32_t>{ 1, 2, 3, 0 });
+}
+
 TEST_CASE("search: a jitter seed draws one drawing at every thread count") {
-  // Seed 0 is the unperturbed search; a seed breaks near-ties the same way on any thread.
+  // A seed breaks near-ties the same way on any thread; seed 7 moves kiln.
   for (bool const cull : { false, true }) {
     CAPTURE(cull);
     scav_profile p{ cull ? culled() : readable() };
+    REQUIRE(p.jitter_seed == 0);
     Laid const plain{ lay("kiln.scav", p, false) };
-    p.jitter_seed = 0;
-    check_same_drawing(lay("kiln.scav", p, false), plain);
     p.jitter_seed = 7;
     Laid const one{ lay("kiln.scav", p, false, 1) };
+    CHECK(one.pins != plain.pins);
     check_same_drawing(lay("kiln.scav", p, false, 0), one);
   }
 }

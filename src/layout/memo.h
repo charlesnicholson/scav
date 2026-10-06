@@ -52,11 +52,6 @@ class KeyIndex {
   static_assert(sizeof(Slot) == 8);
   static_assert(sizeof(Entry) == 8);
 
- public:
-  // Bytes a key holds besides its words: its entry and, at most half full, two slots.
-  static constexpr size_t ENTRY_BYTES{ sizeof(Entry) + (2 * sizeof(Slot)) };
-
- private:
   // The slot holding the key, or the empty slot it goes in.
   [[nodiscard]] size_t slot_of(uint32_t const *key, uint32_t len, uint64_t hash) const;
   void grow();

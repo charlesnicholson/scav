@@ -319,9 +319,10 @@ declares `scav_stable_sort` — so a call site names its header without a grep.
 layout's processor time (`cpu_ms`, from `std::clock`, wall time on Windows), the
 searches run, the rows laid out and searched as an earlier row because they differ only
 in knobs no sizing of the chart reads (`aliased`), the moves scored again after another
-thread finished routing the same drawing (`deferred`), the candidate memo's peak bytes, the
-answers found by drawing rather than
-by laid ordering (`drawn`), and per Level 1 move kind the candidates offered, those the
+thread finished routing the same drawing (`deferred`), the unlabelled bounds laid out
+afresh because the memo answered a culled-search move with a labelled score that cannot win
+(`relaid`), the candidate memo's peak bytes, the answers found by drawing rather than by
+laid ordering (`drawn`), and per Level 1 move kind the candidates offered, those the
 memo answered (`deduped`), those left unrouted because their route bound reached the
 incumbent (`pruned`), those routed whose Tier 2 reached it before Tier 0 was counted
 (`stopped`), those taken, the moves culled unoffered as changing nothing
@@ -329,7 +330,7 @@ incumbent (`pruned`), those routed whose Tier 2 reached it before Tier 0 was cou
 took a move (`skipped`). `tools/trace.py --stats
 [chart...]` runs it over the corpus, or
 the charts given, at both text scales and tabulates it, with `scored` as offered less
-deduped and pruned. `deduped` varies by a few tenths
+deduped and pruned. `deduped` and `relaid` vary by a few tenths
 of a percent between runs, since two threads can compute one key at once; the drawing
 does not.
 
@@ -361,7 +362,7 @@ its header names every event kind, each kind's fields and their types, and the c
 state names, so a reader written from the format needs only the file.
 
 `tools/trace.py` reads the JSON from scav's pipe one line at a time: `--trans N` the
-events behind one transition's route, `--search` the outline, `--raw` every event.
+events behind one transition's route, `--outline` the outline, `--raw` every event.
 
 ## The Unicode tables
 

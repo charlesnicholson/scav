@@ -1,6 +1,5 @@
-// Level 1 search shortcuts checked against runs without them: the search memo, the
-// candidate memo, unscored no-op faces, culled moves, and face moves scored from the
-// incumbent's prefix.
+// Level 1 shortcuts checked against runs without them: the search and candidate memos,
+// unscored no-op faces, culled moves, and face moves scored from the incumbent's prefix.
 
 #include "layout/candidate_memo.h"
 #include "layout/pack.h"
@@ -14,9 +13,11 @@
 #include "doctest.h"
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <initializer_list>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -48,6 +49,7 @@ uint32_t layout_test_search_memo_hits();
 uint32_t layout_test_search_memo_mismatches();
 void layout_test_candidate_memo(bool on, bool verify);
 void layout_test_candidate_memo_budget(uint64_t bytes);
+uint32_t layout_test_candidate_memos_built();
 uint64_t layout_test_candidate_memo_deduped();
 uint64_t layout_test_candidate_memo_drawn();
 uint64_t layout_test_candidate_memo_faced();
@@ -62,6 +64,9 @@ void layout_test_row_alias(bool on);
 std::vector<Cost> const &layout_test_schedule_first();
 std::vector<Cost> const &layout_test_schedule_second();
 std::vector<Cost> const &layout_test_schedule_kept();
+void layout_test_degrade(bool on);
+uint64_t layout_test_degraded();
+uint64_t layout_test_taken_degraded();
 
 }  // namespace scav
 
@@ -116,7 +121,11 @@ struct Laid {
 
 // With `labelled`, a path box for every routed transition, so a layout places labels;
 // with `culled`, the culled search.
-Laid lay_out(char const *name, bool labelled = false, bool culled = false) {
+Laid lay_out(char const *name,
+             bool labelled = false,
+             bool culled = false,
+             uint32_t threads = 0,
+             SearchStats *stats = nullptr) {
   std::string path{ SCAV_TEST_DATA_DIR "/charts/" };
   path += name;
   Loader loader;
@@ -139,9 +148,20 @@ Laid lay_out(char const *name, bool labelled = false, bool culled = false) {
   std::vector<scav_placed> placed;
   scav_profile p{ readable() };
   p.search_cull = culled ? 1 : 0;
-  scav_layout_opts const opts{ .profile = p, .router = 0, .threads = 0 };
+  scav_layout_opts const opts{ .profile = p, .router = 0, .threads = threads };
   Laid out;
-  out.ok = layout_run(c, s, opts, placed, diags);
+  out.ok = layout_run(c,
+                      s,
+                      opts,
+                      placed,
+                      diags,
+                      nullptr,
+                      nullptr,
+                      INVALID,
+                      nullptr,
+                      nullptr,
+                      nullptr,
+                      stats);
   out.structural = layout_structural_hash(c);
   out.coordinate = layout_coordinate_hash(c);
   return out;
@@ -651,14 +671,41 @@ SearchStats counted(char const *name, uint32_t rows) {
   scav_layout_opts const opts{ .profile = p, .router = 0, .threads = 1 };
   std::vector<scav_placed> placed;
   SearchStats out;
-  search_stats_set(&out);
-  bool const laid{ layout_run(c, {}, opts, placed, diags) };
-  search_stats_set(nullptr);
+  bool const laid{ layout_run(c,
+                              {},
+                              opts,
+                              placed,
+                              diags,
+                              nullptr,
+                              nullptr,
+                              INVALID,
+                              nullptr,
+                              nullptr,
+                              nullptr,
+                              &out) };
   REQUIRE(laid);
   return out;
 }
 
 }  // namespace
+
+TEST_CASE("search: a layout builds a candidate memo only when it searches") {
+  std::string path{ SCAV_TEST_DATA_DIR "/charts/estop.scav" };
+  Loader loader;
+  Chart c;
+  std::vector<Diagnostic> diags;
+  std::string failed;
+  REQUIRE(load_file(path.c_str(), loader, c, diags, failed));
+  scav_profile p{ readable() };
+  std::vector<scav_placed> placed;
+  (void)layout_test_candidate_memos_built();
+  for (int32_t const k : { 0, 4 }) {
+    CAPTURE(k);
+    p.portfolio_k = k;
+    REQUIRE(layout_run(c, {}, { .profile = p, .router = 0, .threads = 1 }, placed, diags));
+    CHECK(layout_test_candidate_memos_built() == ((k == 0) ? 0U : 1U));
+  }
+}
 
 TEST_CASE("search: two rows that draw every candidate alike lay each out once") {
   // Rows 0 and 1 differ only in `trybox`, and no frame of these charts packs by box. On
@@ -680,19 +727,54 @@ TEST_CASE("search: two rows that draw every candidate alike lay each out once") 
   CHECK(layout_test_candidate_memo_mismatches() == 0);
 }
 
+TEST_CASE("search stats: a layout counts its own search while another lays out") {
+  auto const load = [](char const *name) {
+    std::string path{ SCAV_TEST_DATA_DIR "/charts/" };
+    path += name;
+    Loader loader;
+    Chart c;
+    std::vector<Diagnostic> diags;
+    std::string failed;
+    REQUIRE(load_file(path.c_str(), loader, c, diags, failed));
+    return c;
+  };
+  scav_layout_opts const opts{ .profile = readable(), .router = 0, .threads = 1 };
+  auto const counts = [&]() {
+    Chart c{ load("brew.scav") };
+    std::vector<scav_placed> placed;
+    std::vector<Diagnostic> diags;
+    std::vector<char> out;
+    REQUIRE(layout_search_stats(c, {}, opts, placed, diags, out));
+    return std::string(out.begin(), out.end());
+  };
+  std::string const alone{ counts() };
+  std::atomic<bool> done{ false };
+  std::atomic<uint32_t> beside{ 0 };
+  Chart const estop{ load("estop.scav") };
+  std::thread other([&] {
+    while (!done.load()) {
+      Chart c{ estop };
+      std::vector<scav_placed> placed;
+      std::vector<Diagnostic> diags;
+      if (layout_run(c, {}, opts, placed, diags)) { ++beside; }
+    }
+  });
+  std::string const shared{ counts() };
+  done.store(true);
+  other.join();
+  CHECK(beside.load() > 0);
+  CHECK(shared == alone);
+}
+
 TEST_CASE(
     "search stats: a layout's moves by kind, the memo's answers among them, and "
     "the same moves without it") {
   CandidateGuard const guard;
   SearchStats on;
-  search_stats_set(&on);
-  bool const laid_on{ lay_out("brew.scav", true).ok };
-  search_stats_set(nullptr);
+  bool const laid_on{ lay_out("brew.scav", true, false, 0, &on).ok };
   layout_test_candidate_memo(false, false);
   SearchStats off;
-  search_stats_set(&off);
-  bool const laid_off{ lay_out("brew.scav", true).ok };
-  search_stats_set(nullptr);
+  bool const laid_off{ lay_out("brew.scav", true, false, 0, &off).ok };
   REQUIRE(laid_on);
   REQUIRE(laid_off);
   // With no sink set, nothing is counted.
@@ -767,6 +849,34 @@ void check_route_bound(std::array<char const *, N> const &charts) {
 }
 
 }  // namespace
+
+TEST_CASE(
+    "search: a seed with a degraded net is stored degraded, and no move onto it is "
+    "taken") {
+  // On one thread the first routing is row 0's seed; each routing of its drawing degrades.
+  struct Guard {
+    Guard() = default;
+    Guard(Guard const &) = delete;
+    Guard &operator=(Guard const &) = delete;
+    ~Guard() {
+      layout_test_degrade(false);
+      layout_test_candidate_memo(true, false);
+    }
+  } const guard;
+  for (bool const culled : { false, true }) {
+    for (char const *name : { "estop.scav", "ota.scav" }) {
+      CAPTURE(culled);
+      std::string const chart{ name };
+      CAPTURE(chart);
+      layout_test_degrade(true);
+      layout_test_candidate_memo(true, true);
+      REQUIRE(lay_out(name, false, culled, 1).ok);
+      CHECK(layout_test_degraded() > 1);  // moves reach the seed's drawing
+      CHECK(layout_test_candidate_memo_mismatches() == 0);
+      CHECK(layout_test_taken_degraded() == 0);
+    }
+  }
+}
 
 TEST_CASE("search: a move pruned by its route bound scores at least that bound") {
   check_route_bound(std::array<char const *, 3>{ "estop.scav", "led.scav", "dock.scav" });
@@ -866,15 +976,11 @@ TEST_CASE("search: rows differing only in knobs no sizing reads search as one, a
         CAPTURE(name);
         layout_test_row_alias(true);
         SearchStats on;
-        search_stats_set(&on);
-        Laid const with{ lay_out(name, labelled, culled) };
-        search_stats_set(nullptr);
+        Laid const with{ lay_out(name, labelled, culled, 0, &on) };
         Schedules const aliased{ schedules() };
         layout_test_row_alias(false);
         SearchStats off;
-        search_stats_set(&off);
-        Laid const without{ lay_out(name, labelled, culled) };
-        search_stats_set(nullptr);
+        Laid const without{ lay_out(name, labelled, culled, 0, &off) };
         CHECK(on.aliased > 0);
         CHECK(off.aliased == 0);
         CHECK(on.searches < off.searches);

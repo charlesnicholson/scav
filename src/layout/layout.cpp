@@ -56,6 +56,8 @@ uint32_t layout_test_search_memo_hits();
 uint32_t layout_test_search_memo_mismatches();
 void layout_test_candidate_memo(bool on, bool verify);
 void layout_test_candidate_memo_budget(uint64_t bytes);
+uint32_t layout_test_candidate_memos_built();
+void layout_test_candidate_memo_empty(uint32_t every);
 uint64_t layout_test_candidate_memo_deduped();
 uint64_t layout_test_candidate_memo_drawn();
 uint64_t layout_test_candidate_memo_faced();
@@ -73,6 +75,12 @@ std::vector<Cost> const &layout_test_schedule_kept();
 void layout_test_dont_look_verify(bool on);
 uint64_t layout_test_dont_look_checked();
 uint64_t layout_test_dont_look_mismatches();
+void layout_test_degrade(bool on);
+uint64_t layout_test_degraded();
+uint64_t layout_test_taken_degraded();
+void layout_test_bound_replay(bool on);
+uint64_t layout_test_bound_replayed();
+uint64_t layout_test_bound_replay_mismatches();
 #endif
 
 SCAV_INTERNAL_BEGIN
@@ -91,6 +99,10 @@ void search_changes(Chart const &c,
                     std::vector<uint8_t> &route,
                     std::vector<uint8_t> &resized);
 uint32_t search_argmin(std::vector<Cost> const &cost, std::vector<uint8_t> const &viable);
+// Orders `rest`, kick indices, by `cost` plus `jit`, ties keeping their order.
+void kick_order(std::vector<uint32_t> &rest,
+                std::vector<Cost> const &cost,
+                std::vector<int64_t> const &jit);
 // Writes to `key` every input of a Level 1 search: the objective, the row, the budget,
 // `refold`, the seed pins in order, and `scope`.
 void search_key(scav_profile const &objective,
@@ -648,6 +660,36 @@ bool lay_facing(Candidate &out,
   return true;
 }
 
+#ifdef SCAV_TESTING
+// Test switch: armed, the first routing records its drawing and every routing of it counts
+// a net outside its region. The counters tally those routings and moves taken onto one.
+bool test_degrade{ false };
+Mutex test_degrade_lock;
+std::vector<int32_t> test_degrade_drawing;  // state rects then route points
+uint64_t test_degraded{ 0 };
+uint64_t test_taken_degraded{ 0 };
+
+// Counts a net of `out` outside its region where `out` routes the recorded drawing.
+void degrade_for_test(Candidate &out) {
+  if (!test_degrade) { return; }
+  std::vector<int32_t> words;
+  for (scav_rect const &r : out.sized.state) {
+    vec_insert(words, words.end(), { r.x, r.y, r.w, r.h });
+  }
+  for (scav_point const &p : out.routes.points) {
+    vec_insert(words, words.end(), { p.x, p.y });
+  }
+  ScopedLock const held{ test_degrade_lock };
+  if (test_degrade_drawing.empty()) {
+    test_degrade_drawing = std::move(words);
+  } else if (words != test_degrade_drawing) {
+    return;
+  }
+  ++out.routes.outside_region;
+  ++test_degraded;
+}
+#endif
+
 // Phase 3 for `out` over `laid` and `out.sized`: routes, retries at wider spacing while a
 // route is unreachable, and covers the chart.
 void lay_routes(Candidate &out,
@@ -677,6 +719,9 @@ void lay_routes(Candidate &out,
                     pins,
                     labels,
                     with.stop);
+#ifdef SCAV_TESTING
+  degrade_for_test(out);
+#endif
   if ((with.stop != nullptr) && with.stop->stopped) {
     out.viable = true;
     return;
@@ -954,7 +999,10 @@ uint64_t test_prefix_mismatches{ 0 };
 // against a lay-out without it. The counters tally answers and mismatches.
 bool test_candidate_memo{ true };
 bool test_candidate_memo_verify{ false };
+uint32_t test_candidate_memo_empty{ 0 };  // empty it before every this-many labellings
+uint32_t test_candidate_memo_labellings{ 0 };
 uint64_t test_candidate_memo_budget{ CandidateMemo::BUDGET };
+uint32_t test_candidate_memos_built{ 0 };  // candidate memos layout_run built
 Mutex test_candidate_memo_lock;
 uint64_t test_candidate_memo_deduped{ 0 };
 uint64_t test_candidate_memo_drawn{ 0 };
@@ -1064,10 +1112,8 @@ struct MemoAccess {
   CandidateMemo::Blocks const *ordered{ nullptr };
   CandidateMemo::Blocks const *laid{ nullptr };
   CandidateMemo::Blocks const *drawing{ nullptr };
-  Cost incumbent{};  // the round's incumbent
-  bool prune{
-    false
-  };  // a move whose route bound reaches `incumbent` scores as that bound
+  Cost incumbent{};     // the round's incumbent
+  bool prune{ false };  // a move whose bound reaches `incumbent` scores as it
   bool defer{ false };  // a move whose drawing another thread is routing is left unscored
 };
 
@@ -1081,6 +1127,7 @@ struct MemoUse {
   bool pruned{ false };       // its route bound reached the incumbent
   bool deferred{ false };     // left unscored while another thread routed its drawing
   bool stopped{ false };      // routed, its Tier 2 then reached the incumbent
+  bool relaid{ false };       // its bound laid out afresh for its don't-look bit
 };
 
 MemoScore memo_score(Scored const &s) {
@@ -1128,8 +1175,8 @@ CostTerms route_bound(Chart const &c,
                     per_trans);
 }
 
-// The share of the incumbent's Tier 2, in tenths, an unseated route bound reaches for the
-// seated bound to be computed.
+// The seated bound is computed where the unseated one reaches this many tenths of the
+// incumbent's Tier 2.
 constexpr int64_t SEATED_FROM_TENTHS{ 7 };
 
 #ifdef SCAV_TESTING
@@ -1226,8 +1273,7 @@ Scored score_memoized(Chart const &c,
 #ifdef SCAV_TESTING
   stops = stops && test_cost_stop;
 #endif
-  // Prunes by the stored route bound, else by that of `bends` sized as `z`, which it
-  // stores.
+  // Prunes by the stored route bound, else by `bends` sized as `z`'s, which it stores.
   auto const pruned_by = [&](std::vector<std::vector<uint32_t>> const &bends,
                              SizedLayout const &z) {
     if (prune_at(stored_bound)) { return true; }
@@ -1699,9 +1745,7 @@ uint64_t move_key(Move const &m) {
          ((param & 0x3FF'FFFFU) << 6U) | (subject << 32U);
 }
 
-constexpr int64_t JITTER_PER_MILLE{
-  2
-};  // the jitter's span against the incumbent's Tier 2
+constexpr int64_t JITTER_PER_MILLE{ 2 };  // the jitter's span, per mille of Tier 2
 
 // `JITTER_PER_MILLE` per mille of `incumbent`'s Tier 2, at least 1.
 int64_t jitter_span(Cost const &incumbent) {
@@ -1873,7 +1917,43 @@ bool test_dont_look_verify{ false };
 Mutex test_dont_look_lock;
 uint64_t test_dont_look_checked{ 0 };
 uint64_t test_dont_look_mismatches{ 0 };
+
+// Test switch: score each bounded round's moves again after its labelling and set their
+// bits again; the counters tally moves scored again and bits that differ.
+bool test_bound_replay{ false };
+uint64_t test_bound_replayed{ 0 };
+uint64_t test_bound_replay_mismatches{ 0 };
 #endif
+
+// One layout's search counts, added to by its threads; a null `to` counts nothing.
+struct RunStats {
+  SearchStats *to{ nullptr };
+  Mutex lock;
+};
+
+// Adds `add` to `run`'s counts; `memo_bytes` takes the larger.
+void stats_add(RunStats *run, SearchStats const &add) {
+  if ((run == nullptr) || (run->to == nullptr)) { return; }
+  ScopedLock const held{ run->lock };
+  SearchStats &to{ *run->to };
+  for (uint32_t k = 0; k < TRACE_MOVES; ++k) {
+    to.offered[k] += add.offered[k];
+    to.deduped[k] += add.deduped[k];
+    to.taken[k] += add.taken[k];
+    to.culled[k] += add.culled[k];
+    to.skipped[k] += add.skipped[k];
+    to.pruned[k] += add.pruned[k];
+    to.stopped[k] += add.stopped[k];
+  }
+  to.drawn += add.drawn;
+  to.faced += add.faced;
+  to.searches += add.searches;
+  to.recalled += add.recalled;
+  to.aliased += add.aliased;
+  to.deferred += add.deferred;
+  to.relaid += add.relaid;
+  to.memo_bytes = imax(to.memo_bytes, add.memo_bytes);
+}
 
 // Suspends this thread's trace sink for its scope.
 struct TraceMuted {
@@ -1885,8 +1965,7 @@ struct TraceMuted {
 };
 
 // Level 1: each round takes the cheapest strictly improving move, ties to enumeration
-// order, and appends its pin to `held`. Per-kind counters cap moves offered at `budget`.
-// Under the culled search, a round skips moves its don't-look bits mark.
+// order, offering `budget` moves per kind at most; culled, it skips moves its bits mark.
 Improved run_search(Chart const &c,
                     SplitGraph const &g,
                     scav_spaces const &s,
@@ -1898,7 +1977,8 @@ Improved run_search(Chart const &c,
                     bool refold,
                     SearchPins const &seed,
                     std::vector<uint8_t> const *scope,
-                    CandidateMemo *memo) {
+                    CandidateMemo *memo,
+                    RunStats *stats) {
   Improved out;
   SearchStats counted;  // this search's counts, added to the sink on return
   counted.searches = 1;
@@ -1930,7 +2010,7 @@ Improved run_search(Chart const &c,
   }
   out.viable = out.best.viable;
   if (!out.viable) {
-    search_stats_add(counted);
+    stats_add(stats, counted);
     return out;
   }
   CostContext const scoring{ cost_context(c, g) };
@@ -1974,7 +2054,10 @@ Improved run_search(Chart const &c,
     if ((access.drawn == INVALID) || out.best.retried) { return; }
     table.box_faces(&held, held_faces);
     CandidateMemo::Recalled const at{ table.find_score(access.drawn, held_faces, true) };
-    table.set_score(at.entry, true, { .cost = out.cost, .viable = true });
+    table.set_score(
+        at.entry,
+        true,
+        { .cost = out.cost, .viable = true, .degraded = out.best.routes.degraded() != 0 });
     if (arranged != INVALID) {
       table.link(table.find_ordering(access.row, arranged, held_faces).key, at.entry);
     }
@@ -2211,9 +2294,9 @@ Improved run_search(Chart const &c,
     culled.clear();
 #endif
   };
+  bool const culled_search{ objective.search_cull != 0 };
   // The culled search's don't-look bits: per move key, 1 where its last score could not
   // beat the incumbent then.
-  bool const culled_search{ objective.search_cull != 0 };
   HashMap<uint64_t, uint8_t> dont_look;
   std::vector<uint8_t> dont_look_now;  // parallel to `round`
   std::vector<Move> skipped;           // the round's moves its bits left unscored
@@ -2284,9 +2367,8 @@ Improved run_search(Chart const &c,
   while (rescan || (cut_scored < budget) || (rev_scored < budget) ||
          (face_scored < budget) || (side_scored < budget) || (pin_scored < budget) ||
          (loop_scored < budget) || (refold && (fold_scored < budget))) {
-    // Enumerates the round's moves, scores them in parallel, then reduces them in order. A
-    // round that takes nothing after its bits skipped moves is followed by a round of
-    // those.
+    // Enumerates, scores in parallel and reduces in order; a round that takes nothing
+    // after its bits skipped moves is followed by a round of just those.
     if (rescan) {
       round.swap(skipped);
       skipped.clear();
@@ -2320,9 +2402,8 @@ Improved run_search(Chart const &c,
     }
 
     access.incumbent = out.cost;
-    // Each candidate runs its phases on one thread; `fresh` scores it without the memo.
-    // `fresh` scores without the memo; `defer` leaves a move unscored while another thread
-    // routes its drawing.
+    // Scores move `i` on this thread: `fresh` without the memo, `defer` leaving it
+    // unscored while another thread routes its drawing.
     auto const score = [&](uint32_t i,
                            bool labels,
                            MemoUse &use,
@@ -2351,8 +2432,7 @@ Improved run_search(Chart const &c,
       return uses[i].deferred;
     };
     // 1 when move `i`'s unlabelled bound cannot beat the incumbent. `known` is that bound,
-    // or its labelled score where `labelled`; a labelled score that cannot win lays it
-    // out.
+    // or where `labelled` a labelled score; one that cannot win has the bound laid out.
     auto const bound_idle =
         [&](uint32_t i, Scored const &known, bool labelled, MemoUse &use) -> uint8_t {
       if (may_win(known, out.cost)) { return 0; }
@@ -2364,6 +2444,7 @@ Improved run_search(Chart const &c,
         access.table->set_score(use.entry, false, memo_score(bound));
       }
       use.deduped = false;
+      use.relaid = true;
       return may_win(bound, out.cost) ? 0U : 1U;
     };
     uint32_t const n{ static_cast<uint32_t>(round.size()) };
@@ -2442,9 +2523,27 @@ Improved run_search(Chart const &c,
         return scored;
       };
       score_round(n, threads, again, bound, deferred);
+#ifdef SCAV_TESTING
+      if ((test_candidate_memo_empty != 0) && (access.table != nullptr)) {
+        bool due{ false };
+        {
+          ScopedLock const locked{ test_candidate_memo_lock };
+          due = ((++test_candidate_memo_labellings) % test_candidate_memo_empty) == 0;
+        }
+        if (due) { access.table->empty(); }
+      }
+#endif
       win = least_by_bound(n, out.cost, jit, got, order, exact);
       kept_n = 0;
 #ifdef SCAV_TESTING
+      for (uint32_t i = 0; test_bound_replay && culled_search && (i < n); ++i) {
+        MemoUse use;
+        Scored const rescored{ score(i, false, use, nullptr) };
+        uint8_t const bit{ bound_idle(i, rescored, use.deduped && use.labelled, use) };
+        ScopedLock const locked{ test_dont_look_lock };
+        ++test_bound_replayed;
+        test_bound_replay_mismatches += (bit != dont_look_now[i]) ? 1U : 0U;
+      }
       if (test_label_bound_verify) {
         verify_bounded_round(n,
                              threads,
@@ -2475,6 +2574,7 @@ Improved run_search(Chart const &c,
       counted.stopped[kind] += uses[i].stopped ? 1U : 0U;
       counted.drawn += uses[i].drawn ? 1U : 0U;
       counted.faced += uses[i].faced ? 1U : 0U;
+      counted.relaid += uses[i].relaid ? 1U : 0U;
     }
 
     // Reduces in enumeration order and emits the trace in that order.
@@ -2584,6 +2684,12 @@ Improved run_search(Chart const &c,
                                 &held,
                                 { .reuse = &was, .fill = &base, .prefix = &incumbent });
     out.cost = best;
+#ifdef SCAV_TESTING
+    if (out.best.routes.degraded() != 0) {
+      ScopedLock const locked{ test_degrade_lock };
+      ++test_taken_degraded;
+    }
+#endif
     (void)cost_terms(scoring, c, g, out.best.sized, out.best.routes, s, objective, &party);
     remember_incumbent();
     if (culled_search) {
@@ -2597,7 +2703,7 @@ Improved run_search(Chart const &c,
                      resized);
     }
   }
-  search_stats_add(counted);
+  stats_add(stats, counted);
   return out;
 }
 
@@ -2627,6 +2733,15 @@ SearchPins get_pins(int32_t const *w, uint32_t &at) {
   }
   return p;
 }
+
+// Deletes the candidate memo it holds on scope exit.
+struct HeldMemo {
+  CandidateMemo *const memo;
+  explicit HeldMemo(CandidateMemo *m) : memo(m) {}
+  HeldMemo(HeldMemo const &) = delete;
+  HeldMemo &operator=(HeldMemo const &) = delete;
+  ~HeldMemo() { delete memo; }
+};
 
 // A layout's search results by `search_key`, shared across threads; `lock` guards each
 // lookup or insert.
@@ -2667,7 +2782,8 @@ Improved search_moves(Chart const &c,
                       SearchPins const &seed,
                       std::vector<uint8_t> const *scope,
                       SearchMemo *memo,
-                      CandidateMemo *candidates) {
+                      CandidateMemo *candidates,
+                      RunStats *stats) {
   auto const search = [&]() {
     return run_search(c,
                       g,
@@ -2680,7 +2796,8 @@ Improved search_moves(Chart const &c,
                       refold,
                       seed,
                       scope,
-                      candidates);
+                      candidates,
+                      stats);
   };
   if ((memo == nullptr) || (trace_sink() != nullptr)) { return search(); }
   std::vector<uint32_t> key;
@@ -2700,7 +2817,7 @@ Improved search_moves(Chart const &c,
   if (hit) {
     SearchStats one;
     one.recalled = 1;
-    search_stats_add(one);
+    stats_add(stats, one);
     Improved out;
     uint32_t at{ 0 };
     out.viable = value[at++] != 0;
@@ -2809,6 +2926,14 @@ Row search_row(scav_profile const &p, uint32_t index) {
   return out;
 }
 
+void kick_order(std::vector<uint32_t> &rest,
+                std::vector<Cost> const &cost,
+                std::vector<int64_t> const &jit) {
+  scav_insertion_sort(rest.data(), rest.data() + rest.size(), [&](uint32_t a, uint32_t b) {
+    return cost_less(jittered(cost[a], jit[a]), jittered(cost[b], jit[b]));
+  });
+}
+
 // The viable row of least cost, lowest index among equals; 0 when none is viable.
 uint32_t search_argmin(std::vector<Cost> const &cost, std::vector<uint8_t> const &viable) {
   uint32_t best{ 0 };
@@ -2906,8 +3031,11 @@ bool layout_run(Chart &c,
                 uint32_t row,
                 uint32_t *moves,
                 SearchPins *taken,
-                SearchPins const *pins) {
+                SearchPins const *pins,
+                SearchStats *stats) {
   MemoRun const scope;
+  RunStats counts;
+  counts.to = stats;
   if (inflations != nullptr) { *inflations = 0; }
   if (tuple != nullptr) { *tuple = 0; }
   scav_profile const &p{ o.profile };
@@ -2955,8 +3083,8 @@ bool layout_run(Chart &c,
     search_table(p, table);
   }
   auto const rows{ static_cast<uint32_t>(table.size()) };
-  // Each row with the knobs sizing never reads at row 0's values; a row whose canonical
-  // row matches an earlier one's lays out and searches as that row, its `alias`.
+  // A row's canonical form takes row 0's values for knobs no sizing reads; a row whose
+  // form matches an earlier row's lays out and searches as that row, its `alias`.
   RowReads reads{ size_row_reads(c, orders) };
 #ifdef SCAV_TESTING
   if (!test_row_alias) {
@@ -2974,7 +3102,7 @@ bool layout_run(Chart &c,
     }
     aliased.aliased += (alias[i] != i) ? 1U : 0U;
   }
-  search_stats_add(aliased);
+  stats_add(&counts, aliased);
   auto const row_of = [&](uint32_t i) { return canonical[i]; };
   bool const culled_search{ p.search_cull != 0 };
   std::vector<Candidate> candidates(rows);
@@ -3021,16 +3149,21 @@ bool layout_run(Chart &c,
   std::vector<SearchPins> held(rows, seed);
   SearchMemo memo;
   SearchMemo *memo_at{ &memo };
-  // Every search of this layout scores its moves through one candidate memo.
+  // Every search of this layout scores its moves through one candidate memo, on the heap.
   uint64_t memo_budget{ CandidateMemo::BUDGET };
+  bool memoized{ budget != 0 };
 #ifdef SCAV_TESTING
   memo_budget = test_candidate_memo_budget;
-#endif
-  CandidateMemo move_memo{ c, g, memo_budget };
-  CandidateMemo *move_memo_at{ &move_memo };
-#ifdef SCAV_TESTING
+  memoized = memoized && test_candidate_memo;
   if (!test_search_memo) { memo_at = nullptr; }
-  if (!test_candidate_memo) { move_memo_at = nullptr; }
+#endif
+  HeldMemo const move_memo{ memoized ? new CandidateMemo{ c, g, memo_budget } : nullptr };
+  CandidateMemo *const move_memo_at{ move_memo.memo };
+#ifdef SCAV_TESTING
+  if (memoized) {
+    ScopedLock const held_lock{ test_candidate_memo_lock };
+    ++test_candidate_memos_built;
+  }
   test_search_memo_hits = 0;
   test_search_memo_mismatches = 0;
 #endif
@@ -3065,7 +3198,8 @@ bool layout_run(Chart &c,
                              held[active[k]],
                              nullptr,
                              memo_at,
-                             move_memo_at);
+                             move_memo_at,
+                             &counts);
     });
     for (uint32_t i = 0; i < rows; ++i) {
       if ((twin[i] == INVALID) || !done[twin[i]].viable) { continue; }
@@ -3104,7 +3238,8 @@ bool layout_run(Chart &c,
                           start,
                           within,
                           memo_at,
-                          move_memo_at);
+                          move_memo_at,
+                          &counts);
     };
     // Searches `start` in the `redo` frames, then in turn in the frames enclosing them and
     // in the `redo` frames again, until a search improves nothing. `framed` gets the first
@@ -3310,10 +3445,9 @@ bool layout_run(Chart &c,
       for (uint32_t const j : winners) {
         if (j != single) { vec_push_back(rest, j); }
       }
-      scav_insertion_sort(
-          rest.data(),
-          rest.data() + rest.size(),
-          [&](uint32_t a, uint32_t b) { return cost_less(tried[a].cost, tried[b].cost); });
+      std::vector<Cost> tried_cost(tried.size());
+      for (uint32_t j = 0; j < tried.size(); ++j) { tried_cost[j] = tried[j].cost; }
+      kick_order(rest, tried_cost, jit);
       for (uint32_t const j : rest) {
         std::vector<uint8_t> redo(c.submachines.size(), 0);
         if (kick_frame[j] < redo.size()) { redo[kick_frame[j]] = 1; }
@@ -3370,7 +3504,7 @@ bool layout_run(Chart &c,
       kick(kicking[k]);
     });
     // A second search from each row's converged pins adds the fold moves; the cheaper is
-    // kept, ties to the first. The culled search does not refold a repeated row.
+    // kept, ties to the first. The culled search refolds only the rows that repeat none.
     std::vector<Candidate> first{ candidates };
     std::vector<Cost> const first_cost{ cost };
     std::vector<SearchPins> first_held{ held };
@@ -3445,8 +3579,8 @@ bool layout_run(Chart &c,
 
   write_columns(c, sized, routes, inputs_digest(s, o));
   SearchStats held_bytes;
-  held_bytes.memo_bytes = move_memo.peak_bytes();
-  search_stats_add(held_bytes);
+  held_bytes.memo_bytes = (move_memo_at != nullptr) ? move_memo_at->peak_bytes() : 0;
+  stats_add(&counts, held_bytes);
   return true;
 }
 
@@ -3542,11 +3676,9 @@ bool layout_search_stats(Chart &c,
                          uint32_t *tuple,
                          SearchPins *taken) {
   SearchStats counted;
-  search_stats_set(&counted);
   bool const ran{
-    layout_run(c, s, o, placed, diags, nullptr, tuple, row, nullptr, taken, pins)
+    layout_run(c, s, o, placed, diags, nullptr, tuple, row, nullptr, taken, pins, &counted)
   };
-  search_stats_set(nullptr);
   search_stats_to_json(counted, out);
   return ran;
 }
@@ -3705,6 +3837,17 @@ void layout_test_search_memo(bool on) { test_search_memo = on; }
 void layout_test_candidate_memo_budget(uint64_t bytes) {
   test_candidate_memo_budget = bytes;
 }
+uint32_t layout_test_candidate_memos_built() {
+  ScopedLock const held{ test_candidate_memo_lock };
+  uint32_t const out{ test_candidate_memos_built };
+  test_candidate_memos_built = 0;
+  return out;
+}
+void layout_test_candidate_memo_empty(uint32_t every) {
+  ScopedLock const held{ test_candidate_memo_lock };
+  test_candidate_memo_empty = every;
+  test_candidate_memo_labellings = 0;
+}
 void layout_test_candidate_memo(bool on, bool verify) {
   test_candidate_memo = on;
   test_candidate_memo_verify = verify;
@@ -3779,6 +3922,35 @@ uint64_t layout_test_dont_look_checked() {
 uint64_t layout_test_dont_look_mismatches() {
   ScopedLock const held{ test_dont_look_lock };
   return test_dont_look_mismatches;
+}
+void layout_test_degrade(bool on) {
+  ScopedLock const held{ test_degrade_lock };
+  test_degrade = on;
+  test_degrade_drawing.clear();
+  test_degraded = 0;
+  test_taken_degraded = 0;
+}
+uint64_t layout_test_degraded() {
+  ScopedLock const held{ test_degrade_lock };
+  return test_degraded;
+}
+uint64_t layout_test_taken_degraded() {
+  ScopedLock const held{ test_degrade_lock };
+  return test_taken_degraded;
+}
+void layout_test_bound_replay(bool on) {
+  ScopedLock const held{ test_dont_look_lock };
+  test_bound_replay = on;
+  test_bound_replayed = 0;
+  test_bound_replay_mismatches = 0;
+}
+uint64_t layout_test_bound_replayed() {
+  ScopedLock const held{ test_dont_look_lock };
+  return test_bound_replayed;
+}
+uint64_t layout_test_bound_replay_mismatches() {
+  ScopedLock const held{ test_dont_look_lock };
+  return test_bound_replay_mismatches;
 }
 #endif
 

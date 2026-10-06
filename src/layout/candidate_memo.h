@@ -115,7 +115,7 @@ class CandidateMemo {
     bool found{ false };
     bool labelled{ false };  // the labelled score answered
     MemoScore score;
-    int64_t route_bound{ -1 };  // the entry's `cost_bound` Tier 2, -1 while unset
+    int64_t route_bound{ -1 };  // a Tier 2 the requested score reaches, -1 while unset
   };
 
   // Finds or makes drawing `drawn`'s score entry under `faces`: a bound request reads the
@@ -143,7 +143,8 @@ class CandidateMemo {
   bool score(uint32_t e, bool labelled, MemoScore &out);
   void set_score(uint32_t e, bool labelled, MemoScore const &s);
 
-  // Stores the Tier 2 of entry `e`'s `cost_bound`, whose Tier 0 is zero.
+  // Stores the Tier 2 of entry `e`'s `cost_bound`, whose Tier 0 is zero, as the bound of
+  // both its scores.
   void set_route_bound(uint32_t e, int64_t t2);
 
   // Claims entry `e`'s labelled or unlabelled score for the caller to set; `Scored` fills
@@ -151,7 +152,7 @@ class CandidateMemo {
   Claim claim(uint32_t e, bool labelled, MemoScore &out);
 
   // Releases the caller's claim on entry `e`'s labelled or unlabelled score, leaving it
-  // unset, and raises the entry's route bound to `t2`.
+  // unset, and raises that score's route bound to `t2`; an unlabelled one bounds both.
   void release(uint32_t e, bool labelled, int64_t t2);
 
   // Marks entry `e` retried: it then never answers and takes no score.
@@ -160,17 +161,21 @@ class CandidateMemo {
   // The most bytes the tables held at once: keys, entries, slots and records.
   [[nodiscard]] uint64_t peak_bytes() const;
 
+  // The bytes the tables hold now, as their vectors' capacities.
+  [[nodiscard]] uint64_t held_bytes();
+
+  // Empties every table; a number issued before is never issued again.
+  void empty();
+
  private:
   // An entry's unlabelled then labelled score, `t0` a Tier-0 count or a negative tag, and
-  // its route bound's Tier 2, `bound_hi` negative while unset.
+  // the Tier 2 each reaches, -1 while unset; the first bounds both.
   struct ScoreRecord {
     std::array<int32_t, 2> t0;
-    std::array<uint32_t, 2> t2_hi;
-    std::array<uint32_t, 2> t2_lo;
-    int32_t bound_hi;
-    uint32_t bound_lo;
+    std::array<int64_t, 2> t2;
+    std::array<int64_t, 2> bound;
   };
-  static_assert(sizeof(ScoreRecord) == 32);
+  static_assert(sizeof(ScoreRecord) == 40);
 
   // Writes `r`'s score `k` (0 unlabelled, 1 labelled) to `out`; false while it is unset.
   static bool read(ScoreRecord const &r, uint32_t k, MemoScore &out);
@@ -201,7 +206,7 @@ class CandidateMemo {
 
   // Tables are striped by key hash into shards under their own locks; a number is the
   // shard's `base` plus the key's index, shifted by `SHARD_BITS`, or'd with the shard.
-  static constexpr uint32_t SHARD_BITS{ 8 };
+  static constexpr uint32_t SHARD_BITS{ 6 };
   static constexpr uint32_t SHARDS{ 1U << SHARD_BITS };
   struct IndexShard {
     Mutex lock;
@@ -228,20 +233,31 @@ class CandidateMemo {
     std::vector<uint32_t> links;  // parallel to `keys`: a score number or INVALID
   };
 
+  // The bytes a shard holds, as its vectors' capacities.
+  static uint64_t held(IndexShard const &f) { return f.keys.bytes(); }
+  static uint64_t held(FacingShard const &f) {
+    return f.keys.bytes() + (f.records.capacity() * sizeof(FacingRecord)) +
+           (f.turns.capacity() * sizeof(uint32_t));
+  }
+  static uint64_t held(ScoreShard const &f) {
+    return f.keys.bytes() + (f.records.capacity() * sizeof(ScoreRecord));
+  }
+  static uint64_t held(LinkShard const &f) {
+    return f.keys.bytes() + (f.links.capacity() * sizeof(uint32_t));
+  }
+
   // The shard holding a key of hash `hash`.
   static uint32_t shard_of(uint64_t hash) {
     return static_cast<uint32_t>(hash >> 20U) & (SHARDS - 1);
   }
-  // The number for index `index` of shard `shard` at base `base`; INVALID past the
-  // numbering.
+  // The number of index `index` in shard `shard` at base `base`; INVALID past the range.
   static uint32_t number(uint32_t base, uint32_t index, uint32_t shard) {
     uint64_t const n{ uint64_t{ base } + index };
     return (n < (INVALID >> SHARD_BITS))
                ? ((static_cast<uint32_t>(n) << SHARD_BITS) | shard)
                : INVALID;
   }
-  // The index of number `e` in a shard at base `base` holding `size` keys; INVALID where
-  // `e` was emptied away.
+  // The index of number `e` in a shard at `base` with `size` keys; INVALID once emptied.
   static uint32_t index_of(uint32_t e, uint32_t base, size_t size) {
     uint32_t const n{ e >> SHARD_BITS };
     return ((e == INVALID) || (n < base) || ((n - base) >= size)) ? INVALID : (n - base);
@@ -253,7 +269,6 @@ class CandidateMemo {
 
   // Adds `n` bytes to `charged`, emptying every table past `budget`.
   void charge(uint64_t n);
-  void empty();
 
   Chart const &chart;
   SplitGraph const &graph;

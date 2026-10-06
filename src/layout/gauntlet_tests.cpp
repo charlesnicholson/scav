@@ -2014,9 +2014,8 @@ TEST_CASE(
 
 TEST_CASE(
     "gauntlet: a loop room that sits alike at either end of its face lays out alike") {
-  // Each state with inner loops, from each placement to the other end of its face: where
-  // `loop_room_unmoved` holds, the two lay out the same rects and routes. `rooms` widened
-  // past its loops is the case where it does not.
+  // Each inner-loop placement against the other end of its face: where `loop_room_unmoved`
+  // holds both lay out alike; on `rooms` widened past its loops it fails.
   scav_profile const p{ one_row(readable()) };
   uint32_t alike{ 0 };
   uint32_t apart{ 0 };
