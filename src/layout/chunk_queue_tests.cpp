@@ -21,7 +21,9 @@ using Clock = std::chrono::steady_clock;
 // Chunk `k` of a run: `bytes` bytes, each a function of its chunk and position.
 std::vector<uint8_t> chunk_bytes(uint32_t k, size_t bytes) {
   std::vector<uint8_t> out(bytes);
-  for (size_t i = 0; i < bytes; ++i) { out[i] = static_cast<uint8_t>((k * 131U) + i); }
+  for (size_t i = 0; i < bytes; ++i) {
+    out[i] = static_cast<uint8_t>((size_t{ k } * 131U) + i);
+  }
   return out;
 }
 

@@ -16,6 +16,8 @@
 #include <cstring>
 #include <string>
 #include <string_view>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 #ifdef SCAV_TESTING
@@ -206,9 +208,7 @@ void put_text(std::vector<uint8_t> &out, std::string_view s) {
 struct Encode {
   std::vector<uint8_t> &out;
   void operator()(char const * /*name*/, uint16_t v) const { put_varint(out, v); }
-  void operator()(char const * /*name*/, uint32_t v) const {
-    put_varint(out, static_cast<uint32_t>(v + 1U));
-  }
+  void operator()(char const * /*name*/, uint32_t v) const { put_varint(out, v + 1U); }
   void operator()(char const * /*name*/, int32_t v) const { put_varint(out, zigzag(v)); }
   void operator()(char const * /*name*/, int64_t v) const { put_varint(out, zigzag(v)); }
   template <size_t N>
@@ -335,7 +335,7 @@ size_t decode_header(TraceDecoder &d) {
     d.failed = true;
     return 0;
   }
-  if (length > static_cast<uint64_t>(r.end - r.at)) { return 0; }
+  if (std::cmp_greater(length, r.end - r.at)) { return 0; }
   Reader body{ .at = r.at, .end = r.at + length };
   std::vector<uint8_t> const &want{ schema() };
   if ((length < want.size()) || (std::memcmp(body.at, want.data(), want.size()) != 0)) {
@@ -347,7 +347,7 @@ size_t decode_header(TraceDecoder &d) {
   bool ok{ body.varint(states) };
   for (uint64_t s = 0; ok && (s < states); ++s) {
     uint64_t n{ 0 };
-    ok = body.varint(n) && (n <= static_cast<uint64_t>(body.end - body.at));
+    ok = body.varint(n) && std::cmp_less_equal(n, body.end - body.at);
     if (ok) {
       d.states.emplace_back(reinterpret_cast<char const *>(body.at), n);
       body.at += n;
@@ -472,15 +472,15 @@ bool atomic_file_commit(AtomicFile &f) {
   bool const closed{ std::fclose(f.file) == 0 };
   f.file = nullptr;
   bool const moved{ closed && replace_file(f.temp.c_str(), f.path.c_str()) };
-  if (!moved) { std::remove(f.temp.c_str()); }
+  if (!moved) { std::ignore = std::remove(f.temp.c_str()); }
   return moved;
 }
 
 void atomic_file_abandon(AtomicFile &f) {
   if (f.file == nullptr) { return; }
-  std::fclose(f.file);
+  std::ignore = std::fclose(f.file);
   f.file = nullptr;
-  std::remove(f.temp.c_str());
+  std::ignore = std::remove(f.temp.c_str());
 }
 
 bool json_flush(JsonOut &j) {
@@ -588,15 +588,12 @@ bool trace_file_json(char const *path, TraceWrite write, void *ctx) {
   JsonOut j{ json_out(write, ctx) };
   std::vector<uint8_t> buffer(TRACE_CHUNK);
   bool ok{ true };
-  while (ok) {
+  for (;;) {
     size_t const got{ std::fread(buffer.data(), 1, buffer.size(), f) };
-    ok = json_write(&j, buffer.data(), got);
-    if (got < buffer.size()) {
-      ok = ok && (std::ferror(f) == 0);
-      break;
-    }
+    ok = json_write(&j, buffer.data(), got) && (std::ferror(f) == 0);
+    if (!ok || (std::feof(f) != 0)) { break; }
   }
-  std::fclose(f);
+  std::ignore = std::fclose(f);
   return ok && json_finish(j);
 }
 

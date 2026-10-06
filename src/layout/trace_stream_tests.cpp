@@ -17,6 +17,7 @@
 #include <limits>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <type_traits>
 #include <vector>
 
@@ -34,19 +35,19 @@ struct Values {
   uint16_t h;
 };
 constexpr std::array<Values, 7> VALUES{ {
-    { 0, 0, 0, 0 },
-    { INVALID, -1, -1, 0xFFFF },
-    { 1, -2, -3, 1 },
-    { INVALID - 1U,
-      std::numeric_limits<int32_t>::min(),
-      std::numeric_limits<int64_t>::min(),
-      0x8000 },
-    { 0x7FFFFFFFU,
-      std::numeric_limits<int32_t>::max(),
-      std::numeric_limits<int64_t>::max(),
-      0x7FFF },
-    { 127, 64, int64_t{ 4294967296 }, 128 },
-    { 128, -65, -int64_t{ 4294967297 }, 127 },
+    { .u = 0, .i = 0, .l = 0, .h = 0 },
+    { .u = INVALID, .i = -1, .l = -1, .h = 0xFFFF },
+    { .u = 1, .i = -2, .l = -3, .h = 1 },
+    { .u = INVALID - 1U,
+      .i = std::numeric_limits<int32_t>::min(),
+      .l = std::numeric_limits<int64_t>::min(),
+      .h = 0x8000 },
+    { .u = 0x7FFFFFFFU,
+      .i = std::numeric_limits<int32_t>::max(),
+      .l = std::numeric_limits<int64_t>::max(),
+      .h = 0x7FFF },
+    { .u = 127, .i = 64, .l = int64_t{ 4294967296 }, .h = 128 },
+    { .u = 128, .i = -65, .l = -int64_t{ 4294967297 }, .h = 127 },
 } };
 
 // Calls `f` on `pass`, `frame`, then each field of the union member `e.kind` carries.
@@ -214,7 +215,7 @@ TraceEvent make(uint32_t k, uint32_t set) {
 // The kind, then every field in `each_field` order, as 64-bit values.
 std::vector<int64_t> values(TraceEvent e) {
   std::vector<int64_t> out{ static_cast<int64_t>(e.kind) };
-  each_field(e, [&out](auto &field) { out.push_back(static_cast<int64_t>(field)); });
+  each_field(e, [&out](auto &field) { out.push_back(int64_t{ field }); });
   return out;
 }
 
@@ -344,7 +345,7 @@ TEST_CASE("trace stream: a malformed or partial stream is refused") {
 
   SUBCASE("a wrong magic") {
     std::vector<uint8_t> bad{ good };
-    bad[0] ^= 1U;
+    bad[0] = static_cast<uint8_t>(bad[0] ^ 1U);
     CHECK_FALSE(decodes(bad));
   }
   SUBCASE("another format version") {
@@ -544,7 +545,7 @@ std::string scratch(std::string_view name) {
 bool exists(std::string const &path) {
   std::FILE *const f{ std::fopen(path.c_str(), "rb") };
   if (f == nullptr) { return false; }
-  std::fclose(f);
+  std::ignore = std::fclose(f);
   return true;
 }
 
@@ -614,8 +615,8 @@ TEST_CASE("trace stream: a file appears only once its stream finishes whole") {
   Chart const c{ named_chart() };
   std::string const path{ scratch("whole.trace") };
   std::string const temp{ path + ".tmp" };
-  std::remove(path.c_str());
-  std::remove(temp.c_str());
+  std::ignore = std::remove(path.c_str());
+  std::ignore = std::remove(temp.c_str());
   std::vector<TraceEvent> const events{ many_events() };
   LayoutTrace want;
   {
@@ -671,7 +672,7 @@ TEST_CASE("trace stream: a failed write leaves no temp and the file as it was") 
     if (had) {
       put(path, "previous");
     } else {
-      std::remove(path.c_str());
+      std::ignore = std::remove(path.c_str());
     }
     {
       FailGuard const failing{ 2 };

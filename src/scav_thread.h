@@ -47,7 +47,7 @@ class Mutex {
 };
 
 // Blocks a thread holding a Mutex until another notifies. `wait` may return with no
-// notify, so a waiter re-checks its condition; the null backend's always does.
+// notify, so a waiter re-checks its condition; the null backend spins until notified.
 class ConditionVariable {
  public:
   ConditionVariable();
@@ -58,7 +58,7 @@ class ConditionVariable {
   void notify_all();
 
  private:
-  [[maybe_unused]] void *impl{ nullptr };  // the backend's; null in the null backend
+  void *impl{ nullptr };  // the backend's condition variable
 };
 
 // A thread of its own running `fn(ctx)`; the destructor joins it.
@@ -72,7 +72,7 @@ class Thread {
   void join();                                // returns once `fn` has; no-op if unstarted
 
  private:
-  [[maybe_unused]] void *impl{ nullptr };  // the backend's handle, null until started
+  void *impl{ nullptr };  // the backend's handle, null until started
 };
 
 // Holds a Mutex for the scope it is declared in.
