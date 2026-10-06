@@ -1002,7 +1002,7 @@ bool test_candidate_memo_verify{ false };
 uint32_t test_candidate_memo_empty{ 0 };  // empty it before every this-many labellings
 uint32_t test_candidate_memo_labellings{ 0 };
 uint64_t test_candidate_memo_budget{ CandidateMemo::BUDGET };
-uint32_t test_candidate_memos_built{ 0 };  // memos layouts built
+uint32_t test_candidate_memos_built{ 0 };  // candidate memos layout_run built
 Mutex test_candidate_memo_lock;
 uint64_t test_candidate_memo_deduped{ 0 };
 uint64_t test_candidate_memo_drawn{ 0 };

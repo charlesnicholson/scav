@@ -627,7 +627,7 @@ TEST_CASE("candidate memo: past its budget it empties, and issues no number twic
 
 TEST_CASE("candidate memo: the tables never hold more than the budget") {
   Fixture const f;
-  constexpr uint64_t BUDGET{ 64 * 1024 };
+  constexpr uint64_t BUDGET{ uint64_t{ 64 } << 10U };
   CandidateMemo memo{ f.c, f.g, BUDGET };
   uint32_t const row{ memo.row_word(f.row) };
   std::vector<uint32_t> faces;
