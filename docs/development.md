@@ -324,21 +324,24 @@ answers found by drawing rather than
 by laid ordering (`drawn`), and per Level 1 move kind the candidates offered, those the
 memo answered (`deduped`), those left unrouted because their route bound reached the
 incumbent (`pruned`), those taken, the moves culled unoffered as changing nothing
-(`culled`), and those the culled search's don't-look bits left unscored in a round that
-took a move (`skipped`). `tools/trace.py --stats [chart...]` runs it over the corpus, or
+(`culled`), those the culled search's don't-look bits left unscored in a round that
+took a move (`skipped`). `tools/trace.py --stats
+[chart...]` runs it over the corpus, or
 the charts given, at both text scales and tabulates it, with `scored` as offered less
 deduped and pruned. `deduped` varies by a few tenths
 of a percent between runs, since two threads can compute one key at once; the drawing
 does not.
 
 `--search culled` runs the culled search (PRD §11.10c) in place of the full one, and
-`--jitter-seed N` breaks near-equal moves and kicks by a hash of `N`. `tools/jitter.py
---runs DIR` runs the corpus at both scales, for both searches, unperturbed and under
-three seeds, keeps each run in DIR, and reports per chart whether one search is worse
-than the other: worse only when every one of its runs is more than 2% above every run of
-the other. `tools/shootout.py --runs DIR --out FILE --shots PNGDIR` draws every chart
-under real text by both searches side by side, from the same runs, with each panel's
-Tier 2, Tier 0, bends, crossings, candidates evaluated and search CPU.
+`--jitter-seed N` breaks near-equal
+moves and kicks by a hash of `N`. `tools/jitter.py --runs DIR` runs the corpus at both
+scales, for two searches (`--searches full,culled` by default), unperturbed and under
+three seeds, keeps each run in DIR with the instructions it retired, and reports per
+chart whether one search is worse than the other: worse only when every one of its runs
+is more than 2% above every run of the other. `tools/shootout.py --runs DIR --out FILE
+--shots PNGDIR` draws every chart under real text by the same two searches side by side,
+from the same runs, with each panel's Tier 2, Tier 0, bends, crossings, candidates
+evaluated and search CPU; `--prefix` names the PNGs.
 
 ## The Unicode tables
 

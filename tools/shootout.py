@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
-"""Every corpus chart under real text, drawn by the full search beside the culled search,
-each panel with its cost, counts and search CPU, and the corpus totals on top.
+"""Every corpus chart under real text, drawn by two searches side by side, each panel with
+its cost, counts and search CPU, and the corpus totals on top.
 
   tools/shootout.py --runs DIR --out FILE.html
   tools/shootout.py --runs DIR --out FILE.html --shots DIR    also one PNG per chart row
   tools/shootout.py --runs DIR --out FILE.html --scale none   with no space requests
+  tools/shootout.py --runs DIR --out FILE.html --searches full,culled --prefix PFX
 
 Reads the runs `tools/jitter.py` keeps in DIR, running the unperturbed ones it lacks, and
-draws each from its pins with `scav render --no-search`. The seed verdicts need the
-seeded runs; without them a chart reads "unseeded".
+draws each from its pins with `scav render --no-search`. The first search named is the
+baseline the second's deltas are taken against. The seed verdicts need the seeded runs;
+without them a chart reads "unseeded". PNGs are named <prefix>_<chart>.png.
 """
 
 import argparse
@@ -30,7 +32,14 @@ import jitter  # noqa: E402
 REPO_ROOT = jitter.REPO_ROOT
 CORPUS = jitter.CORPUS
 CHROME = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
-SEARCHES = (("full", "Full search", "#2a78d6"), ("culled", "Culled search", "#eb6834"))
+LOOK = {"full": ("Full search", "#2a78d6"), "culled": ("Culled search", "#eb6834")}
+# What each search does beyond the one before it, for the page's heading.
+WHAT = {
+    "culled": ("The culled search kicks only the rows cheapest after their first search "
+               "(<code>kick_rows</code>, 4), drops the compaction rows, refolds no repeated "
+               "row, and skips moves its don't-look bits mark until what they read changes. "
+               "It is <code>search_cull</code> 1, or <code>--search culled</code>."),
+}
 
 STYLE = """
 :root {
@@ -133,11 +142,14 @@ def stats_rows(rec: dict, other: dict | None) -> str:
     return "".join(out)
 
 
-def card(name: str, made: tuple[int, int], recs: dict, svgs: dict, verdicts: dict) -> str:
+def card(name: str, made: tuple[int, int], recs: dict, svgs: dict, verdicts: dict,
+         names: tuple[str, str]) -> str:
+    base, cand = names
     panels = []
-    for key, label, colour in SEARCHES:
+    for key in names:
+        label, colour = LOOK[key]
         rec = recs[key]
-        other = recs["full"] if key == "culled" else None
+        other = recs[base] if key == cand else None
         row = rec["rests_on"].split("--portfolio-row ")[1].split()[0]
         panels.append(
             f'<div class="panel"><div class="head"><span class="who">'
@@ -146,8 +158,8 @@ def card(name: str, made: tuple[int, int], recs: dict, svgs: dict, verdicts: dic
             f'<div class="stage"><img alt="{name} by the {key} search" '
             f'src="{data_uri(svgs[key])}"></div>'
             f'<table class="stats">{stats_rows(rec, other)}</table></div>')
-    factor = recs["full"]["scored"] / max(recs["culled"]["scored"], 1)
-    cpu = recs["full"]["cpu_ms"] / max(recs["culled"]["cpu_ms"], 1)
+    factor = recs[base]["scored"] / max(recs[cand]["scored"], 1)
+    cpu = recs[base]["cpu_ms"] / max(recs[cand]["cpu_ms"], 1)
     seeds = ", ".join(f"{scale}: {verdicts.get((name, scale), 'unseeded')}"
                       for scale in ("text", "none"))
     return (f'<section class="card" id="{html.escape(Path(name).stem)}">'
@@ -158,23 +170,25 @@ def card(name: str, made: tuple[int, int], recs: dict, svgs: dict, verdicts: dic
             f'<div class="panels">{"".join(panels)}</div></section>')
 
 
-def tiles(runs: Path, charts: list[str], seeds: int, verdicts: dict) -> str:
+def tiles(runs: Path, charts: list[str], seeds: int, verdicts: dict,
+          names: tuple[str, str]) -> str:
     """Corpus totals at each scale and at both, unperturbed, and the seed bar's count."""
+    base, cand = names
     out = []
-    both = {s: {"scored": 0, "cpu_ms": 0} for s, _, _ in SEARCHES}
+    both = {s: {"scored": 0, "cpu_ms": 0} for s in names}
     for scale, title in (("text", "real text"), ("none", "no text")):
-        tot = {s: {"scored": 0, "cpu_ms": 0, "t2": 0, "t0": 0} for s, _, _ in SEARCHES}
+        tot = {s: {"scored": 0, "cpu_ms": 0, "t2": 0, "t0": 0} for s in names}
         logs = []
         for chart in charts:
-            full = jitter.load(runs, chart, scale, "full", 0).get(0)
-            culled = jitter.load(runs, chart, scale, "culled", 0).get(0)
-            if full is None or culled is None:
+            a = jitter.load(runs, chart, scale, base, 0).get(0)
+            b = jitter.load(runs, chart, scale, cand, 0).get(0)
+            if a is None or b is None:
                 continue
-            for key, rec in (("full", full), ("culled", culled)):
+            for key, rec in ((base, a), (cand, b)):
                 for k in tot[key]:
                     tot[key][k] += rec[k]
-            logs.append(math.log(culled["t2"] / full["t2"]))
-        f, c = tot["full"], tot["culled"]
+            logs.append(math.log(b["t2"] / a["t2"]))
+        f, c = tot[base], tot[cand]
         if not c["scored"]:
             continue
         for key in both:
@@ -184,7 +198,7 @@ def tiles(runs: Path, charts: list[str], seeds: int, verdicts: dict) -> str:
         out.append(
             f'<div class="tile"><div class="k">candidates evaluated, {title}</div>'
             f'<div class="v">{f["scored"] / c["scored"]:.2f}&times; fewer</div>'
-            f'<div class="n">{f["scored"]:,} full &rarr; {c["scored"]:,} culled</div></div>'
+            f'<div class="n">{f["scored"]:,} {base} &rarr; {c["scored"]:,} {cand}</div></div>'
             f'<div class="tile"><div class="k">search CPU, {title}</div>'
             f'<div class="v">{f["cpu_ms"] / c["cpu_ms"]:.2f}&times; less</div>'
             f'<div class="n">{f["cpu_ms"] / 1e3:.1f} s &rarr; {c["cpu_ms"] / 1e3:.1f} s</div>'
@@ -193,7 +207,7 @@ def tiles(runs: Path, charts: list[str], seeds: int, verdicts: dict) -> str:
             f'<div class="v">{(c["t2"] / f["t2"] - 1) * 100:+.2f}%</div>'
             f'<div class="n">sum {f["t2"]:,} &rarr; {c["t2"]:,}; geometric mean {gm:+.2f}%; '
             f'Tier 0 {f["t0"]} &rarr; {c["t0"]}</div></div>')
-    f, c = both["full"], both["culled"]
+    f, c = both[base], both[cand]
     if c["scored"] and c["cpu_ms"]:
         out.append(
             f'<div class="tile"><div class="k">both scales, reduction</div>'
@@ -202,20 +216,20 @@ def tiles(runs: Path, charts: list[str], seeds: int, verdicts: dict) -> str:
             f'CPU {f["cpu_ms"] / c["cpu_ms"]:.2f}&times; less, '
             f'{f["cpu_ms"] / 1e3:.0f} s &rarr; {c["cpu_ms"] / 1e3:.0f} s</div></div>')
     worse = sorted(f"{Path(c).stem} {s}" for (c, s), v in verdicts.items()
-                   if v == "culled worse")
+                   if v == f"{cand} worse")
     better = sorted(f"{Path(c).stem} {s}" for (c, s), v in verdicts.items()
-                    if v == "full worse")
+                    if v == f"{base} worse")
     out.append(
         f'<div class="tile"><div class="k">seed bar, {seeds} seeds, both scales</div>'
         f'<div class="v">{len(worse)} worse, {len(better)} better</div>'
-        f'<div class="n">culled worse: {", ".join(worse) or "none"}; '
+        f'<div class="n">{cand} worse: {", ".join(worse) or "none"}; '
         f'better: {", ".join(better) or "none"}</div></div>')
     return "".join(out)
 
 
-def page(head: str, body: str) -> str:
+def page(head: str, body: str, names: tuple[str, str]) -> str:
     return (f'<!doctype html><html lang="en"><meta charset="utf-8">'
-            f'<title>scav: full search vs culled search</title><style>{STYLE}</style>'
+            f'<title>scav: {names[0]} search vs {names[1]} search</title><style>{STYLE}</style>'
             f'<body>{head}{body}</body></html>')
 
 
@@ -263,12 +277,19 @@ def main() -> int:
     ap.add_argument("--seeds", type=int, default=3)
     ap.add_argument("--scale", choices=jitter.SCALES, default="text")
     ap.add_argument("--scav", type=Path, default=None)
+    ap.add_argument("--searches", default=",".join(jitter.SEARCHES),
+                    help="the baseline and the search judged against it")
+    ap.add_argument("--prefix", default="shootout", help="the PNG file names' prefix")
     args = ap.parse_args()
 
+    names = tuple(args.searches.split(","))
+    if len(names) != 2 or any(n not in LOOK for n in names):
+        raise SystemExit(f"--searches takes two of {', '.join(LOOK)}")
+    base, cand = names
     scav = args.scav or jitter.find_scav()
     charts = sorted(p.name for p in CORPUS.glob("*.scav"))
     for chart in charts:
-        for search, _, _ in SEARCHES:
+        for search in names:
             p = jitter.path_of(args.runs, chart, args.scale, search, 0)
             if not p.exists():
                 p.write_text(json.dumps(jitter.run_one(scav, CORPUS / chart, args.scale,
@@ -276,39 +297,35 @@ def main() -> int:
     verdicts = {}
     for chart in charts:
         for scale in jitter.SCALES:
-            full = jitter.load(args.runs, chart, scale, "full", args.seeds)
-            culled = jitter.load(args.runs, chart, scale, "culled", args.seeds)
-            if len(full) > 1 and len(culled) > 1:
-                verdicts[(chart, scale)] = jitter.verdict_of(full, culled)
+            a = jitter.load(args.runs, chart, scale, base, args.seeds)
+            b = jitter.load(args.runs, chart, scale, cand, args.seeds)
+            if len(a) > 1 and len(b) > 1:
+                verdicts[(chart, scale)] = jitter.verdict_of(a, b, names)
 
     svg_dir = args.runs / "svg"
     svg_dir.mkdir(parents=True, exist_ok=True)
     cards = {}
     for chart in charts:
-        recs = {s: jitter.load(args.runs, chart, args.scale, s, 0)[0]
-                for s, _, _ in SEARCHES}
+        recs = {s: jitter.load(args.runs, chart, args.scale, s, 0)[0] for s in names}
         svgs = {s: render(scav, CORPUS / chart, recs[s],
                           svg_dir / f"{chart}.{args.scale}.{s}.svg")
-                for s, _, _ in SEARCHES}
-        cards[chart] = card(chart, counts(scav, CORPUS / chart), recs, svgs, verdicts)
+                for s in names}
+        cards[chart] = card(chart, counts(scav, CORPUS / chart), recs, svgs, verdicts,
+                            names)
 
     commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=REPO_ROOT,
                             capture_output=True, text=True).stdout.strip() or "unknown"
     scale_words = "under real text" if args.scale == "text" else "with no space requests"
-    head = (f'<h1>Full search vs culled search</h1>'
+    a_title, b_title = LOOK[base][0], LOOK[cand][0]
+    head = (f'<h1>{a_title} vs {b_title.lower()}</h1>'
             f'<p class="sub">Every corpus chart {scale_words}, searched unpinned at '
-            f'<code>readable</code>, scav at <code>{commit}</code>. The culled search kicks '
-            f'only the rows cheapest after their first search (<code>kick_rows</code>, 4), '
-            f'drops the compaction rows, refolds no repeated row, and skips moves its '
-            f'don\'t-look bits mark until what they read changes. It is chosen by the '
-            f'profile field <code>search_cull</code>, or <code>--search culled</code> on the '
-            f'command line. Deltas under the culled panel are against the full '
-            f'search. The seed bar counts a chart worse only when every culled run is more '
-            f'than 2% above every full run, over the unperturbed run and {args.seeds} jitter '
-            f'seeds.</p>'
-            f'<div class="tiles">{tiles(args.runs, charts, args.seeds, verdicts)}</div>')
+            f'<code>readable</code>, scav at <code>{commit}</code>. {WHAT.get(cand, "")} '
+            f'Deltas under the {cand} panel are against the {base} search. The seed bar '
+            f'counts a chart worse only when every {cand} run is more than 2% above every '
+            f'{base} run, over the unperturbed run and {args.seeds} jitter seeds.</p>'
+            f'<div class="tiles">{tiles(args.runs, charts, args.seeds, verdicts, names)}</div>')
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(page(head, "".join(cards.values())), encoding="utf-8")
+    args.out.write_text(page(head, "".join(cards.values()), names), encoding="utf-8")
     print(f"wrote {args.out} ({args.out.stat().st_size / 1024:.0f} KB)")
 
     if args.shots is not None:
@@ -322,13 +339,13 @@ def main() -> int:
         for chart, body in cards.items():
             stem = Path(chart).stem
             one = rows / f"{stem}.html"
-            one.write_text(page("", body), encoding="utf-8")
-            png = args.shots / f"shootout_{stem}{suffix}.png"
+            one.write_text(page("", body, names), encoding="utf-8")
+            png = args.shots / f"{args.prefix}_{stem}{suffix}.png"
             shoot(CHROME, one, png, 1040)
             print(f"wrote {png}")
         top = rows / "header.html"
-        top.write_text(page(head, ""), encoding="utf-8")
-        png = args.shots / f"shootout_header{suffix}.png"
+        top.write_text(page(head, "", names), encoding="utf-8")
+        png = args.shots / f"{args.prefix}_header{suffix}.png"
         shoot(CHROME, top, png, 560)
         print(f"wrote {png}")
     return 0

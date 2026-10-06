@@ -144,9 +144,9 @@ def print_stats(scav, charts, layout):
     full, taken; searches; the memo's peak; the layout's CPU. Then the same by move kind."""
     scales = [[]] if "--no-text" in layout else [[], ["--no-text"]]
     kinds = {m: [0, 0, 0, 0, 0, 0] for m in MOVES}
-    print(f"{'chart':14} {'scale':6} {'culled':>8} {'skipped':>8} {'offered':>9} "
-          f"{'deduped':>9} {'drawn':>9} {'pruned':>9} {'scored':>9} {'taken':>6} "
-          f"{'searches':>8} {'memo MB':>8} {'cpu s':>8}")
+    print(f"{'chart':14} {'scale':6} {'culled':>8} {'skipped':>8} "
+          f"{'offered':>9} {'deduped':>9} {'drawn':>9} {'pruned':>9} "
+          f"{'scored':>9} {'taken':>6} {'searches':>8} {'memo MB':>8} {'cpu s':>8}")
     for chart in charts:
         for scale in scales:
             st = search_stats(scav, chart, [*layout, *scale])
@@ -165,12 +165,13 @@ def print_stats(scav, charts, layout):
                 kinds[m][4] += v["skipped"]
                 kinds[m][5] += v["pruned"]
             print(f"{Path(chart).stem:14} {'notext' if scale else 'text':6} {culled:8} "
-                  f"{skipped:8} {offered:9} {deduped:9} {s['drawn']:9} {pruned:9} "
+                  f"{skipped:8} {offered:9} {deduped:9} "
+                  f"{s['drawn']:9} {pruned:9} "
                   f"{offered - deduped - pruned:9} {taken:6} "
                   f"{s['searches']:8} {s['memo_bytes'] / 1e6:8.1f} {st['cpu_ms'] / 1e3:8.2f}")
     print()
-    print(f"{'move':14} {'culled':>8} {'skipped':>8} {'offered':>9} {'deduped':>9} "
-          f"{'pruned':>9} {'scored':>9} {'taken':>6}")
+    print(f"{'move':14} {'culled':>8} {'skipped':>8} "
+          f"{'offered':>9} {'deduped':>9} {'pruned':>9} {'scored':>9} {'taken':>6}")
     for m in MOVES:
         c, o, d, t, k, p = kinds[m]
         if c or o or t:
