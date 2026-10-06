@@ -482,6 +482,115 @@ TEST_CASE("thread: a mutex held on one host thread keeps another out until relea
   CHECK(entered.load());
 }
 
+TEST_CASE("thread: a started thread runs its function once, and join waits for it") {
+  struct Run {
+    std::atomic<uint32_t> calls{ 0 };
+    std::atomic<bool> done{ false };
+  };
+  Run run;
+  Thread t;
+  t.join();  // a thread never started joins as a no-op
+  bool const started{ t.start(
+      [](void *ctx) {
+        auto *const r{ static_cast<Run *>(ctx) };
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        r->calls.fetch_add(1U);
+        r->done.store(true);
+      },
+      &run) };
+  t.join();
+  if (!started) {
+    CHECK(thread_concurrency() == 1U);  // only the null backend starts no thread
+    CHECK(run.calls.load() == 0U);
+    return;
+  }
+  CHECK(run.done.load());
+  CHECK(run.calls.load() == 1U);
+  t.join();  // a second join is a no-op
+  CHECK(run.calls.load() == 1U);
+}
+
+TEST_CASE("thread: a destroyed thread has finished its function") {
+  std::atomic<bool> done{ false };
+  {
+    Thread t;
+    if (!t.start(
+            [](void *ctx) {
+              std::this_thread::sleep_for(std::chrono::milliseconds(20));
+              static_cast<std::atomic<bool> *>(ctx)->store(true);
+            },
+            &done)) {
+      return;
+    }
+  }
+  CHECK(done.load());
+}
+
+// Two host threads take turns through one condition variable, so the null backend's
+// wait, which returns with no notify, is tested too.
+TEST_CASE("thread: a condition variable hands a turn between two threads in order") {
+  struct Turns {
+    Mutex m;
+    ConditionVariable changed;
+    uint32_t next{ 0 };  // under `m`: the turn number to take next; even is the caller's
+    std::vector<uint32_t> taken;  // under `m`
+  };
+  Turns turns;
+  constexpr uint32_t ROUNDS{ 2000 };
+  auto const play = [&turns](uint32_t parity) {
+    for (uint32_t k = 0; k < ROUNDS; ++k) {
+      ScopedLock const held{ turns.m };
+      while ((turns.next % 2U) != parity) { turns.changed.wait(turns.m); }
+      turns.taken.push_back(turns.next);
+      ++turns.next;
+      turns.changed.notify_all();
+    }
+  };
+  std::thread other([&] { play(1U); });
+  play(0U);
+  other.join();
+  REQUIRE(turns.taken.size() == 2U * ROUNDS);
+  for (uint32_t k = 0; k < turns.taken.size(); ++k) { CHECK(turns.taken[k] == k); }
+}
+
+TEST_CASE("thread: a waiter releases its mutex while it waits and holds it on return") {
+  struct Gate {
+    Mutex m;
+    ConditionVariable changed;
+    bool open{ false };     // under `m`
+    bool waiting{ false };  // under `m`
+  };
+  Gate gate;
+  std::atomic<bool> inside{ false };  // the waiter is between waking and releasing `m`
+  std::atomic<bool> finished{ false };
+  std::thread waiter([&] {
+    ScopedLock const held{ gate.m };
+    gate.waiting = true;
+    while (!gate.open) { gate.changed.wait(gate.m); }
+    inside.store(true);
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    inside.store(false);
+    finished.store(true);
+  });
+  // Locking `m` while the waiter waits shows the wait released it.
+  for (bool opened{ false }; !opened;) {
+    ScopedLock const held{ gate.m };
+    if (gate.waiting) {
+      gate.open = true;
+      gate.changed.notify_all();
+      opened = true;
+    }
+  }
+  // Every entry after waking finds the waiter outside `m`.
+  uint32_t overlaps{ 0 };
+  while (!finished.load()) {
+    ScopedLock const held{ gate.m };
+    overlaps += inside.load() ? 1U : 0U;
+  }
+  waiter.join();
+  CHECK(overlaps == 0U);
+}
+
 TEST_CASE("thread: a chart lays out the same however many threads claim its shards" *
           doctest::test_suite("full")) {
   HookGuard const guard;

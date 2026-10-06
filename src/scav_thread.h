@@ -42,7 +42,37 @@ class Mutex {
   void unlock();
 
  private:
+  friend class ConditionVariable;
   void *impl{ nullptr };  // the backend's lock
+};
+
+// Blocks a thread holding a Mutex until another notifies. `wait` may return with no
+// notify, so a waiter re-checks its condition; the null backend's always does.
+class ConditionVariable {
+ public:
+  ConditionVariable();
+  ~ConditionVariable();
+  ConditionVariable(ConditionVariable const &) = delete;
+  ConditionVariable &operator=(ConditionVariable const &) = delete;
+  void wait(Mutex &held);  // releases `held` while blocked and holds it again on return
+  void notify_all();
+
+ private:
+  [[maybe_unused]] void *impl{ nullptr };  // the backend's; null in the null backend
+};
+
+// A thread of its own running `fn(ctx)`; the destructor joins it.
+class Thread {
+ public:
+  Thread() = default;
+  ~Thread();
+  Thread(Thread const &) = delete;
+  Thread &operator=(Thread const &) = delete;
+  bool start(void (*fn)(void *), void *ctx);  // false when none starts, as under null
+  void join();                                // returns once `fn` has; no-op if unstarted
+
+ private:
+  [[maybe_unused]] void *impl{ nullptr };  // the backend's handle, null until started
 };
 
 // Holds a Mutex for the scope it is declared in.

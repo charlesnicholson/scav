@@ -22,6 +22,19 @@ void Mutex::unlock() {
   static_cast<std::atomic_flag *>(impl)->clear(std::memory_order_release);
 }
 
+// A wait releases and retakes the lock and returns, as a wakeup with no notify.
+ConditionVariable::ConditionVariable() = default;
+ConditionVariable::~ConditionVariable() = default;
+void ConditionVariable::wait(Mutex &held) {
+  held.unlock();
+  held.lock();
+}
+void ConditionVariable::notify_all() {}
+
+Thread::~Thread() = default;
+bool Thread::start(void (* /*fn*/)(void *), void * /*ctx*/) { return false; }
+void Thread::join() {}
+
 uint32_t thread_concurrency() { return 1U; }
 
 void parallel_for(uint32_t shards, uint32_t /*threads*/, ShardFn fn, void *ctx) {

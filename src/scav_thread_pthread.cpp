@@ -177,6 +177,58 @@ Mutex::~Mutex() {
 void Mutex::lock() { pthread_mutex_lock(static_cast<pthread_mutex_t *>(impl)); }
 void Mutex::unlock() { pthread_mutex_unlock(static_cast<pthread_mutex_t *>(impl)); }
 
+ConditionVariable::ConditionVariable() : impl(new pthread_cond_t) {
+  pthread_cond_init(static_cast<pthread_cond_t *>(impl), nullptr);
+}
+ConditionVariable::~ConditionVariable() {
+  pthread_cond_destroy(static_cast<pthread_cond_t *>(impl));
+  delete static_cast<pthread_cond_t *>(impl);
+}
+void ConditionVariable::wait(Mutex &held) {
+  pthread_cond_wait(static_cast<pthread_cond_t *>(impl),
+                    static_cast<pthread_mutex_t *>(held.impl));
+}
+void ConditionVariable::notify_all() {
+  pthread_cond_broadcast(static_cast<pthread_cond_t *>(impl));
+}
+
+namespace {
+
+struct Started {
+  pthread_t handle;
+  void (*fn)(void *);
+  void *ctx;
+};
+
+void *thread_main(void *arg) {
+  Started const &s{ *static_cast<Started *>(arg) };
+  s.fn(s.ctx);
+  return nullptr;
+}
+
+}  // namespace
+
+Thread::~Thread() { join(); }
+
+bool Thread::start(void (*fn)(void *), void *ctx) {
+  if (impl != nullptr) { return false; }
+  auto *const s{ new Started{ .handle = {}, .fn = fn, .ctx = ctx } };
+  if (pthread_create(&s->handle, nullptr, thread_main, s) != 0) {
+    delete s;
+    return false;
+  }
+  impl = s;
+  return true;
+}
+
+void Thread::join() {
+  if (impl == nullptr) { return; }
+  auto *const s{ static_cast<Started *>(impl) };
+  pthread_join(s->handle, nullptr);
+  delete s;
+  impl = nullptr;
+}
+
 uint32_t thread_concurrency() {
   int64_t const online{ sysconf(_SC_NPROCESSORS_ONLN) };
   return (online > 1) ? static_cast<uint32_t>(online) : 1U;
