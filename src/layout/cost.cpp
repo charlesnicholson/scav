@@ -374,10 +374,12 @@ struct Charged {
   std::vector<uint8_t> *party{ nullptr };
   std::vector<Wide> *amount{ nullptr };
   Wide weight{ 0 };
+  bool any{ false };  // `party` or `amount` is given
 };
 
 // Charges `by` of a term to each of `a` and `b` that names a transition.
-void blame(Charged const &to, uint32_t a, uint32_t b, Wide by) {
+inline void blame(Charged const &to, uint32_t a, uint32_t b, Wide by) {
+  if (!to.any) { return; }
   for (uint32_t const t : { a, b }) {
     if ((to.party != nullptr) && (t < to.party->size())) { (*to.party)[t] = 1; }
     if ((to.amount != nullptr) && (t < to.amount->size())) {
@@ -1324,7 +1326,10 @@ CostTerms cost_terms(CostContext const &ctx,
   Wide const em{ imax(Wide{ p.font_size_grid }, Wide{ 1 }) };
   // Per term: a count is charged its weight times the em, a length its weight.
   auto const by = [&](int32_t weight) {
-    return Charged{ .party = party, .amount = charge, .weight = weight };
+    return Charged{ .party = party,
+                    .amount = charge,
+                    .weight = weight,
+                    .any = (party != nullptr) || (charge != nullptr) };
   };
   if (!geometry_complete(c, z, r)) { return t; }
   t.aspect = (Wide{ z.chart.w } * p.dar_den) - (Wide{ z.chart.h } * p.dar_num);
