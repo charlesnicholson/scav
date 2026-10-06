@@ -693,6 +693,29 @@ class TestDump(unittest.TestCase):
                 self.assertEqual("", result.stdout)
                 self.assertEqual(f"scav: not a whole trace file '{cut}'\n", result.stderr)
 
+    def test_trace_names_a_trace_another_build_wrote(self) -> None:
+        """A header whose version or schema differs from this build's prints nothing and
+        says another build wrote it."""
+        path = self.cfg.scratch_dir / "dump" / "other.trace"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.unlink(missing_ok=True)
+        made = self.run_dump("--layout", "--trace", "--trace-file", path,
+                             *self.pinned(NETWORK), NETWORK.as_posix())
+        self.assertEqual(0, made.returncode, made.stderr)
+        data = path.read_bytes()
+        # The version byte follows the 8-byte magic; the first kind is named `none`.
+        named = data.index(b"none")
+        for at in (8, named):
+            with self.subTest(at=at):
+                other = bytearray(data)
+                other[at] ^= 0x20 if at == named else 0x01
+                path.write_bytes(bytes(other))
+                result = self.run_trace(path)
+                self.assertEqual(2, result.returncode)
+                self.assertEqual("", result.stdout)
+                self.assertEqual(f"scav: trace written by a different scav build '{path}'\n",
+                                 result.stderr)
+
     def test_trace_prints_only_a_whole_trace_file(self) -> None:
         chart = self.write("not_a.trace", "chart g {\n  state A,\n}\n")
         result = self.run_trace(chart)

@@ -134,7 +134,9 @@ int run_trace(char const *path) {
   TraceDecoder check;
   if ((f == nullptr) || !feed_file(f, check) || !trace_decode_end(check)) {
     if (f != nullptr) { std::ignore = std::fclose(f); }
-    write_error("not a whole trace file", path);
+    write_error(check.foreign ? "trace written by a different scav build"
+                              : "not a whole trace file",
+                path);
     return EXIT_UNUSABLE;
   }
   TraceDecoder json;

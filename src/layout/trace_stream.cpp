@@ -319,6 +319,7 @@ size_t decode_header(TraceDecoder &d) {
   }
   if ((version != TRACE_FORMAT) || (length > UINT32_MAX)) {
     d.failed = true;
+    d.foreign = (version != TRACE_FORMAT);
     return 0;
   }
   if (std::cmp_greater(length, r.end - r.at)) { return 0; }
@@ -326,6 +327,7 @@ size_t decode_header(TraceDecoder &d) {
   std::vector<uint8_t> const &want{ schema() };
   if ((length < want.size()) || (std::memcmp(body.at, want.data(), want.size()) != 0)) {
     d.failed = true;
+    d.foreign = true;
     return 0;
   }
   body.at += want.size();

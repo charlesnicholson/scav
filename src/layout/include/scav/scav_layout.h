@@ -239,6 +239,7 @@ struct TraceDecoder {
   bool header{ false };
   bool ended{ false };
   bool failed{ false };
+  bool foreign{ false };  // the header is another build's: its version or schema differs
 };
 
 // Feeds `data[0..n)`; false once the bytes fed begin no trace or `write` fails.

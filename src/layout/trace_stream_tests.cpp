@@ -329,6 +329,35 @@ TEST_CASE("trace stream: the header carries every state's name, nameless ones em
   CHECK(d.name_end == std::vector<uint32_t>{ 5, 5, 10 });
 }
 
+TEST_CASE("trace stream: a header another build wrote is told apart from a broken one") {
+  Chart const c{ named_chart() };
+  std::vector<uint8_t> const good{ stream_of(c, every_event()) };
+  std::string_view const text{ reinterpret_cast<char const *>(good.data()), good.size() };
+  size_t const schema{ text.find("none") };
+  REQUIRE(schema != std::string_view::npos);
+  struct Case {
+    char const *what;
+    size_t at;
+    uint8_t flip;
+    size_t keep;
+    bool foreign;
+  };
+  for (Case const &k : { Case{ "version", 8, 1, good.size(), true },
+                         Case{ "schema", schema, 0x20, good.size(), true },
+                         Case{ "magic", 0, 1, good.size(), false },
+                         Case{ "cut", 0, 0, good.size() - 1U, false } }) {
+    std::string const what{ k.what };
+    CAPTURE(what);
+    std::vector<uint8_t> bad{ good.begin(),
+                              good.begin() + static_cast<ptrdiff_t>(k.keep) };
+    bad[k.at] = static_cast<uint8_t>(bad[k.at] ^ k.flip);
+    TraceDecoder d;
+    bool const whole{ trace_decode(d, bad.data(), bad.size()) && trace_decode_end(d) };
+    CHECK_FALSE(whole);
+    CHECK(d.foreign == k.foreign);
+  }
+}
+
 TEST_CASE("trace stream: a malformed or partial stream is refused") {
   Chart const c{ named_chart() };
   std::vector<uint8_t> const good{ stream_of(c, every_event()) };
