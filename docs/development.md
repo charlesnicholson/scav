@@ -179,7 +179,7 @@ variable of the same name, and a test binary run by hand is fast unless it is se
 
 - `fast` takes seconds. Corpus loops keep only `brew`, `dock`, `estop`, `kiln` and
   `led`, still compared line by line against the same goldens; whole searches leave out
-  `kiln` too. Doctest cases tagged `doctest::test_suite("full")` or `"exhaustive"` and
+  `brew` and `kiln` too. Doctest cases tagged `doctest::test_suite("full")` or `"exhaustive"` and
   Python tests marked `scavtest.full_only` are left out.
 - `full` runs everything else, in under five minutes. CI's release and testable rows
   build with `-DSCAV_TEST_TIER=full`; add the same flag locally to do so.

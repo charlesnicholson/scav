@@ -52,9 +52,11 @@ inline bool corpus_skipped(std::string_view chart) {
          (chart != "estop.scav") && (chart != "kiln.scav") && (chart != "led.scav");
 }
 
-// Whether the light tier skips a whole search of `chart`: kiln and every chart it drops.
+// Whether the light tier skips a whole search of `chart`: brew, kiln and every chart it
+// drops.
 inline bool search_skipped(std::string_view chart) {
-  return corpus_skipped(chart) || (corpus_light() && (chart == "kiln.scav"));
+  return corpus_skipped(chart) ||
+         (corpus_light() && ((chart == "brew.scav") || (chart == "kiln.scav")));
 }
 
 // `golden` less every line naming a skipped chart as one of its words.

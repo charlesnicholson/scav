@@ -220,8 +220,8 @@ TEST_CASE("search: the culled table is the first portfolio_m rows less compactio
   }
 }
 
-TEST_CASE(
-    "search: the culled search kicks the kick_rows rows cheapest after their first") {
+TEST_CASE("search: the culled search kicks the kick_rows rows cheapest after their first" *
+          doctest::test_suite("full")) {
   // Per row: its first search's cost, whether it repeats an earlier row, and whether a
   // kick was scored for it.
   for (int32_t const k : { 1, 2, 16 }) {
@@ -374,7 +374,8 @@ uint64_t stops_checked(scav_profile const &p, std::initializer_list<char const *
 
 }  // namespace
 
-TEST_CASE("search: every culled search stops where no move of its last round improves") {
+TEST_CASE("search: every culled search stops where no move of its last round improves" *
+          doctest::test_suite("full")) {
   // The bits skip moves, and a round that takes nothing scores what they skipped.
   CHECK(stops_checked(culled(), { "brew.scav", "dock.scav", "kiln.scav" }) > 0);
   // The check holds the full search to the same, with nothing skipped.
@@ -432,7 +433,8 @@ TEST_CASE("search: the culled search reaches one drawing with the label bound on
 
 TEST_CASE(
     "search: a candidate memo emptied before labelling leaves the culled search as it "
-    "is") {
+    "is" *
+    doctest::test_suite("full")) {
   // Labelling then lays out afresh moves the bound pass answered from the memo.
   SwitchGuard const guard;
   layout_test_search_memo(false);
@@ -454,7 +456,8 @@ TEST_CASE(
   }
 }
 
-TEST_CASE("search: a bound pass scored again after its labelling sets the same bits") {
+TEST_CASE("search: a bound pass scored again after its labelling sets the same bits" *
+          doctest::test_suite("full")) {
   SwitchGuard const guard;
   layout_test_search_memo(false);
   for (uint32_t const every : { 0U, 3U }) {
@@ -472,7 +475,8 @@ TEST_CASE("search: a bound pass scored again after its labelling sets the same b
   }
 }
 
-TEST_CASE("search: the bounds laid out afresh for the bits are counted") {
+TEST_CASE("search: the bounds laid out afresh for the bits are counted" *
+          doctest::test_suite("full")) {
   // Only a labelled score the culled search's bits cannot read is laid out again.
   SwitchGuard const guard;
   layout_test_search_memo(false);
@@ -481,7 +485,8 @@ TEST_CASE("search: the bounds laid out afresh for the bits are counted") {
   CHECK(lay("brew.scav", readable(), true, 1).relaid == 0);
 }
 
-TEST_CASE("search: a traced culled search draws what the untraced one ships") {
+TEST_CASE("search: a traced culled search draws what the untraced one ships" *
+          doctest::test_suite("full")) {
   Chart traced{ loaded("dock.scav") };
   std::vector<scav_path_box> const boxes{ label_boxes(traced) };
   scav_spaces const s{ .box_state_stride = sizeof(scav_box_space),

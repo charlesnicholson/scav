@@ -242,7 +242,7 @@ void check_culled_threads(std::initializer_list<char const *> charts) {
   layout_test_search_memo(false);
   Metrics const m{ bundled() };
   for (char const *name : charts) {
-    if (scav::test::corpus_skipped(name)) { continue; }
+    if (scav::test::search_skipped(name)) { continue; }
     std::string const chart{ name };
     CAPTURE(chart);
     std::array<uint64_t, 7> const want{ culled_search(name, m, 1) };

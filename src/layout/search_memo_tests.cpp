@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <initializer_list>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -320,7 +321,9 @@ std::array<uint64_t, TRACE_MOVES> culls_checked(
   std::array<uint64_t, TRACE_MOVES> culled{};
   for (bool const labelled : { false, true }) {
     for (char const *name : charts) {
-      if (scav::test::search_skipped(name)) { continue; }
+      if (scav::test::search_skipped(name) && (std::string_view{ name } != "brew.scav")) {
+        continue;  // brew holds the light tier's loop culls
+      }
       CAPTURE(labelled);
       CAPTURE(name);
       layout_test_cull(true, true);
@@ -335,7 +338,8 @@ std::array<uint64_t, TRACE_MOVES> culls_checked(
 
 }  // namespace
 
-TEST_CASE("search: every move culled as changing nothing lays out as the incumbent") {
+TEST_CASE("search: every move culled as changing nothing lays out as the incumbent" *
+          doctest::test_suite("full")) {
   // Each culled move is laid out whole and compared with the incumbent it was culled from.
   CullGuard const guard;
   std::array<uint64_t, TRACE_MOVES> const culled{ culls_checked(
@@ -359,7 +363,7 @@ TEST_CASE("search: every move culled on the corpus lays out as the incumbent" *
   CHECK(culled[TRACE_MOVE_LOOP] > 0);
 }
 
-TEST_CASE("search: with culling off, nothing is culled") {
+TEST_CASE("search: with culling off, nothing is culled" * doctest::test_suite("full")) {
   CullGuard const guard;
   layout_test_cull(false, false);
   REQUIRE(lay_out("kiln.scav").ok);
@@ -572,7 +576,8 @@ TEST_CASE("search: the candidate memo lays out what scoring every move in full d
 
 TEST_CASE(
     "search: every move the candidate memo answers scores as that move laid out "
-    "afresh") {
+    "afresh" *
+    doctest::test_suite("full")) {
   // Each answer, taken or not, by laid ordering, by drawing or from the facing memo, is
   // checked.
   CandidateGuard const guard;
@@ -624,7 +629,8 @@ TEST_CASE(
 
 TEST_CASE(
     "search: a candidate memo that empties every few kilobytes lays out the same and "
-    "answers exactly") {
+    "answers exactly" *
+    doctest::test_suite("full")) {
   struct Budget {
     Budget() = default;
     Budget(Budget const &) = delete;
@@ -768,7 +774,8 @@ TEST_CASE("search stats: a layout counts its own search while another lays out")
 
 TEST_CASE(
     "search stats: a layout's moves by kind, the memo's answers among them, and "
-    "the same moves without it") {
+    "the same moves without it" *
+    doctest::test_suite("full")) {
   CandidateGuard const guard;
   SearchStats on;
   bool const laid_on{ lay_out("brew.scav", true, false, 0, &on).ok };
@@ -879,7 +886,8 @@ TEST_CASE(
   }
 }
 
-TEST_CASE("search: a move pruned by its route bound scores at least that bound") {
+TEST_CASE("search: a move pruned by its route bound scores at least that bound" *
+          doctest::test_suite("full")) {
   check_route_bound(std::array<char const *, 3>{ "estop.scav", "led.scav", "dock.scav" });
 }
 
@@ -898,7 +906,8 @@ struct CostStopGuard {
 
 }  // namespace
 
-TEST_CASE("search: a move stopped at its Tier 2 scores at or above it, and draws alike") {
+TEST_CASE("search: a move stopped at its Tier 2 scores at or above it, and draws alike" *
+          doctest::test_suite("full")) {
   CostStopGuard const guard;
   uint64_t stopped{ 0 };
   for (bool const culled : { false, true }) {
