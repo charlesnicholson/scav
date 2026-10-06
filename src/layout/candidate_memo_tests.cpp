@@ -626,6 +626,25 @@ TEST_CASE("candidate memo: past its budget it empties, and issues no number twic
   CHECK(memo.peak_bytes() > 0);
 }
 
+TEST_CASE("candidate memo: the tables never hold more than the budget") {
+  Fixture const f;
+  constexpr uint64_t BUDGET{ 64 * 1024 };
+  CandidateMemo memo{ f.c, f.g, BUDGET };
+  uint32_t const row{ memo.row_word(f.row) };
+  std::vector<uint32_t> faces;
+  uint64_t most{ 0 };
+  for (uint32_t i = 0; i < 20000; ++i) {
+    faces.assign(1 + (i % 7), i);
+    (void)memo.find_score(i, faces, (i % 2) == 0);
+    (void)memo.find_ordering(row, i, faces);
+    uint64_t const held{ memo.held_bytes() };
+    most = (held > most) ? held : most;
+    REQUIRE(held <= BUDGET);
+  }
+  CHECK(most > (BUDGET / 2));
+  CHECK(memo.peak_bytes() >= most);
+}
+
 TEST_CASE("candidate memo: a link to an entry since emptied away reads nothing") {
   Fixture const f;
   CandidateMemo memo{ f.c, f.g };

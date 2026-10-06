@@ -161,6 +161,9 @@ class CandidateMemo {
   // The most bytes the tables held at once: keys, entries, slots and records.
   [[nodiscard]] uint64_t peak_bytes() const;
 
+  // The bytes the tables hold now, as their vectors' capacities.
+  [[nodiscard]] uint64_t held_bytes();
+
   // Empties every table; a number issued before is never issued again.
   void empty();
 
@@ -229,6 +232,19 @@ class CandidateMemo {
     uint32_t base{ 0 };           // numbers issued before the shard last emptied
     std::vector<uint32_t> links;  // parallel to `keys`: a score number or INVALID
   };
+
+  // The bytes a shard holds, as its vectors' capacities.
+  static uint64_t held(IndexShard const &f) { return f.keys.bytes(); }
+  static uint64_t held(FacingShard const &f) {
+    return f.keys.bytes() + (f.records.capacity() * sizeof(FacingRecord)) +
+           (f.turns.capacity() * sizeof(uint32_t));
+  }
+  static uint64_t held(ScoreShard const &f) {
+    return f.keys.bytes() + (f.records.capacity() * sizeof(ScoreRecord));
+  }
+  static uint64_t held(LinkShard const &f) {
+    return f.keys.bytes() + (f.links.capacity() * sizeof(uint32_t));
+  }
 
   // The shard holding a key of hash `hash`.
   static uint32_t shard_of(uint64_t hash) {
