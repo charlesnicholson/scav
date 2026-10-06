@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <limits>
+#include <ostream>
 #include <string>
 #include <string_view>
 #include <tuple>

@@ -346,7 +346,7 @@ class TestFmt(unittest.TestCase):
             "  state A,\n"
             "  state B choice,\n"
             "  state C deephistory,\n"
-            "  trans A -> B,\n"
+            "  trans external A -> B,\n"
             "  trans internal A -> B,\n"
             "  trans local A -> B,\n"
             "}\n",
