@@ -299,7 +299,7 @@ def main() -> int:
         for scale in jitter.SCALES:
             a = jitter.load(args.runs, chart, scale, base, args.seeds)
             b = jitter.load(args.runs, chart, scale, cand, args.seeds)
-            if len(a) > 1 and len(b) > 1:
+            if len(a) == len(b) == args.seeds + 1:
                 verdicts[(chart, scale)] = jitter.verdict_of(a, b, names)
 
     svg_dir = args.runs / "svg"

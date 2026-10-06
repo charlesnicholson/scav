@@ -6,7 +6,7 @@ transition's route.
   tools/trace.py estop.scav --trans 3     the decision chain for one of them
   tools/trace.py estop.scav --kinks       only the ones that bend
   tools/trace.py estop.scav --raw         the events, unsummarized
-  tools/trace.py bottler.scav --search    each row's searches, kicks and takes
+  tools/trace.py bottler.scav --outline   each row's searches, kicks and takes
   tools/trace.py --stats [chart...]       moves culled, skipped, scored, deduped, CPU; corpus default
 
 Any other flag is a layout flag passed to `scav dump`, such as `--no-text` or a pin.
@@ -151,6 +151,20 @@ def print_outline(events):
 
 
 MOVES = ("rank", "cut", "reverse", "face", "side", "fold", "orient", "loop")
+VALUED = ("--profile", "--rank", "--cut", "--reverse", "--end", "--orient", "--fold",
+          "--loop", "--search", "--jitter-seed")  # scav layout flags that take a value
+
+
+def split_layout(argv):
+    """Moves each `VALUED` flag and its value out of `argv`; returns (rest, layout)."""
+    rest, layout = [], []
+    it = iter(argv)
+    for a in it:
+        if a in VALUED:
+            layout += [a, next(it, "")]
+        else:
+            rest.append(a)
+    return rest, layout
 
 
 def search_stats(scav, chart, layout):
@@ -214,8 +228,10 @@ def main():
     ap.add_argument("--raw", action="store_true")
     ap.add_argument("--portfolio-row", dest="row", type=int, default=None)
     ap.add_argument("--scav", default=None)
-    ap.add_argument("--search", action="store_true")
-    args, layout = ap.parse_known_args()
+    ap.add_argument("--outline", action="store_true")
+    rest, layout = split_layout(sys.argv[1:])
+    args, flags = ap.parse_known_args(rest)
+    layout += flags
 
     scav = find_scav(args.scav)
     if scav is None:
@@ -223,14 +239,15 @@ def main():
         return 2
     charts = [Path(c) if Path(c).exists() else CORPUS / c for c in args.chart]
     if args.stats:
-        print_stats(scav, charts or sorted(CORPUS.glob("*.scav")), layout)
+        row = [] if args.row is None else ["--portfolio-row", str(args.row)]
+        print_stats(scav, charts or sorted(CORPUS.glob("*.scav")), [*row, *layout])
         return 0
     if len(charts) != 1:
         ap.error("one chart, or --stats")
     chart = charts[0]
 
-    traced = Traced(scav, chart, args.row, layout, args.search)
-    if args.search and not args.raw:
+    traced = Traced(scav, chart, args.row, layout, args.outline)
+    if args.outline and not args.raw:
         print_outline(traced.events())
         traced.model()
         return 0

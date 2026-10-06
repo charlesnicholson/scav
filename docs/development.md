@@ -360,7 +360,7 @@ is self-describing: its header names every event kind, each kind's fields and th
 types, and the chart's state names, so a reader needs only the file.
 
 `tools/trace.py` reads the JSON from scav's pipe one line at a time: `--trans N` the
-events behind one transition's route, `--search` the outline, `--raw` every event.
+events behind one transition's route, `--outline` the outline, `--raw` every event.
 
 ## The Unicode tables
 

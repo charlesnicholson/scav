@@ -64,11 +64,9 @@ def record_of(out: str) -> dict:
 
 def run_one(scav: Path, chart: Path, scale: str, search: str, seed: int,
             env: dict | None = None) -> dict:
-    argv = [str(scav), "dump", "--layout", "--json", "--search-stats"]
+    argv = [str(scav), "dump", "--layout", "--json", "--search-stats", "--search", search]
     if scale == "none":
         argv.append("--no-text")
-    if search != "full":
-        argv += ["--search", search]
     if seed:
         argv += ["--jitter-seed", str(seed)]
     timed = TIME.exists()
@@ -131,8 +129,11 @@ def report(runs: Path, charts: list[str], seeds: int, names: tuple[str, str]) ->
             other = load(runs, chart, scale, b, seeds)
             if (0 not in base) or (0 not in other):
                 continue
-            verdict = verdict_of(base, other, names)
-            verdicts[(chart, scale)] = verdict
+            if len(base) == len(other) == seeds + 1:
+                verdict = verdict_of(base, other, names)
+                verdicts[(chart, scale)] = verdict
+            else:
+                verdict = "incomplete"  # a verdict needs every seed of both searches
             for seed in base.keys() & other.keys():
                 x, y = base[seed]["t2"], other[seed]["t2"]
                 ratios[seed].append(y / x if x else 1.0)
