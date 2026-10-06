@@ -41,6 +41,7 @@ scav_static_library(scavlayout
   size.cpp
   route.cpp
   trace.cpp
+  trace_stream.cpp
   nudge.cpp
   label.cpp
   cost.cpp
@@ -57,6 +58,7 @@ scav_optimize_for_size(scavlayout SOURCES
   router_straight.cpp
   spaces.cpp
   trace.cpp
+  trace_stream.cpp
 )
 target_link_libraries(scavlayout PUBLIC scavcore)
 target_link_libraries(scavlayout_testable PUBLIC scavcore_testable)
@@ -99,6 +101,7 @@ if(SCAV_BUILD_TESTS)
     pack_tests.cpp
     size_tests.cpp
     trace_tests.cpp
+    trace_stream_tests.cpp
     route_tests.cpp
     nudge_tests.cpp
     label_tests.cpp

@@ -10,6 +10,7 @@
 
 #include <array>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace scav {
@@ -51,6 +52,11 @@ enum class TraceKind : uint16_t {
   KickScored,     // a kick was searched to convergence; `pass` is its `KickVerdict`
   KickTaken,      // a row took a kick search's result; `pass` is its `KickHow`
 };
+
+inline constexpr uint32_t TRACE_KINDS{ static_cast<uint32_t>(TraceKind::KickTaken) + 1U };
+
+// The kind's name in the JSON and the stream header; "none" for any other value.
+char const *trace_kind_name(TraceKind k);
 
 // What a rank boundary's charge is for; `GapCharged.pass`. `Held` adds nothing: the
 // boundary's charge already covers the label.
@@ -268,6 +274,16 @@ struct TraceFrame {
   TraceFrame(TraceFrame const &) = delete;
   TraceFrame &operator=(TraceFrame const &) = delete;
 };
+
+// Chart `c`'s state names by id, empty for a nameless state.
+std::vector<std::string> trace_state_names(Chart const &c);
+
+// Appends `e` as one line's JSON object, without separator or newline, with ordinal `i`
+// and states named from `states`.
+void trace_event_json(TraceEvent const &e,
+                      uint64_t i,
+                      std::vector<std::string> const &states,
+                      std::vector<char> &out);
 
 // A JSON array, one event per line in order; `tools/trace.py` reads it.
 void trace_to_json(LayoutTrace const &t, Chart const &c, std::vector<char> &out);
