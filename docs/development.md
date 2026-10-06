@@ -323,7 +323,8 @@ thread finished routing the same drawing (`deferred`), the candidate memo's peak
 answers found by drawing rather than
 by laid ordering (`drawn`), and per Level 1 move kind the candidates offered, those the
 memo answered (`deduped`), those left unrouted because their route bound reached the
-incumbent (`pruned`), those taken, the moves culled unoffered as changing nothing
+incumbent (`pruned`), those routed whose Tier 2 reached it before Tier 0 was counted
+(`stopped`), those taken, the moves culled unoffered as changing nothing
 (`culled`), those the culled search's don't-look bits left unscored in a round that
 took a move (`skipped`). `tools/trace.py --stats
 [chart...]` runs it over the corpus, or

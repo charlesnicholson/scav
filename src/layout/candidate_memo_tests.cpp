@@ -445,6 +445,26 @@ TEST_CASE("candidate memo: one claim per score kind, until that score is set") {
   CHECK(memo.claim(e, true, got) == Claim::Taken);
 }
 
+TEST_CASE("candidate memo: a released claim leaves the score unset and the bound raised") {
+  Fixture const f;
+  CandidateMemo memo{ f.c, f.g };
+  SubmachineOrders const plain{ f.order() };
+  uint32_t const drawn{ memo.drawing(plain, f.size(plain), memo.profile_word(f.p)) };
+  REQUIRE(drawn != INVALID);
+  std::vector<uint32_t> const none;
+  uint32_t const e{ memo.find_score(drawn, none, false).entry };
+  REQUIRE(e != INVALID);
+  memo.set_route_bound(e, 40);
+  MemoScore got;
+  REQUIRE(memo.claim(e, false, got) == Claim::Taken);
+  memo.release(e, false, 70);
+  CHECK(memo.claim(e, false, got) == Claim::Taken);  // claimable again
+  memo.release(e, false, 50);                        // a lower bound keeps the higher
+  CandidateMemo::Recalled const back{ memo.recall(e, false) };
+  CHECK_FALSE(back.found);
+  CHECK(back.route_bound == 70);
+}
+
 TEST_CASE("candidate memo: a route bound comes back beside a score it does not answer") {
   Fixture const f;
   CandidateMemo memo{ f.c, f.g };

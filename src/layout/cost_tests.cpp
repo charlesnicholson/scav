@@ -3249,6 +3249,54 @@ TEST_CASE("cost: a thread's kept buffers carry nothing from one chart to the nex
   CHECK(mismatches == 0);
 }
 
+TEST_CASE("cost: a stop ends the count once the Tier 2 terms but the labels' reach it") {
+  // A route that jogs through a third box: Tier 0 counts the box, Tier 2 the bends.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  StateId const m{ build_state(c, root, "M", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::Default, {});
+  SplitGraph const g{ decompose(c) };
+  SizedLayout z{ blank(c) };
+  z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 100 };
+  z.state[b.v] = { .x = 600, .y = 0, .w = 100, .h = 100 };
+  z.state[m.v] = { .x = 300, .y = -50, .w = 100, .h = 200 };
+  z.chart = { .x = 0, .y = -50, .w = 700, .h = 200 };
+  z.sub[root.v] = z.chart;
+  Routes const r{ routes_of(c,
+                            { { { .x = 100, .y = 50 },
+                                { .x = 200, .y = 50 },
+                                { .x = 200, .y = 30 },
+                                { .x = 500, .y = 30 },
+                                { .x = 500, .y = 50 },
+                                { .x = 600, .y = 50 } } }) };
+  scav_profile const p{ profile() };
+  CostContext const ctx{ cost_context(c, g) };
+  CostTerms const whole{ cost_terms(ctx, c, g, z, r, {}, p) };
+  REQUIRE(whole.through_box == 1);
+  REQUIRE(whole.bends == 4);
+  int64_t const t2{ cost_of(whole, p).t2 };
+
+  CostStop low{ .t2 = t2 };
+  CostTerms const cut{ cost_terms(ctx, c, g, z, r, {}, p, nullptr, nullptr, &low) };
+  CHECK(low.stopped);
+  CHECK(cut.through_box == 0);
+  CHECK(cut.bends == 4);
+  CHECK(cost_of(cut, p).t2 == t2);
+
+  CostStop high{ .t2 = t2 + 1 };
+  CostTerms const all{ cost_terms(ctx, c, g, z, r, {}, p, nullptr, nullptr, &high) };
+  CHECK_FALSE(high.stopped);
+  CHECK(first_difference(all, whole).empty());
+
+  // Without aspect the same stop is not reached.
+  REQUIRE(whole.aspect > 0);
+  CostStop flat{ .t2 = t2, .aspect = false };
+  (void)cost_terms(ctx, c, g, z, r, {}, p, nullptr, nullptr, &flat);
+  CHECK_FALSE(flat.stopped);
+}
+
 TEST_CASE("cost: a context built once scores every candidate as one built for it") {
   Lattice r{ 7 };
   for (uint32_t trial = 0; trial < 40; ++trial) {

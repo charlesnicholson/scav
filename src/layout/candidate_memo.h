@@ -150,6 +150,10 @@ class CandidateMemo {
   // `out`. An entry the memo cannot hold, or a retried one, is `Taken` and holds no claim.
   Claim claim(uint32_t e, bool labelled, MemoScore &out);
 
+  // Releases the caller's claim on entry `e`'s labelled or unlabelled score, leaving it
+  // unset, and raises the entry's route bound to `t2`.
+  void release(uint32_t e, bool labelled, int64_t t2);
+
   // Marks entry `e` retried: it then never answers and takes no score.
   void set_retried(uint32_t e);
 

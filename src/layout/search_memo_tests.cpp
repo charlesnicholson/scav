@@ -53,6 +53,8 @@ uint64_t layout_test_candidate_memo_drawn();
 uint64_t layout_test_candidate_memo_faced();
 uint64_t layout_test_candidate_memo_mismatches();
 void layout_test_route_bound(bool on, bool verify);
+void layout_test_cost_stop(bool on);
+uint64_t layout_test_cost_stopped();
 uint64_t layout_test_route_bound_pruned();
 uint64_t layout_test_route_bound_checked();
 uint64_t layout_test_route_bound_mismatches();
@@ -768,6 +770,49 @@ void check_route_bound(std::array<char const *, N> const &charts) {
 
 TEST_CASE("search: a move pruned by its route bound scores at least that bound") {
   check_route_bound(std::array<char const *, 3>{ "estop.scav", "led.scav", "dock.scav" });
+}
+
+namespace {
+
+// Re-enables the cost stop and pruning by route bound, its check off, on scope exit.
+struct CostStopGuard {
+  CostStopGuard() = default;
+  CostStopGuard(CostStopGuard const &) = delete;
+  CostStopGuard &operator=(CostStopGuard const &) = delete;
+  ~CostStopGuard() {
+    layout_test_cost_stop(true);
+    layout_test_route_bound(true, false);
+  }
+};
+
+}  // namespace
+
+TEST_CASE("search: a move stopped at its Tier 2 scores at or above it, and draws alike") {
+  CostStopGuard const guard;
+  uint64_t stopped{ 0 };
+  for (bool const culled : { false, true }) {
+    for (bool const labelled : { false, true }) {
+      for (char const *name : { "estop.scav", "led.scav", "dock.scav" }) {
+        CAPTURE(culled);
+        CAPTURE(labelled);
+        CAPTURE(name);
+        layout_test_cost_stop(true);
+        layout_test_route_bound(true, true);
+        Laid const with{ lay_out(name, labelled, culled) };
+        stopped += layout_test_cost_stopped();
+        CHECK(layout_test_route_bound_mismatches() == 0);
+        layout_test_cost_stop(false);
+        layout_test_route_bound(true, false);
+        Laid const without{ lay_out(name, labelled, culled) };
+        CHECK(layout_test_cost_stopped() == 0);
+        REQUIRE(with.ok);
+        REQUIRE(without.ok);
+        CHECK(with.structural == without.structural);
+        CHECK(with.coordinate == without.coordinate);
+      }
+    }
+  }
+  CHECK(stopped > 0);
 }
 
 TEST_CASE("search: on the corpus, every route bound lies at or below its move's score" *

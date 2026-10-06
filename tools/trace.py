@@ -141,12 +141,14 @@ def search_stats(scav, chart, layout):
 def print_stats(scav, charts, layout):
     """One row per chart and scale: moves culled, skipped by the don't-look bits, offered,
     answered by the memo and of those by drawing, pruned by their route bound, laid out in
-    full, taken; searches; the memo's peak; the layout's CPU. Then the same by move kind."""
+    full and of those stopped at the incumbent, taken; searches; the memo's peak; the
+    layout's CPU. Then the same by move kind."""
     scales = [[]] if "--no-text" in layout else [[], ["--no-text"]]
-    kinds = {m: [0, 0, 0, 0, 0, 0] for m in MOVES}
+    kinds = {m: [0, 0, 0, 0, 0, 0, 0] for m in MOVES}
     print(f"{'chart':14} {'scale':6} {'culled':>8} {'skipped':>8} "
           f"{'offered':>9} {'deduped':>9} {'drawn':>9} {'pruned':>9} "
-          f"{'scored':>9} {'taken':>6} {'searches':>8} {'memo MB':>8} {'cpu s':>8}")
+          f"{'scored':>9} {'stopped':>9} {'taken':>6} {'searches':>8} {'memo MB':>8} "
+          f"{'cpu s':>8}")
     for chart in charts:
         for scale in scales:
             st = search_stats(scav, chart, [*layout, *scale])
@@ -156,6 +158,7 @@ def print_stats(scav, charts, layout):
             offered = sum(v["offered"] for v in s["moves"].values())
             deduped = sum(v["deduped"] for v in s["moves"].values())
             pruned = sum(v["pruned"] for v in s["moves"].values())
+            stopped = sum(v["stopped"] for v in s["moves"].values())
             taken = sum(v["taken"] for v in s["moves"].values())
             for m, v in s["moves"].items():
                 kinds[m][0] += v["culled"]
@@ -164,18 +167,20 @@ def print_stats(scav, charts, layout):
                 kinds[m][3] += v["taken"]
                 kinds[m][4] += v["skipped"]
                 kinds[m][5] += v["pruned"]
+                kinds[m][6] += v["stopped"]
             print(f"{Path(chart).stem:14} {'notext' if scale else 'text':6} {culled:8} "
                   f"{skipped:8} {offered:9} {deduped:9} "
                   f"{s['drawn']:9} {pruned:9} "
-                  f"{offered - deduped - pruned:9} {taken:6} "
+                  f"{offered - deduped - pruned:9} {stopped:9} {taken:6} "
                   f"{s['searches']:8} {s['memo_bytes'] / 1e6:8.1f} {st['cpu_ms'] / 1e3:8.2f}")
     print()
     print(f"{'move':14} {'culled':>8} {'skipped':>8} "
-          f"{'offered':>9} {'deduped':>9} {'pruned':>9} {'scored':>9} {'taken':>6}")
+          f"{'offered':>9} {'deduped':>9} {'pruned':>9} {'scored':>9} {'stopped':>9} "
+          f"{'taken':>6}")
     for m in MOVES:
-        c, o, d, t, k, p = kinds[m]
+        c, o, d, t, k, p, x = kinds[m]
         if c or o or t:
-            print(f"{m:14} {c:8} {k:8} {o:9} {d:9} {p:9} {o - d - p:9} {t:6}")
+            print(f"{m:14} {c:8} {k:8} {o:9} {d:9} {p:9} {o - d - p:9} {x:9} {t:6}")
 
 
 def main():

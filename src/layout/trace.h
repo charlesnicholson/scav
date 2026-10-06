@@ -279,9 +279,9 @@ inline constexpr uint32_t TRACE_MOVES{ 8 };  // `TRACE_MOVE_*` values
 // left unscored in a round that took a move.
 struct SearchStats {
   std::array<uint64_t, TRACE_MOVES> offered{}, deduped{}, taken{}, culled{}, skipped{};
-  std::array<uint64_t, TRACE_MOVES>
-      pruned{};              // moves whose route bound reached the incumbent
-  uint64_t drawn{ 0 };       // moves the memo answered by their drawing
+  std::array<uint64_t, TRACE_MOVES> pruned{};   // route bound reached the incumbent
+  std::array<uint64_t, TRACE_MOVES> stopped{};  // routed, then Tier 2 reached it
+  uint64_t drawn{ 0 };                          // moves the memo answered by their drawing
   uint64_t faced{ 0 };       // moves whose facing pass the memo answered
   uint64_t searches{ 0 };    // Level 1 searches run
   uint64_t recalled{ 0 };    // Level 1 searches the search memo answered
@@ -296,8 +296,8 @@ void search_stats_set(SearchStats *s);
 // Adds `add` to the sink, if one is set; `memo_bytes` takes the larger.
 void search_stats_add(SearchStats const &add);
 
-// One JSON object: the totals, then per move kind its offered, deduped, pruned, taken,
-// culled and skipped counts.
+// One JSON object: the totals, then per move kind its offered, deduped, pruned, stopped,
+// taken, culled and skipped counts.
 void search_stats_to_json(SearchStats const &st, std::vector<char> &out);
 
 }  // namespace scav

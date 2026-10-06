@@ -68,6 +68,14 @@ struct CostContext {
 
 CostContext cost_context(Chart const &c, SplitGraph const &g);
 
+// Where `cost_terms` may stop: once the Tier 2 terms but the labels', aspect only where
+// `aspect`, reach `t2`, it sets `stopped` and counts no more.
+struct CostStop {
+  int64_t t2{ 0 };
+  bool aspect{ true };
+  bool stopped{ false };
+};
+
 // `ctx` is `cost_context(c, g)`. `party`, if given, is all 1 on a Tier 0 violation, else 1
 // per transition that bends or carries crossings, corridor, crowding, excess_len or label.
 // `charge`, if given, is per transition the weighted Tier 2 those terms charge it, scaled
@@ -80,7 +88,8 @@ CostTerms cost_terms(CostContext const &ctx,
                      scav_spaces const &s,
                      scav_profile const &p,
                      std::vector<uint8_t> *party = nullptr,
-                     std::vector<Wide> *charge = nullptr);
+                     std::vector<Wide> *charge = nullptr,
+                     CostStop *stop = nullptr);
 
 // The same with a context built for this one call.
 CostTerms cost_terms(Chart const &c,

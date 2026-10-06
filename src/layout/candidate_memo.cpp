@@ -785,6 +785,27 @@ Claim CandidateMemo::claim(uint32_t e, bool labelled, MemoScore &out) {
   return Claim::Taken;
 }
 
+void CandidateMemo::release(uint32_t e, bool labelled, int64_t t2) {
+  if (e == INVALID) { return; }
+  ScoreShard &sh{ scores[e & (SHARDS - 1)] };
+  ScopedLock const held{ sh.lock };
+  uint32_t const index{ index_of(e, sh.base, sh.records.size()) };
+  if (index == INVALID) { return; }
+  ScoreRecord &r{ sh.records[index] };
+  uint32_t const k{ labelled ? 1U : 0U };
+  if (r.t0[k] == TAG_CLAIMED) { r.t0[k] = TAG_UNSET; }
+  int64_t const had{ (r.bound_hi < 0)
+                         ? -1
+                         : static_cast<int64_t>(
+                               (uint64_t{ static_cast<uint32_t>(r.bound_hi) } << 32U) |
+                               uint64_t{ r.bound_lo }) };
+  if (t2 > had) {
+    auto const bits{ static_cast<uint64_t>(t2) };
+    r.bound_hi = static_cast<int32_t>(bits >> 32U);
+    r.bound_lo = static_cast<uint32_t>(bits);
+  }
+}
+
 void CandidateMemo::set_retried(uint32_t e) {
   if (e == INVALID) { return; }
   ScoreShard &sh{ scores[e & (SHARDS - 1)] };

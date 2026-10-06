@@ -208,6 +208,7 @@ void search_stats_add(SearchStats const &add) {
     to->culled[k] += add.culled[k];
     to->skipped[k] += add.skipped[k];
     to->pruned[k] += add.pruned[k];
+    to->stopped[k] += add.stopped[k];
   }
   to->drawn += add.drawn;
   to->faced += add.faced;
@@ -236,6 +237,7 @@ void search_stats_to_json(SearchStats const &st, std::vector<char> &out) {
     j.num(static_cast<int64_t>(st.offered[k]));
     j.kv("deduped", static_cast<int64_t>(st.deduped[k]));
     j.kv("pruned", static_cast<int64_t>(st.pruned[k]));
+    j.kv("stopped", static_cast<int64_t>(st.stopped[k]));
     j.kv("taken", static_cast<int64_t>(st.taken[k]));
     j.kv("culled", static_cast<int64_t>(st.culled[k]));
     j.kv("skipped", static_cast<int64_t>(st.skipped[k]));

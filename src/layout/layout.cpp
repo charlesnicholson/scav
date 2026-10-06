@@ -60,6 +60,8 @@ uint64_t layout_test_candidate_memo_drawn();
 uint64_t layout_test_candidate_memo_faced();
 uint64_t layout_test_candidate_memo_mismatches();
 void layout_test_route_bound(bool on, bool verify);
+void layout_test_cost_stop(bool on);
+uint64_t layout_test_cost_stopped();
 uint64_t layout_test_route_bound_pruned();
 uint64_t layout_test_route_bound_checked();
 uint64_t layout_test_route_bound_mismatches();
@@ -865,6 +867,7 @@ struct Scored {
   bool viable{ false };
   bool inflated{ false };
   bool degraded{ false };  // a net fell back to a straight line
+  bool stopped{ false };   // `cost` is the Tier 2 its count stopped at, a bound
 };
 
 void put_pins(SearchPins const &p, std::vector<uint32_t> &w) {
@@ -954,6 +957,8 @@ uint64_t test_candidate_memo_mismatches{ 0 };
 // Test switches: leave unrouted a move whose route bound reaches the incumbent; check each
 // bound against its move routed. The counters tally pruned moves, checks and failures.
 bool test_route_bound{ true };
+bool test_cost_stop{ true };  // stop a routed move's count at the incumbent
+uint64_t test_cost_stopped{ 0 };
 bool test_route_bound_verify{ false };
 Mutex test_route_bound_lock;
 uint64_t test_route_bound_pruned{ 0 };
@@ -977,7 +982,8 @@ Scored scored_of(Chart const &c,
                  scav_spaces const &s,
                  scav_profile const &objective,
                  Candidate const &cand,
-                 bool labelled = true) {
+                 bool labelled = true,
+                 int64_t stop_at = -1) {  // 0 or more: stop once Tier 2 reaches it
   Scored out;
   if (!cand.viable) { return out; }
   out.viable = true;
@@ -989,9 +995,25 @@ Scored scored_of(Chart const &c,
     out.degraded = true;
     return out;
   }
-  CostTerms terms{ cost_terms(scoring, c, g, cand.sized, cand.routes, s, objective) };
   // A bound zeroes aspect while a path box could still grow the chart.
-  if (!labelled && !labels_fit(s, cand.sized_chart)) { terms.aspect = 0; }
+  bool const aspect{ labelled || labels_fit(s, cand.sized_chart) };
+  CostStop stop{ .t2 = stop_at, .aspect = aspect };
+  CostTerms terms{ cost_terms(scoring,
+                              c,
+                              g,
+                              cand.sized,
+                              cand.routes,
+                              s,
+                              objective,
+                              nullptr,
+                              nullptr,
+                              (stop_at >= 0) ? &stop : nullptr) };
+  if (!aspect) { terms.aspect = 0; }
+  if (stop.stopped) {
+    out.cost = { .t0_violations = 0, .t1_hints = 0, .t2 = cost_of(terms, objective).t2 };
+    out.stopped = true;
+    return out;
+  }
   out.cost = cost_of(terms, objective);
   std::array<int64_t, TIER2_TERMS> const share{ cost_shares(terms, objective) };
   for (uint32_t k = 0; k < TIER2_TERMS; ++k) {
@@ -1050,6 +1072,7 @@ struct MemoUse {
   bool faced{ false };        // the facing memo answered its facing pass
   bool pruned{ false };       // its route bound reached the incumbent
   bool deferred{ false };     // left unscored while another thread routed its drawing
+  bool stopped{ false };      // routed, its Tier 2 then reached the incumbent
 };
 
 MemoScore memo_score(Scored const &s) {
@@ -1348,7 +1371,13 @@ Scored score_memoized(Chart const &c,
     case Claim::Taken: break;
   }
   lay_routes(cand, c, g, *laid, s, row, router, 1, &pins, { .reuse = reuse }, labels);
-  out = scored_of(c, g, scoring, s, objective, cand, labels);
+  bool stops{ memo.prune && (memo.incumbent.t0_violations == 0) &&
+              (memo.incumbent.t1_hints == 0) };
+#ifdef SCAV_TESTING
+  stops = stops && test_cost_stop;
+#endif
+  out =
+      scored_of(c, g, scoring, s, objective, cand, labels, stops ? memo.incumbent.t2 : -1);
 #ifdef SCAV_TESTING
   if (test_route_bound_verify && bounded) {
     check_route_bound(c, g, scoring, s, objective, cand, bound, shares);
@@ -1359,6 +1388,9 @@ Scored score_memoized(Chart const &c,
   if (cand.retried) {
     table.set_retried(use.entry);
     use.entry = INVALID;
+  } else if (out.stopped) {
+    use.stopped = true;
+    table.release(use.entry, labels, out.cost.t2);
   } else {
     table.set_score(use.entry, labels, memo_score(out));
   }
@@ -1435,9 +1467,34 @@ Scored score_move(Chart const &c,
       test_candidate_memo_drawn += use.drawn ? 1U : 0U;
       test_candidate_memo_faced += use.faced ? 1U : 0U;
     }
-    if (use.pruned) {
+    if (use.pruned || use.stopped) {
       ScopedLock const held{ test_route_bound_lock };
-      ++test_route_bound_pruned;
+      test_route_bound_pruned += use.pruned ? 1U : 0U;
+      test_cost_stopped += use.stopped ? 1U : 0U;
+    }
+    if (test_route_bound_verify && use.stopped) {
+      // A stopped move laid out whole scores at or above its bound.
+      SubmachineOrders const moved{ order_submachines(c, g, s, objective, 1, pins) };
+      std::vector<Diagnostic> spilled;
+      Candidate fresh;
+      search_candidate(fresh,
+                       c,
+                       g,
+                       moved,
+                       s,
+                       row,
+                       router,
+                       1,
+                       spilled,
+                       &pins,
+                       { .reuse = reuse },
+                       labels);
+      Scored const want{ scored_of(c, g, scoring, s, objective, fresh, labels) };
+      bool const holds{ !want.viable || want.inflated || want.degraded ||
+                        !cost_less(want.cost, out.cost) };
+      ScopedLock const held{ test_route_bound_lock };
+      ++test_route_bound_checked;
+      test_route_bound_mismatches += holds ? 0U : 1U;
     }
     if (test_route_bound_verify && use.pruned) {
       // A pruned move laid out whole scores at or above its bound.
@@ -1463,7 +1520,7 @@ Scored score_move(Chart const &c,
       ++test_route_bound_checked;
       test_route_bound_mismatches += holds ? 0U : 1U;
     }
-    if (test_candidate_memo_verify && !use.pruned && !use.deferred &&
+    if (test_candidate_memo_verify && !use.pruned && !use.stopped && !use.deferred &&
         (use.deduped || use.faced)) {
       SubmachineOrders const moved{ order_submachines(c, g, s, objective, 1, pins) };
       std::vector<Diagnostic> spilled;
@@ -2396,6 +2453,7 @@ Improved run_search(Chart const &c,
       ++counted.offered[kind];
       counted.deduped[kind] += uses[i].deduped ? 1U : 0U;
       counted.pruned[kind] += uses[i].pruned ? 1U : 0U;
+      counted.stopped[kind] += uses[i].stopped ? 1U : 0U;
       counted.drawn += uses[i].drawn ? 1U : 0U;
       counted.faced += uses[i].faced ? 1U : 0U;
     }
@@ -3664,6 +3722,15 @@ uint64_t layout_test_route_bound_checked() {
 uint64_t layout_test_route_bound_mismatches() {
   ScopedLock const held{ test_route_bound_lock };
   return test_route_bound_mismatches;
+}
+void layout_test_cost_stop(bool on) {
+  test_cost_stop = on;
+  ScopedLock const held{ test_route_bound_lock };
+  test_cost_stopped = 0;
+}
+uint64_t layout_test_cost_stopped() {
+  ScopedLock const held{ test_route_bound_lock };
+  return test_cost_stopped;
 }
 void layout_test_search_memo_verify(bool on) { test_search_memo_verify = on; }
 void layout_test_no_search(bool on) { test_no_search = on; }

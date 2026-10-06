@@ -1325,7 +1325,8 @@ CostTerms cost_terms(CostContext const &ctx,
                      scav_spaces const &s,
                      scav_profile const &p,
                      std::vector<uint8_t> *party,
-                     std::vector<Wide> *charge) {
+                     std::vector<Wide> *charge,
+                     CostStop *stop) {
   CostTerms t;
   if (party != nullptr) { vec_assign(*party, c.transitions.size(), 0); }
   if (charge != nullptr) { vec_assign(*charge, c.transitions.size(), 0); }
@@ -1428,6 +1429,13 @@ CostTerms cost_terms(CostContext const &ctx,
     if (crossings_of[tr] != 0) {
       blame(by(p.w_crossings), tr, INVALID, em * crossings_of[tr]);
     }
+  }
+  t.adjacency = adjacency_of(c, g, z, p);
+  if (stop != nullptr) {
+    CostTerms counted{ t };
+    if (!stop->aspect) { counted.aspect = 0; }
+    stop->stopped = cost_of(counted, p).t2 >= stop->t2;
+    if (stop->stopped) { return t; }
   }
 
   // Live states grown by the band `flush` reads; the flush and placed-box queries share
@@ -1570,8 +1578,6 @@ CostTerms cost_terms(CostContext const &ctx,
       for (uint32_t const st : common) { encloses[st] = 0; }
     }
   }
-
-  t.adjacency = adjacency_of(c, g, z, p);
 
   // Tier 0 `box_overlap`, `through_box`, `through_band` and `through_region`, from the
   // context's ancestry and this candidate's fill of its child grid.
