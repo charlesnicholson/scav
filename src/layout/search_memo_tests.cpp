@@ -345,7 +345,7 @@ TEST_CASE("search: every move culled as changing nothing lays out as the incumbe
 }
 
 TEST_CASE("search: every move culled on the corpus lays out as the incumbent" *
-          doctest::test_suite("full")) {
+          doctest::test_suite("exhaustive")) {
   CullGuard const guard;
   std::array<uint64_t, TRACE_MOVES> const culled{ culls_checked({ "axis.scav",
                                                                   "bottler.scav",
@@ -542,7 +542,7 @@ uint64_t total(std::array<uint64_t, TRACE_MOVES> const &by_kind) {
 }  // namespace
 
 TEST_CASE("search: the candidate memo lays out what scoring every move in full does" *
-          doctest::test_suite("full")) {
+          doctest::test_suite("exhaustive")) {
   CandidateGuard const guard;
   constexpr std::array<char const *, 6> CHARTS{ "axis.scav", "brew.scav", "kiln.scav",
                                                 "ota.scav",  "tcp.scav",  "vac.scav" };
@@ -600,7 +600,7 @@ TEST_CASE(
 TEST_CASE(
     "search: every move the candidate memo answers on the corpus scores as laid out "
     "afresh" *
-    doctest::test_suite("full")) {
+    doctest::test_suite("exhaustive")) {
   CandidateGuard const guard;
   constexpr std::array<char const *, 5> CHARTS{ "axis.scav",
                                                 "kiln.scav",
@@ -927,7 +927,7 @@ TEST_CASE("search: a move stopped at its Tier 2 scores at or above it, and draws
 }
 
 TEST_CASE("search: on the corpus, every route bound lies at or below its move's score" *
-          doctest::test_suite("full")) {
+          doctest::test_suite("exhaustive")) {
   check_route_bound(std::array<char const *, 6>{ "axis.scav",
                                                  "brew.scav",
                                                  "kiln.scav",

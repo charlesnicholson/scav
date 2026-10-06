@@ -264,7 +264,7 @@ TEST_CASE(
 TEST_CASE(
     "drawlist corpus: under real text the culled search on the large charts is one "
     "search" *
-    doctest::test_suite("full")) {
+    doctest::test_suite("exhaustive")) {
   check_culled_threads({ "elevator.scav", "bottler.scav" });
 }
 

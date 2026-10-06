@@ -382,7 +382,7 @@ TEST_CASE("search: every culled search stops where no move of its last round imp
 }
 
 TEST_CASE("search: every culled search on the corpus stops at a local optimum" *
-          doctest::test_suite("full")) {
+          doctest::test_suite("exhaustive")) {
   CHECK(stops_checked(
             culled(),
             { "axis.scav", "ota.scav", "tcp.scav", "vac.scav", "elevator.scav" }) > 0);

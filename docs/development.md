@@ -173,16 +173,22 @@ same bytes, which is the point: worker count reaches scheduling and nothing
 else. `NULL` is what the `wasm32-wasi` target will use, and building it now is
 how that stays true.
 
-**Tests run in two tiers.** The cache variable `SCAV_TEST_TIER` is `fast`, the
-default on every preset, or `full`; every test reads the environment variable of
-the same name, and a test binary run by hand is fast unless it is set. The fast
-tier takes seconds: corpus loops keep only `brew`, `dock`, `estop`, `kiln` and `led`, still
-compared line by line against the same goldens, and doctest cases tagged
-`doctest::test_suite("full")` and Python tests marked `scavtest.full_only` are
-left out. CI's release and testable rows build with `-DSCAV_TEST_TIER=full` and
-run everything in under five minutes; add the same flag locally to do so. The
-functional tests' traced-dump and render loops leave out `bottler`, `mill`, `tcp`
-and `toolchanger` in both tiers, and the full-corpus `scav selftest` run is opt-in
+**Tests run in three tiers.** The cache variable `SCAV_TEST_TIER` is `fast`, the
+default on every preset, `full` or `exhaustive`; every test reads the environment
+variable of the same name, and a test binary run by hand is fast unless it is set.
+
+- `fast` takes seconds. Corpus loops keep only `brew`, `dock`, `estop`, `kiln` and
+  `led`, still compared line by line against the same goldens; whole searches leave out
+  `kiln` too. Doctest cases tagged `doctest::test_suite("full")` or `"exhaustive"` and
+  Python tests marked `scavtest.full_only` are left out.
+- `full` runs everything else, in under five minutes. CI's release and testable rows
+  build with `-DSCAV_TEST_TIER=full`; add the same flag locally to do so.
+- `exhaustive` adds the cases tagged `doctest::test_suite("exhaustive")`: corpus-wide
+  proofs that lay out every culled, pruned, stopped or memo-answered move whole and
+  compare. They take minutes of CPU and run by hand after a change to the search.
+
+The functional tests' traced-dump and render loops leave out `bottler`, `mill`, `tcp`
+and `toolchanger` in every tier, and the full-corpus `scav selftest` run is opt-in
 with `SCAV_TEST_SELFTEST=1`.
 
 **Corpus tests lay out from committed pins.** For each corpus chart and scale,

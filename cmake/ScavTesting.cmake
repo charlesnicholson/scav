@@ -43,10 +43,11 @@ function(scav_testing_init)
   )
 
   set(SCAV_TEST_TIER "fast" CACHE STRING
-    "Tests a build runs: fast (seconds, four small charts) | full (everything)")
-  set_property(CACHE SCAV_TEST_TIER PROPERTY STRINGS fast full)
-  if(NOT SCAV_TEST_TIER MATCHES "^(fast|full)$")
-    message(FATAL_ERROR "SCAV_TEST_TIER=${SCAV_TEST_TIER} is not one of fast full")
+    "Tests a build runs: fast (seconds) | full (CI) | exhaustive (full plus corpus proofs)")
+  set_property(CACHE SCAV_TEST_TIER PROPERTY STRINGS fast full exhaustive)
+  if(NOT SCAV_TEST_TIER MATCHES "^(fast|full|exhaustive)$")
+    message(FATAL_ERROR
+      "SCAV_TEST_TIER=${SCAV_TEST_TIER} is not one of fast full exhaustive")
   endif()
 
   # `rm -rf out/<preset>/stamp` re-runs the suite without rebuilding anything.
