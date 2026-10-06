@@ -315,35 +315,43 @@ declares `scav_stable_sort` — so a call site names its header without a grep.
 
 ## Measuring the search
 
-`scav dump --layout --search-stats <chart>` prints one JSON line ahead of the model: the
-layout's processor time (`cpu_ms`, from `std::clock`, wall time on Windows), the
-searches run, the rows laid out and searched as an earlier row because they differ only
-in knobs no sizing of the chart reads (`aliased`), the moves scored again after another
-thread finished routing the same drawing (`deferred`), the unlabelled bounds laid out
-afresh because the memo answered a culled-search move with a labelled score that cannot win
-(`relaid`), the candidate memo's peak bytes, the answers found by drawing rather than by
-laid ordering (`drawn`), and per Level 1 move kind the candidates offered, those the
-memo answered (`deduped`), those left unrouted because their route bound reached the
-incumbent (`pruned`), those routed whose Tier 2 reached it before Tier 0 was counted
-(`stopped`), those taken, the moves culled unoffered as changing nothing
-(`culled`), those the culled search's don't-look bits left unscored in a round that
-took a move (`skipped`). `tools/trace.py --stats
-[chart...]` runs it over the corpus, or
-the charts given, at both text scales and tabulates it, with `scored` as offered less
-deduped and pruned. `deduped` and `relaid` vary by a few tenths
-of a percent between runs, since two threads can compute one key at once; the drawing
-does not.
+`scav dump --layout --search-stats <chart>` prints one JSON line ahead of the model:
 
-`--search full` runs the full search (PRD §11.10c) in place of the culled one, the default, and
-`--jitter-seed N` breaks near-equal
-moves and kicks by a hash of `N`. `tools/jitter.py --runs DIR` runs the corpus at both
-scales, for two searches (`--searches full,culled` by default), unperturbed and under
-three seeds, keeps each run in DIR with the instructions it retired, and reports per
-chart whether one search is worse than the other: worse only when every one of its runs
-is more than 2% above every run of the other. `tools/shootout.py --runs DIR --out FILE
---shots PNGDIR` draws every chart under real text by the same two searches side by side,
-from the same runs, with each panel's Tier 2, Tier 0, bends, crossings, candidates
-evaluated and search CPU; `--prefix` names the PNGs.
+- `cpu_ms`: the layout's processor time (`std::clock`; wall time on Windows).
+- `searches`: Level 1 searches run; `recalled`: those the search memo answered.
+- `aliased`: rows laid out and searched as an earlier row, differing only in knobs no
+  sizing of the chart reads.
+- `deferred`: moves scored again after another thread routed the same drawing.
+- `relaid`: unlabelled bounds laid out again where the memo held only a labelled score
+  that cannot win.
+- `memo_bytes`: the candidate memo's peak bytes.
+- `drawn`: memo answers found by drawing rather than by laid ordering; `faced`: moves
+  whose facing pass the memo answered.
+- Per Level 1 move kind:
+  - `offered`: moves offered;
+  - `deduped`: those the memo answered;
+  - `pruned`: those left unrouted because their route bound reached the incumbent;
+  - `stopped`: those whose routing or Tier 2 reached the incumbent before Tier 0 was
+    counted;
+  - `taken`: those taken;
+  - `culled`: moves never offered because they change nothing;
+  - `skipped`: moves the culled search's don't-look bits left unscored in a round that
+    took a move.
+
+`tools/trace.py --stats [chart...]` tabulates these over the corpus, or the charts given,
+at both text scales, with `scored` as offered less deduped and pruned. `deduped` and
+`relaid` vary by a few tenths of a percent between runs; the drawing does not.
+
+`--search full` runs the full search (PRD §11.10c) in place of the culled default, and
+`--jitter-seed N` breaks near-equal moves and kicks by a hash of `N`.
+
+- `tools/jitter.py --runs DIR` runs the corpus at both scales for two searches
+  (`--searches full,culled` by default), unperturbed and under three seeds, keeps each run
+  in DIR, and reports per chart whether one search is worse: every one of its runs more
+  than 2% above every run of the other.
+- `tools/shootout.py --runs DIR --out FILE --shots PNGDIR` draws every chart by the same
+  two searches side by side from those runs, each panel with its Tier 2, Tier 0, bends,
+  crossings, candidates evaluated and search CPU; `--prefix` names the PNGs.
 
 ## Tracing a layout
 
