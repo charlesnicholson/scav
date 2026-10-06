@@ -14,7 +14,7 @@ namespace scav {
 namespace {
 
 constexpr uint32_t ID_LIMIT{ 1U << 28 };     // every state and segment number is below it
-constexpr uint32_t LOCAL_LIMIT{ 0xFFFF };    // frame-local node numbers, and the none mark
+constexpr uint32_t LOCAL_LIMIT{ 0xFFFF };    // bounds frame-local node numbers; marks none
 constexpr uint32_t CHAIN_LIMIT{ 1U << 15 };  // the bends a segment's geometry word counts
 constexpr int32_t TAG_UNSET{ -1 };
 constexpr int32_t TAG_NOT_VIABLE{ -2 };
@@ -51,8 +51,7 @@ void group(uint32_t count,
 
 using Blocks = CandidateMemo::Blocks;
 
-// Whether block `m` of `a`, numbered in memo `serial`, has the words of block `m` of
-// `now`.
+// True when `a`, numbered in memo `serial`, holds `now`'s words for block `m`.
 bool same_block(Blocks const &a, Blocks const &now, uint32_t m, uint32_t serial) {
   if ((a.serial != serial) || (a.ids.size() != now.ends.size())) { return false; }
   uint32_t const at{ (m == 0) ? 0U : now.ends[m - 1] };

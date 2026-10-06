@@ -2619,8 +2619,7 @@ RowReads size_row_reads(Chart const &c, SubmachineOrders const &o) {
     Span const ns{ o.sub_nodes[m] };
     Span const es{ o.sub_edges[m] };
     if ((c.submachines[m].live == 0) || (ns.len == 0)) { continue; }
-    // An edge lets a component take two layers, and so fold into packed pieces.
-    bool const edged{ es.len != 0 };
+    bool const edged{ es.len != 0 };  // a component can take two layers
     vec_resize(root, ns.len);
     for (uint32_t k = 0; k < ns.len; ++k) { root[k] = k; }
     uint32_t parts{ ns.len };

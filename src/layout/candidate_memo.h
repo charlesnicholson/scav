@@ -250,16 +250,14 @@ class CandidateMemo {
   static uint32_t shard_of(uint64_t hash) {
     return static_cast<uint32_t>(hash >> 20U) & (SHARDS - 1);
   }
-  // The number for index `index` of shard `shard` at base `base`; INVALID past the
-  // numbering.
+  // The number of index `index` in shard `shard` at base `base`; INVALID past the range.
   static uint32_t number(uint32_t base, uint32_t index, uint32_t shard) {
     uint64_t const n{ uint64_t{ base } + index };
     return (n < (INVALID >> SHARD_BITS))
                ? ((static_cast<uint32_t>(n) << SHARD_BITS) | shard)
                : INVALID;
   }
-  // The index of number `e` in a shard at base `base` holding `size` keys; INVALID where
-  // `e` was emptied away.
+  // The index of number `e` in a shard at `base` with `size` keys; INVALID once emptied.
   static uint32_t index_of(uint32_t e, uint32_t base, size_t size) {
     uint32_t const n{ e >> SHARD_BITS };
     return ((e == INVALID) || (n < base) || ((n - base) >= size)) ? INVALID : (n - base);

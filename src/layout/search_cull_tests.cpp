@@ -1,6 +1,5 @@
-// The culled search: its row table, the rows it kicks and refolds, its don't-look bits
-// against the whole last round, its independence of threads, the label bound and the
-// trace, and the jitter seed.
+// The culled search: its rows, kicks and refolds, its don't-look bits, its independence of
+// threads, the label bound, the trace and the jitter seed.
 
 #include "layout/route.h"
 #include "layout/size.h"

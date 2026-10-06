@@ -204,8 +204,7 @@ TEST_CASE(
   CHECK(key(row, plain, {}) == base);
   CHECK(key(row2, plain, {}) != base);
   CHECK(key(row, moved, {}) != base);
-  // The router reads no pin at a port end.
-  CHECK(key(row, plain, { ported }) == base);
+  CHECK(key(row, plain, { ported }) == base);  // the router reads no pin at a port end
   uint32_t const faced{ key(row, plain, { boxed }) };
   CHECK(faced != base);
   // The last pin naming an end decides it, and pins naming different ends commute.

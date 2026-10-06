@@ -1,6 +1,5 @@
-// Level 1 search shortcuts checked against runs without them: the search memo, the
-// candidate memo, unscored no-op faces, culled moves, and face moves scored from the
-// incumbent's prefix.
+// Level 1 shortcuts checked against runs without them: the search and candidate memos,
+// unscored no-op faces, culled moves, and face moves scored from the incumbent's prefix.
 
 #include "layout/candidate_memo.h"
 #include "layout/pack.h"

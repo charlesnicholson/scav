@@ -1112,10 +1112,8 @@ struct MemoAccess {
   CandidateMemo::Blocks const *ordered{ nullptr };
   CandidateMemo::Blocks const *laid{ nullptr };
   CandidateMemo::Blocks const *drawing{ nullptr };
-  Cost incumbent{};  // the round's incumbent
-  bool prune{
-    false
-  };  // a move whose route bound reaches `incumbent` scores as that bound
+  Cost incumbent{};     // the round's incumbent
+  bool prune{ false };  // a move whose bound reaches `incumbent` scores as it
   bool defer{ false };  // a move whose drawing another thread is routing is left unscored
 };
 
@@ -1177,8 +1175,8 @@ CostTerms route_bound(Chart const &c,
                     per_trans);
 }
 
-// The share of the incumbent's Tier 2, in tenths, an unseated route bound reaches for the
-// seated bound to be computed.
+// The seated bound is computed where the unseated one reaches this many tenths of the
+// incumbent's Tier 2.
 constexpr int64_t SEATED_FROM_TENTHS{ 7 };
 
 #ifdef SCAV_TESTING
@@ -1275,8 +1273,7 @@ Scored score_memoized(Chart const &c,
 #ifdef SCAV_TESTING
   stops = stops && test_cost_stop;
 #endif
-  // Prunes by the stored route bound, else by that of `bends` sized as `z`, which it
-  // stores.
+  // Prunes by the stored route bound, else by `bends` sized as `z`'s, which it stores.
   auto const pruned_by = [&](std::vector<std::vector<uint32_t>> const &bends,
                              SizedLayout const &z) {
     if (prune_at(stored_bound)) { return true; }
@@ -1748,9 +1745,7 @@ uint64_t move_key(Move const &m) {
          ((param & 0x3FF'FFFFU) << 6U) | (subject << 32U);
 }
 
-constexpr int64_t JITTER_PER_MILLE{
-  2
-};  // the jitter's span against the incumbent's Tier 2
+constexpr int64_t JITTER_PER_MILLE{ 2 };  // the jitter's span, per mille of Tier 2
 
 // `JITTER_PER_MILLE` per mille of `incumbent`'s Tier 2, at least 1.
 int64_t jitter_span(Cost const &incumbent) {
@@ -1970,8 +1965,7 @@ struct TraceMuted {
 };
 
 // Level 1: each round takes the cheapest strictly improving move, ties to enumeration
-// order, and appends its pin to `held`. Per-kind counters cap moves offered at `budget`.
-// Under the culled search, a round skips moves its don't-look bits mark.
+// order, offering `budget` moves per kind at most; culled, it skips moves its bits mark.
 Improved run_search(Chart const &c,
                     SplitGraph const &g,
                     scav_spaces const &s,
@@ -2300,9 +2294,9 @@ Improved run_search(Chart const &c,
     culled.clear();
 #endif
   };
+  bool const culled_search{ objective.search_cull != 0 };
   // The culled search's don't-look bits: per move key, 1 where its last score could not
   // beat the incumbent then.
-  bool const culled_search{ objective.search_cull != 0 };
   HashMap<uint64_t, uint8_t> dont_look;
   std::vector<uint8_t> dont_look_now;  // parallel to `round`
   std::vector<Move> skipped;           // the round's moves its bits left unscored
@@ -2373,9 +2367,8 @@ Improved run_search(Chart const &c,
   while (rescan || (cut_scored < budget) || (rev_scored < budget) ||
          (face_scored < budget) || (side_scored < budget) || (pin_scored < budget) ||
          (loop_scored < budget) || (refold && (fold_scored < budget))) {
-    // Enumerates the round's moves, scores them in parallel, then reduces them in order. A
-    // round that takes nothing after its bits skipped moves is followed by a round of
-    // those.
+    // Enumerates, scores in parallel and reduces in order; a round that takes nothing
+    // after its bits skipped moves is followed by a round of just those.
     if (rescan) {
       round.swap(skipped);
       skipped.clear();
@@ -2409,9 +2402,8 @@ Improved run_search(Chart const &c,
     }
 
     access.incumbent = out.cost;
-    // Each candidate runs its phases on one thread; `fresh` scores it without the memo.
-    // `fresh` scores without the memo; `defer` leaves a move unscored while another thread
-    // routes its drawing.
+    // Scores move `i` on this thread: `fresh` without the memo, `defer` leaving it
+    // unscored while another thread routes its drawing.
     auto const score = [&](uint32_t i,
                            bool labels,
                            MemoUse &use,
@@ -2440,8 +2432,7 @@ Improved run_search(Chart const &c,
       return uses[i].deferred;
     };
     // 1 when move `i`'s unlabelled bound cannot beat the incumbent. `known` is that bound,
-    // or its labelled score where `labelled`; a labelled score that cannot win lays it
-    // out.
+    // or where `labelled` a labelled score; one that cannot win has the bound laid out.
     auto const bound_idle =
         [&](uint32_t i, Scored const &known, bool labelled, MemoUse &use) -> uint8_t {
       if (may_win(known, out.cost)) { return 0; }
@@ -3092,8 +3083,8 @@ bool layout_run(Chart &c,
     search_table(p, table);
   }
   auto const rows{ static_cast<uint32_t>(table.size()) };
-  // Each row with the knobs sizing never reads at row 0's values; a row whose canonical
-  // row matches an earlier one's lays out and searches as that row, its `alias`.
+  // A row's canonical form takes row 0's values for knobs no sizing reads; a row whose
+  // form matches an earlier row's lays out and searches as that row, its `alias`.
   RowReads reads{ size_row_reads(c, orders) };
 #ifdef SCAV_TESTING
   if (!test_row_alias) {
@@ -3513,7 +3504,7 @@ bool layout_run(Chart &c,
       kick(kicking[k]);
     });
     // A second search from each row's converged pins adds the fold moves; the cheaper is
-    // kept, ties to the first. The culled search does not refold a repeated row.
+    // kept, ties to the first. The culled search refolds only the rows that repeat none.
     std::vector<Candidate> first{ candidates };
     std::vector<Cost> const first_cost{ cost };
     std::vector<SearchPins> first_held{ held };

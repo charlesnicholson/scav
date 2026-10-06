@@ -1674,8 +1674,7 @@ CostTerms cost_bound(Chart const &c,
                          (seg.src_port == INVALID) && (seg.dst_port == INVALID) &&
                          (seg.src_inner == 0) && (seg.dst_inner == 0) };
       if (rectilinear && direct && seated) {
-        // A box-to-box segment seats each end on a face; its waypoints aim the router's
-        // seats and bound no turn.
+        // A box-to-box segment seats each end on a face, aimed at its waypoint or far box.
         std::vector<uint32_t> const &via{ (segs.off < bends.size()) ? bends[segs.off]
                                                                     : NO_BENDS };
         std::array<SeatEnd, 2> end{};

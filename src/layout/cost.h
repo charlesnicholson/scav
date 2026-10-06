@@ -68,18 +68,16 @@ struct CostContext {
 
 CostContext cost_context(Chart const &c, SplitGraph const &g);
 
-// Where `cost_terms` may stop: once the Tier 2 terms but the labels', aspect only where
-// `aspect`, reach `t2`, it sets `stopped` and counts no more.
+// Where `cost_terms` may stop: once its Tier 2 terms less the labels', with aspect only
+// where `aspect`, reach `t2`, it sets `stopped` and counts no more.
 struct CostStop {
   int64_t t2{ 0 };
   bool aspect{ true };
   bool stopped{ false };
 };
 
-// `ctx` is `cost_context(c, g)`. `party`, if given, is all 1 on a Tier 0 violation, else 1
-// per transition that bends or carries crossings, corridor, crowding, excess_len or label.
-// `charge`, if given, is per transition the weighted Tier 2 those terms charge it, scaled
-// by the em; a pair's term is charged to both.
+// `ctx` is `cost_context(c, g)`. Per transition, `party` gets 1 where a term charges it,
+// all 1 on a Tier 0 violation, and `charge` the em-scaled Tier 2 it is charged.
 CostTerms cost_terms(CostContext const &ctx,
                      Chart const &c,
                      SplitGraph const &g,
