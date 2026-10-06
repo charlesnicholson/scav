@@ -90,16 +90,18 @@ CostTerms cost_terms(Chart const &c,
                      scav_spaces const &s,
                      scav_profile const &p);
 
-// Per term, the least any routing of `z` with Tier 0 zero and no degraded net scores;
-// `bends` per `segment_bends`, `faces` per `CandidateMemo::box_faces`.
+// Per term, the least any routing of `z` by `router` with Tier 0 zero and no degraded net
+// scores, box ends on their seats' faces where `seated`; `faces` per `box_faces`.
 CostTerms cost_bound(Chart const &c,
                      SplitGraph const &g,
-                     std::vector<std::vector<uint32_t>> const &bends,
+                     std::vector<std::vector<uint32_t>> const &bends,  // `segment_bends`
                      SizedLayout const &z,
                      std::vector<uint32_t> const &faces,
                      scav_profile const &p,
                      int32_t clear,
-                     bool rectilinear);
+                     Router const &router,
+                     bool seated = true,
+                     std::vector<int32_t> *per_trans = nullptr);  // bends per transition
 
 // The same scoring read from the geometry columns; `placed` is the run's placed-box
 // out-param.

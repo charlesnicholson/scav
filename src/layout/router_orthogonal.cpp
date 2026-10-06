@@ -315,13 +315,20 @@ bool ortho_escape_horizontal(scav_point toward, scav_rect const &r) {
   return beyond(toward.x, r.x, r.w) >= beyond(toward.y, r.y, r.h);
 }
 
-scav_point ortho_escape_box(scav_point at, scav_point toward, scav_rect const &r) {
+uint32_t ortho_escape_face(scav_point toward, scav_rect const &r) {
   if (ortho_escape_horizontal(toward, r)) {
-    bool const left{ (Wide{ toward.x } - r.x) <= ((Wide{ r.x } + r.w) - toward.x) };
-    return { .x = left ? r.x : (r.x + r.w), .y = at.y };
+    return ((Wide{ toward.x } - r.x) <= ((Wide{ r.x } + r.w) - toward.x)) ? 0U : 1U;
   }
-  bool const top{ (Wide{ toward.y } - r.y) <= ((Wide{ r.y } + r.h) - toward.y) };
-  return { .x = at.x, .y = top ? r.y : (r.y + r.h) };
+  return ((Wide{ toward.y } - r.y) <= ((Wide{ r.y } + r.h) - toward.y)) ? 2U : 3U;
+}
+
+scav_point ortho_escape_box(scav_point at, scav_point toward, scav_rect const &r) {
+  switch (ortho_escape_face(toward, r)) {
+    case 0: return { .x = r.x, .y = at.y };
+    case 1: return { .x = r.x + r.w, .y = at.y };
+    case 2: return { .x = at.x, .y = r.y };
+    default: return { .x = at.x, .y = r.y + r.h };
+  }
 }
 
 scav_point ortho_attach_face(scav_point toward,
@@ -1392,6 +1399,10 @@ scav_point seat_at(RouteInput const &in,
 }
 
 }  // namespace
+
+uint32_t OrthogonalRouter::seat_face(scav_rect const &r, scav_point aim) const {
+  return ortho_escape_face(aim, r);
+}
 
 uint32_t OrthogonalRouter::effective_faces(RouteInput const &in,
                                            uint32_t net,

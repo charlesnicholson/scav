@@ -7,6 +7,7 @@
 #include "layout/geom.h"
 #include "layout/order.h"
 #include "layout/route.h"
+#include "layout/router.h"
 #include "layout/size.h"
 #include "scav/scav_core.h"
 #include "scav_int.h"
@@ -923,6 +924,7 @@ bool axis_reaches(Wide a0,
 constexpr int32_t FAR_TURNS{ 1 << 20 };  // exceeds any count of turns
 
 std::vector<uint32_t> const NO_BENDS;
+std::vector<scav_point> const NO_POINTS;
 
 // Per arrival axis (0 horizontal, 1 vertical), the fewest axis changes from `a` to `b`
 // after arriving at `a` along `in` (2 for none); `first`, `last` constrain the end pieces.
@@ -1007,6 +1009,136 @@ Region face_region(scav_rect const &r, uint32_t face) {
     default: break;
   }
   return out;
+}
+
+// Where on face `face` of box `r` a seat can lie: inset `max(arc, 1)` from each corner,
+// or the face's middle on an inscribed glyph.
+Region seat_run(scav_rect const &r, uint32_t face, int32_t arc, bool glyph) {
+  if (glyph) {
+    switch (face) {
+      case 0: return region_at({ .x = r.x, .y = r.y + (r.h / 2) });
+      case 1: return region_at({ .x = r.x + r.w, .y = r.y + (r.h / 2) });
+      case 2: return region_at({ .x = r.x + (r.w / 2), .y = r.y });
+      default: return region_at({ .x = r.x + (r.w / 2), .y = r.y + r.h });
+    }
+  }
+  int32_t const len{ (face < 2) ? r.h : r.w };
+  int32_t const inset{ imin(imax(arc, 1), len / 2) };
+  Region out{ face_region(r, face) };
+  if (face < 2) {
+    out.y0 += inset;
+    out.y1 -= inset;
+  } else {
+    out.x0 += inset;
+    out.x1 -= inset;
+  }
+  return out;
+}
+
+// True when each straight line from seat run `a` to `b` (horizontal at `across` 0) enters
+// a live child of `frame` but `src` and `dst`, or runs `near` its or the owner's border.
+bool straight_blocked(Chart const &c,
+                      SizedLayout const &z,
+                      uint32_t frame,
+                      uint32_t src,
+                      uint32_t dst,
+                      Region const &a,
+                      Region const &b,
+                      uint32_t across,
+                      int32_t near) {
+  bool const flat{ across == 0 };
+  Wide const lo{ flat ? imax(a.y0, b.y0) : imax(a.x0, b.x0) };  // the lines' coordinates
+  Wide const hi{ flat ? imin(a.y1, b.y1) : imin(a.x1, b.x1) };
+  Wide const from{ flat ? imin(a.x0, b.x0) : imin(a.y0, b.y0) };  // the span they run
+  Wide const to{ flat ? imax(a.x0, b.x0) : imax(a.y0, b.y0) };
+  if ((lo > hi) || (frame >= c.submachines.size())) { return false; }
+  thread_local std::vector<std::array<Wide, 2>> shut;  // closed ranges meeting [lo, hi]
+  shut.clear();
+  auto const close = [&](Wide from_at, Wide to_at) {
+    if ((to_at >= lo) && (from_at <= hi)) { vec_push_back(shut, { from_at, to_at }); }
+  };
+  auto const strip = [&](Wide line) { close(line - near, line + near); };
+  uint32_t const owner{ c.submachines[frame].owner.v };
+  if (owner < z.state.size()) {
+    Region const o{ region_of(z.state[owner]) };
+    strip(flat ? o.y0 : o.x0);
+    strip(flat ? o.y1 : o.x1);
+  }
+  Span const kids{ c.submachines[frame].children };
+  for (uint32_t k = 0; k < kids.len; ++k) {
+    uint32_t const st{ c.state_ids[kids.off + k].v };
+    if ((st == src) || (st == dst) || (st >= z.state.size()) || (c.states[st].live == 0)) {
+      continue;
+    }
+    Region const o{ region_of(z.state[st]) };
+    Wide const o_from{ flat ? o.x0 : o.y0 };
+    Wide const o_to{ flat ? o.x1 : o.y1 };
+    if ((o_to <= from) || (o_from >= to)) { continue; }
+    Wide const o_lo{ flat ? o.y0 : o.x0 };
+    Wide const o_hi{ flat ? o.y1 : o.x1 };
+    if ((from < o_from) || (o_to < to)) {
+      close(o_lo - near, o_hi + near);  // a line crosses a border into it
+    } else {
+      strip(o_lo);
+      strip(o_hi);
+    }
+  }
+  if (shut.empty()) { return false; }
+  scav_stable_sort(shut, [](std::array<Wide, 2> const &x, std::array<Wide, 2> const &y) {
+    return x[0] < y[0];
+  });
+  Wide open{ lo };  // the least coordinate not yet shut
+  for (std::array<Wide, 2> const &s : shut) {
+    if (s[0] > open) { return false; }
+    open = imax(open, s[1] + 1);
+    if (open > hi) { return true; }
+  }
+  return false;
+}
+
+// A box end of a direct transition: its box, the faces its seat can lie on, its arc.
+struct SeatEnd {
+  scav_rect box{};
+  uint32_t can{ 0xFU };
+  int32_t arc{ 0 };
+  bool glyph{ false };
+};
+
+// The fewest turns from a seat of `a` to a seat of `b`, each left square unless the two
+// runs meet; a straight line `straight_blocked` shuts takes two.
+int32_t seat_turns(Chart const &c,
+                   SizedLayout const &z,
+                   uint32_t frame,
+                   uint32_t src,
+                   uint32_t dst,
+                   std::array<SeatEnd, 2> const &end,
+                   int32_t near) {
+  // The least turns a pair of faces needs: none leaving and entering the same way, two
+  // turning back, one otherwise.
+  auto const least = [](uint32_t fa, uint32_t fb) {
+    if ((fa < 2) != (fb < 2)) { return 1; }
+    return ((fa % 2) == (fb % 2)) ? 2 : 0;
+  };
+  int32_t best{ FAR_TURNS };
+  for (int32_t floor = 0; (floor <= 2) && (floor < best); ++floor) {
+    for (uint32_t fa = 0; fa < 4; ++fa) {
+      if (((end[0].can >> fa) & 1U) == 0) { continue; }
+      Region const ra{ seat_run(end[0].box, fa, end[0].arc, end[0].glyph) };
+      for (uint32_t fb = 0; (fb < 4) && (floor < best); ++fb) {
+        if (((end[1].can >> fb) & 1U) == 0) { continue; }
+        Region const rb{ seat_run(end[1].box, fb, end[1].arc, end[1].glyph) };
+        bool const free{ meets(ra, rb) };
+        if ((free ? 0 : least(fa, fb)) != floor) { continue; }
+        int32_t turns{ path_turns(ra, free ? 4U : fa, NO_POINTS, rb, free ? 4U : fb) };
+        if ((turns == 0) && !free &&
+            straight_blocked(c, z, frame, src, dst, ra, rb, (fa < 2) ? 0U : 1U, near)) {
+          turns = 2;
+        }
+        best = imin(best, turns);
+      }
+    }
+  }
+  return best;
 }
 
 }  // namespace
@@ -1503,12 +1635,16 @@ CostTerms cost_bound(Chart const &c,
                      std::vector<uint32_t> const &faces,
                      scav_profile const &p,
                      int32_t clear,
-                     bool rectilinear) {
+                     Router const &router,
+                     bool seated,
+                     std::vector<int32_t> *per_trans) {
   CostTerms t;
+  if (per_trans != nullptr) { vec_assign(*per_trans, c.transitions.size(), 0); }
   t.area = area_of(z.chart);
   t.whitespace = (p.w_whitespace != 0) ? whitespace_of(c, z, t.area) : 0;
   t.adjacency = adjacency_of(c, g, z, p);
-  thread_local std::vector<scav_point> via;
+  bool const rectilinear{ router.rectilinear() };
+  int32_t const near{ border_band(p) - 1 };
   // The face `faces` names at end `end` of segment `seg`, else INVALID.
   auto const named = [&faces](uint32_t seg, uint32_t end) {
     uint32_t const at{ (seg << 3U) | (end << 2U) };
@@ -1518,63 +1654,82 @@ CostTerms cost_bound(Chart const &c,
   for (uint32_t tr = 0; tr < c.transitions.size(); ++tr) {
     if ((tr >= g.trans_segments.size()) || (g.trans_segments[tr].len == 0)) { continue; }
     Transition const &trans{ c.transitions[tr] };
+    int32_t turns{ 0 };
     if (inner_loop(c, tr)) {
-      t.bends += rectilinear ? 2 : 0;  // out, along and back, the middle of nonzero length
-      continue;
-    }
-    if (trans.src == trans.dst) { continue; }
-    std::array<Region, 2> const box{ region_of(z.state[trans.src.v]),
-                                     region_of(z.state[trans.dst.v]) };
-    Wide const gap_x{ imax(Wide{ 0 },
-                           imax(box[1].x0 - box[0].x1, box[0].x0 - box[1].x1)) };
-    Wide const gap_y{ imax(Wide{ 0 },
-                           imax(box[1].y0 - box[0].y1, box[0].y0 - box[1].y1)) };
-    if (!rectilinear) {
-      t.length += imax(gap_x, gap_y);
-      continue;
-    }
-    t.length += gap_x + gap_y;
-    // A box-to-box segment also takes its waypoints and the faces it names.
-    Span const segs{ g.trans_segments[tr] };
-    SplitSegment const &seg{ g.segments[segs.off] };
-    bool const direct{ (segs.len == 1) && (trans.kind != TransKind::External) &&
-                       (seg.src_port == INVALID) && (seg.dst_port == INVALID) &&
-                       (seg.src_inner == 0) && (seg.dst_inner == 0) };
-    via.clear();
-    std::array<Region, 2> end_at{ box };
-    std::array<uint32_t, 2> face{ INVALID, INVALID };
-    if (direct) {
-      for (uint32_t const bend : (segs.off < bends.size()) ? bends[segs.off] : NO_BENDS) {
-        vec_push_back(via, z.node[bend]);
-      }
-      for (uint32_t end = 0; end < 2; ++end) {
-        uint32_t const st{ (end == 0) ? trans.src.v : trans.dst.v };
-        uint32_t const f{ named(segs.off, end) };
-        scav_rect const &r{ z.state[st] };
-        bool const looped{ (st >= z.loop.size()) || (z.loop[st].w > 0) ||
-                           (z.loop[st].h > 0) };
-        int32_t const arc{
-          state_corner_radius(c.states[st].kind, r, z.before[st].x - r.x)
-        };
-        if ((f == INVALID) || kind_inscribed(c.states[st].kind) || looped ||
-            !face_seats(r, f, clear, arc)) {
-          continue;
+      turns = rectilinear ? 2 : 0;  // out, along and back, the middle of nonzero length
+    } else if (trans.src != trans.dst) {
+      std::array<Region, 2> const box{ region_of(z.state[trans.src.v]),
+                                       region_of(z.state[trans.dst.v]) };
+      Wide const gap_x{ imax(Wide{ 0 },
+                             imax(box[1].x0 - box[0].x1, box[0].x0 - box[1].x1)) };
+      Wide const gap_y{ imax(Wide{ 0 },
+                             imax(box[1].y0 - box[0].y1, box[0].y0 - box[1].y1)) };
+      t.length += rectilinear ? (gap_x + gap_y) : imax(gap_x, gap_y);
+      Span const segs{ g.trans_segments[tr] };
+      SplitSegment const &seg{ g.segments[segs.off] };
+      bool const direct{ (segs.len == 1) && (trans.kind != TransKind::External) &&
+                         (seg.src_port == INVALID) && (seg.dst_port == INVALID) &&
+                         (seg.src_inner == 0) && (seg.dst_inner == 0) };
+      if (rectilinear && direct && seated) {
+        // A box-to-box segment seats each end on a face; its waypoints aim the router's
+        // seats and bound no turn.
+        std::vector<uint32_t> const &via{ (segs.off < bends.size()) ? bends[segs.off]
+                                                                    : NO_BENDS };
+        std::array<SeatEnd, 2> end{};
+        for (uint32_t e = 0; e < 2; ++e) {
+          uint32_t const st{ (e == 0) ? trans.src.v : trans.dst.v };
+          uint32_t const other{ (e == 0) ? trans.dst.v : trans.src.v };
+          scav_rect const &r{ z.state[st] };
+          end[e].box = r;
+          end[e].arc = state_corner_radius(c.states[st].kind, r, z.before[st].x - r.x);
+          end[e].glyph = kind_inscribed(c.states[st].kind);
+          bool const looped{ (st >= z.loop.size()) || (z.loop[st].w > 0) ||
+                             (z.loop[st].h > 0) };
+          if (end[e].glyph || looped) { continue; }
+          uint32_t f{ named(segs.off, e) };
+          if ((f == INVALID) || !face_seats(r, f, clear, end[e].arc)) {
+            scav_rect const &o{ z.state[other] };
+            scav_point aim{ .x = o.x + floor_div(o.w, 2), .y = o.y + floor_div(o.h, 2) };
+            if (!via.empty()) { aim = z.node[(e == 0) ? via.front() : via.back()]; }
+            f = router.seat_face(r, aim);
+          }
+          if ((f < 4) && (((f < 2) ? r.h : r.w) >= 2)) { end[e].can = 1U << f; }
         }
-        Region const on{ face_region(r, f) };
-        // A face meeting the next point takes no constraint.
-        Region const next{ via.empty()
-                               ? end_at[1 - end]
-                               : region_at((end == 0) ? via.front() : via.back()) };
-        if (meets(on, next)) { continue; }
-        end_at[end] = on;
-        face[end] = f;
+        turns = seat_turns(c, z, seg.frame.v, trans.src.v, trans.dst.v, end, near);
+      } else if (rectilinear && direct) {
+        // A named face that seats is left square from somewhere on it.
+        std::array<Region, 2> at{ box };
+        std::array<uint32_t, 2> face{ INVALID, INVALID };
+        for (uint32_t e = 0; e < 2; ++e) {
+          uint32_t const st{ (e == 0) ? trans.src.v : trans.dst.v };
+          scav_rect const &r{ z.state[st] };
+          uint32_t const f{ named(segs.off, e) };
+          bool const looped{ (st >= z.loop.size()) || (z.loop[st].w > 0) ||
+                             (z.loop[st].h > 0) };
+          int32_t const arc{
+            state_corner_radius(c.states[st].kind, r, z.before[st].x - r.x)
+          };
+          if ((f == INVALID) || kind_inscribed(c.states[st].kind) || looped ||
+              !face_seats(r, f, clear, arc)) {
+            continue;
+          }
+          at[e] = face_region(r, f);
+          face[e] = f;
+        }
+        for (uint32_t e = 0; e < 2; ++e) {
+          if ((face[e] != INVALID) && meets(at[e], at[1 - e])) { face[e] = INVALID; }
+        }
+        if ((face[0] == INVALID) && (face[1] == INVALID)) {
+          turns = ((gap_x > 0) && (gap_y > 0)) ? 1 : 0;
+        } else {
+          turns = path_turns(at[0], face[0], NO_POINTS, at[1], face[1]);
+        }
+      } else if (rectilinear) {
+        turns = ((gap_x > 0) && (gap_y > 0)) ? 1 : 0;
       }
     }
-    if (via.empty() && (face[0] == INVALID) && (face[1] == INVALID)) {
-      t.bends += ((gap_x > 0) && (gap_y > 0)) ? 1 : 0;
-    } else {
-      t.bends += path_turns(end_at[0], face[0], via, end_at[1], face[1]);
-    }
+    t.bends += turns;
+    if (per_trans != nullptr) { (*per_trans)[tr] = turns; }
   }
   return t;
 }

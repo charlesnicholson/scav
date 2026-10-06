@@ -134,9 +134,16 @@ class Router {
   // How far the caller grows `region` on every side for this router's lanes.
   [[nodiscard]] virtual int32_t margin(scav_profile const & /*p*/) const { return 0; }
 
-  // True when undegraded nets run axis-aligned through their waypoints and leave a named
-  // face square where `face_seats` holds on a box neither inscribed nor looped.
+  // True when undegraded nets run axis-aligned and leave each box end square from a seat
+  // `max(arc, 1)` off a face's corners, or at an inscribed glyph's face middle.
   [[nodiscard]] virtual bool rectilinear() const { return false; }
+
+  // The face an end on box `r` with no seatable named face is seated on, aimed at `aim`,
+  // on a box neither inscribed nor looped; 4 for any face.
+  [[nodiscard]] virtual uint32_t seat_face(scav_rect const & /*r*/,
+                                           scav_point /*aim*/) const {
+    return 4;
+  }
 
   // Bit f set where naming face f at end `end` (0 source, 1 destination) of
   // `in.nets[net]` can change the route; independent of that end's own named face.
@@ -171,6 +178,7 @@ class OrthogonalRouter final : public Router {
   [[nodiscard]] uint32_t version() const override { return 1; }
   [[nodiscard]] int32_t margin(scav_profile const &p) const override;
   [[nodiscard]] bool rectilinear() const override { return true; }
+  [[nodiscard]] uint32_t seat_face(scav_rect const &r, scav_point aim) const override;
   [[nodiscard]] uint32_t effective_faces(RouteInput const &in,
                                          uint32_t net,
                                          uint32_t end) const override;

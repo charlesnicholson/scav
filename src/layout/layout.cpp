@@ -1074,7 +1074,7 @@ MoveScratch &move_scratch() {
 }
 
 // `cost_bound` of a laid ordering with `bends` sized as `z` under the move's faces, routed
-// by `router`.
+// by `router`; `seated` and `per_trans` as `cost_bound` takes them.
 CostTerms route_bound(Chart const &c,
                       SplitGraph const &g,
                       std::vector<std::vector<uint32_t>> const &bends,
@@ -1082,7 +1082,9 @@ CostTerms route_bound(Chart const &c,
                       std::vector<uint32_t> const &faces,
                       scav_profile const &objective,
                       Row const &row,
-                      Router const &router) {
+                      Router const &router,
+                      bool seated,
+                      std::vector<int32_t> *per_trans = nullptr) {
   return cost_bound(c,
                     g,
                     bends,
@@ -1090,19 +1092,44 @@ CostTerms route_bound(Chart const &c,
                     faces,
                     objective,
                     route_clearance(row.knobs),
-                    router.rectilinear());
+                    router,
+                    seated,
+                    per_trans);
 }
 
+// The share of the incumbent's Tier 2, in tenths, an unseated route bound reaches for the
+// seated bound to be computed.
+constexpr int64_t SEATED_FROM_TENTHS{ 7 };
+
 #ifdef SCAV_TESTING
-// Tallies a check of `bound` against `cand` routed: each term at or above it, and the sum
-// where `cand` has Tier 0 zero, no degraded net and no inflation.
+// Turns of transition `t`'s polyline in `r`, counted as `cost_terms` counts bends.
+uint32_t route_turns(Routes const &r, uint32_t t) {
+  auto const way = [](scav_point a, scav_point b) {
+    auto const axis = [](int32_t from, int32_t to) {
+      if (to > from) { return 2U; }
+      return (to < from) ? 0U : 1U;
+    };
+    return (axis(a.x, b.x) * 3U) + axis(a.y, b.y);
+  };
+  scav_span const at{ r.route[t] };
+  uint32_t out{ 0 };
+  for (uint32_t k = 0; (k + 2) < at.len; ++k) {
+    scav_point const *p{ r.points.data() + at.off + k };
+    out += (way(p[0], p[1]) != way(p[1], p[2])) ? 1U : 0U;
+  }
+  return out;
+}
+
+// Tallies a check of `bound` and its `shares` against `cand` routed with Tier 0 zero, no
+// degraded net and no inflation: each term, each transition's bends, and the sum.
 void check_route_bound(Chart const &c,
                        SplitGraph const &g,
                        CostContext const &scoring,
                        scav_spaces const &s,
                        scav_profile const &objective,
                        Candidate const &cand,
-                       CostTerms const &bound) {
+                       CostTerms const &bound,
+                       std::vector<int32_t> const &shares) {
   bool holds{ true };
   if (cand.viable && (cand.inflations == 0) && (cand.routes.degraded() == 0)) {
     CostTerms const t{ cost_terms(scoring, c, g, cand.sized, cand.routes, s, objective) };
@@ -1111,6 +1138,9 @@ void check_route_bound(Chart const &c,
             ((t.area >= bound.area) && (t.whitespace >= bound.whitespace) &&
              (t.adjacency >= bound.adjacency) && (t.length >= bound.length) &&
              (t.bends >= bound.bends) && (cost.t2 >= cost_of(bound, objective).t2));
+    for (uint32_t tr = 0; (cost.t0_violations == 0) && (tr < shares.size()); ++tr) {
+      holds = holds && (static_cast<int64_t>(route_turns(cand.routes, tr)) >= shares[tr]);
+    }
   }
   ScopedLock const held{ test_route_bound_lock };
   ++test_route_bound_checked;
@@ -1164,6 +1194,10 @@ Scored score_memoized(Chart const &c,
     return true;
   };
   CostTerms bound{};  // the move's route bound where `bounded`
+#ifdef SCAV_TESTING
+  std::vector<int32_t>
+      shares;  // its bends per transition, under `test_route_bound_verify`
+#endif
   bool bounded{ false };
   // Prunes by the stored route bound, else by that of `bends` sized as `z`, which it
   // stores.
@@ -1176,9 +1210,21 @@ Scored score_memoized(Chart const &c,
     compute = compute || test_route_bound_verify;
 #endif
     if (!compute) { return false; }
-    bound = route_bound(c, g, bends, z, sc.faces, objective, row, router);
+#ifdef SCAV_TESTING
+    std::vector<int32_t> *const per_trans{ test_route_bound_verify ? &shares : nullptr };
+#else
+    std::vector<int32_t> *const per_trans{ nullptr };
+#endif
+    bound = route_bound(c, g, bends, z, sc.faces, objective, row, router, false);
+    int64_t t2{ cost_of(bound, objective).t2 };
+    if ((per_trans != nullptr) ||
+        ((t2 < memo.incumbent.t2) &&
+         ((t2 * 10) >= (memo.incumbent.t2 * SEATED_FROM_TENTHS)))) {
+      bound =
+          route_bound(c, g, bends, z, sc.faces, objective, row, router, true, per_trans);
+      t2 = cost_of(bound, objective).t2;
+    }
     bounded = true;
-    int64_t const t2{ cost_of(bound, objective).t2 };
     table.set_route_bound(use.entry, t2);
     return prune_at(t2);
   };
@@ -1305,7 +1351,7 @@ Scored score_memoized(Chart const &c,
   out = scored_of(c, g, scoring, s, objective, cand, labels);
 #ifdef SCAV_TESTING
   if (test_route_bound_verify && bounded) {
-    check_route_bound(c, g, scoring, s, objective, cand, bound);
+    check_route_bound(c, g, scoring, s, objective, cand, bound, shares);
   }
 #else
   (void)bounded;
