@@ -3,7 +3,6 @@
 
 #include "layout/trace_stream.h"
 
-#include "layout/chunk_queue.h"
 #include "layout/trace.h"
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
@@ -12,23 +11,9 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>
 #include <cstring>
-#include <string>
-#include <string_view>
-#include <tuple>
 #include <utility>
 #include <vector>
-
-#ifdef SCAV_TESTING
-#  include <atomic>
-#endif
-
-#ifdef _WIN32
-#  define WIN32_LEAN_AND_MEAN
-#  define NOMINMAX
-#  include <windows.h>
-#endif
 
 namespace scav {
 
@@ -199,9 +184,9 @@ int64_t unzigzag(uint64_t u) {
   return static_cast<int64_t>(u >> 1U) ^ -static_cast<int64_t>(u & 1U);
 }
 
-void put_text(std::vector<uint8_t> &out, std::string_view s) {
-  put_varint(out, s.size());
-  vec_insert(out, out.end(), s.begin(), s.end());
+void put_text(std::vector<uint8_t> &out, char const *s, size_t n) {
+  put_varint(out, n);
+  vec_insert(out, out.end(), s, s + n);
 }
 
 // Appends each field's value.
@@ -222,7 +207,7 @@ struct Describe {
   std::vector<uint8_t> &out;
   uint64_t fields{ 0 };
   void field(char const *name, TraceType type, uint64_t count) {
-    put_text(out, name);
+    put_text(out, name, std::strlen(name));
     vec_push_back(out, static_cast<uint8_t>(type));
     put_varint(out, count);
     ++fields;
@@ -249,7 +234,8 @@ std::vector<uint8_t> const &schema() {
       fields.clear();
       Describe d{ .out = fields, .fields = 0 };
       each_field(e, d);
-      put_text(out, trace_kind_name(e.kind));
+      char const *const name{ trace_kind_name(e.kind) };
+      put_text(out, name, std::strlen(name));
       put_varint(out, d.fields);
       vec_insert(out, out.end(), fields.begin(), fields.end());
     }
@@ -331,8 +317,9 @@ size_t decode_header(TraceDecoder &d) {
     d.failed = r.bad;
     return 0;
   }
-  if (version != TRACE_FORMAT) {
+  if ((version != TRACE_FORMAT) || (length > UINT32_MAX)) {
     d.failed = true;
+    d.foreign = (version != TRACE_FORMAT);
     return 0;
   }
   if (std::cmp_greater(length, r.end - r.at)) { return 0; }
@@ -340,6 +327,7 @@ size_t decode_header(TraceDecoder &d) {
   std::vector<uint8_t> const &want{ schema() };
   if ((length < want.size()) || (std::memcmp(body.at, want.data(), want.size()) != 0)) {
     d.failed = true;
+    d.foreign = true;
     return 0;
   }
   body.at += want.size();
@@ -349,7 +337,9 @@ size_t decode_header(TraceDecoder &d) {
     uint64_t n{ 0 };
     ok = body.varint(n) && std::cmp_less_equal(n, body.end - body.at);
     if (ok) {
-      d.states.emplace_back(reinterpret_cast<char const *>(body.at), n);
+      char const *const name{ reinterpret_cast<char const *>(body.at) };
+      vec_insert(d.names, d.names.end(), name, name + n);
+      vec_push_back(d.name_end, static_cast<uint32_t>(d.names.size()));
       body.at += n;
     }
   }
@@ -366,7 +356,10 @@ size_t decode_header(TraceDecoder &d) {
 void trace_encode_header(Chart const &c, std::vector<uint8_t> &out) {
   std::vector<uint8_t> body{ schema() };
   put_varint(body, c.states.size());
-  for (State const &st : c.states) { put_text(body, chart_string(c, st.name)); }
+  for (State const &st : c.states) {
+    auto const name{ chart_string(c, st.name) };
+    put_text(body, name.data(), name.size());
+  }
   vec_insert(out, out.end(), MAGIC.begin(), MAGIC.end());
   put_varint(out, TRACE_FORMAT);
   put_varint(out, body.size());
@@ -383,11 +376,11 @@ void trace_encode_end(uint64_t events, std::vector<uint8_t> &out) {
   put_varint(out, events);
 }
 
-bool trace_decode(TraceDecoder &d,
-                  uint8_t const *data,
-                  size_t n,
-                  TraceEventFn on,
-                  void *ctx) {
+bool trace_decode_events(TraceDecoder &d,
+                         uint8_t const *data,
+                         size_t n,
+                         TraceEventFn on,
+                         void *ctx) {
   if (d.failed) { return false; }
   vec_insert(d.pending, d.pending.end(), data, data + n);
   size_t used{ d.header ? 0U : decode_header(d) };
@@ -416,7 +409,7 @@ bool trace_decode(TraceDecoder &d,
         break;
       }
       ++d.events;
-      d.failed = !on(ctx, e);
+      d.failed = (on != nullptr) && !on(ctx, e);
     } else {
       d.failed = true;
     }
@@ -430,171 +423,62 @@ bool trace_decode_whole(TraceDecoder const &d) {
   return d.header && d.ended && !d.failed && d.pending.empty();
 }
 
-#ifdef SCAV_TESTING
-void trace_test_fail_write(uint32_t nth);
-#endif
-
 namespace {
 
-#ifdef SCAV_TESTING
-std::atomic<uint32_t> g_fail_at{ 0 };  // the file write that fails, from 1; 0 for none
-std::atomic<uint32_t> g_writes{ 0 };
-#endif
-
-// Renames `from` onto `to`, replacing `to` if it exists.
-bool replace_file(char const *from, char const *to) {
-#ifdef _WIN32
-  return MoveFileExA(from, to, MOVEFILE_REPLACE_EXISTING) != 0;
-#else
-  return std::rename(from, to) == 0;
-#endif
-}
-
-bool atomic_file_open(AtomicFile &f, char const *path) {
-  f.path = path;
-  f.temp = f.path + ".tmp";
-  f.file = std::fopen(f.temp.c_str(), "wb");
-  return f.file != nullptr;
-}
-
-// A `ChunkWrite` appending to the temp file.
-bool atomic_file_write(void *ctx, uint8_t const *data, size_t n) {
-#ifdef SCAV_TESTING
-  uint32_t const fail_at{ g_fail_at.load() };
-  if ((fail_at != 0) && ((g_writes.fetch_add(1U) + 1U) == fail_at)) { return false; }
-#endif
-  auto &f{ *static_cast<AtomicFile *>(ctx) };
-  return std::fwrite(data, 1, n, f.file) == n;
-}
-
-// Closes the temp file and renames it onto the path; on failure removes it.
-bool atomic_file_commit(AtomicFile &f) {
-  bool const closed{ std::fclose(f.file) == 0 };
-  f.file = nullptr;
-  bool const moved{ closed && replace_file(f.temp.c_str(), f.path.c_str()) };
-  if (!moved) { std::ignore = std::remove(f.temp.c_str()); }
-  return moved;
-}
-
-void atomic_file_abandon(AtomicFile &f) {
-  if (f.file == nullptr) { return; }
-  std::ignore = std::fclose(f.file);
-  f.file = nullptr;
-  std::ignore = std::remove(f.temp.c_str());
-}
-
-bool json_flush(JsonOut &j) {
-  bool const wrote{ j.write(j.ctx, j.text.data(), j.text.size()) };
-  j.text.clear();
+// Writes the JSON held and empties it.
+bool json_flush(TraceDecoder &d) {
+  bool const wrote{ d.write(d.ctx, d.text.data(), d.text.size()) };
+  d.text.clear();
   return wrote;
 }
 
-// A `TraceEventFn` writing the event's line, with the separator before every line but
-// the first.
+// A `TraceEventFn` appending the event's line after `[` or a separator, and writing once
+// `TRACE_JSON_FLUSH` bytes are held.
 bool json_event(void *ctx, TraceEvent const &e) {
-  auto &j{ *static_cast<JsonOut *>(ctx) };
-  uint64_t const i{ j.decoder.events - 1U };
-  if (i != 0) { vec_insert(j.text, j.text.end(), { ',', '\n' }); }
-  trace_event_json(e, i, j.decoder.states, j.text);
-  return (j.text.size() < TRACE_JSON_FLUSH) || json_flush(j);
+  auto &d{ *static_cast<TraceDecoder *>(ctx) };
+  uint64_t const i{ d.events - 1U };
+  vec_insert(d.text, d.text.end(), { (i == 0) ? '[' : ',', '\n' });
+  trace_event_json(e, i, d.names, d.name_end, d.text);
+  return (d.text.size() < TRACE_JSON_FLUSH) || json_flush(d);
 }
 
-// A `ChunkWrite` decoding the chunk to JSON.
-bool json_write(void *ctx, uint8_t const *data, size_t n) {
-  auto &j{ *static_cast<JsonOut *>(ctx) };
-  return trace_decode(j.decoder, data, n, json_event, &j);
-}
-
-// Closes the array once the stream is whole and writes what is held.
-bool json_finish(JsonOut &j) {
-  if (!trace_decode_whole(j.decoder)) { return false; }
-  char const *const tail{ (j.decoder.events == 0) ? "]\n" : "\n]\n" };
-  vec_insert(j.text, j.text.end(), tail, tail + std::strlen(tail));
-  return json_flush(j);
-}
-
-JsonOut json_out(TraceWrite write, void *ctx) {
-  return { .decoder = {}, .text = { '[', '\n' }, .write = write, .ctx = ctx };
-}
-
-// Queues the chunk and makes room for another.
-void writer_flush(TraceWriter &w) {
-  if (!w.chunk.empty()) { w.ok = w.queue->push(w.chunk) && w.ok; }
-  if (w.chunk.capacity() < TRACE_CHUNK + TRACE_RECORD_MAX) {
-    w.chunk.reserve(TRACE_CHUNK + TRACE_RECORD_MAX);
-  }
+// Hands the chunk to the sink and empties it.
+void trace_flush(LayoutTrace &t) {
+  if (t.ok && !t.chunk.empty()) { t.ok = t.sink(t.ctx, t.chunk.data(), t.chunk.size()); }
+  t.chunk.clear();
 }
 
 }  // namespace
 
-#ifdef SCAV_TESTING
-void trace_test_fail_write(uint32_t nth) {
-  g_writes.store(0);
-  g_fail_at.store(nth);
+bool trace_decode(TraceDecoder &d, uint8_t const *data, size_t n) {
+  return trace_decode_events(d, data, n, (d.write != nullptr) ? json_event : nullptr, &d);
 }
-#endif
+
+bool trace_decode_end(TraceDecoder &d) {
+  if (!trace_decode_whole(d)) { return false; }
+  if (d.write == nullptr) { return true; }
+  char const *const tail{ (d.events == 0) ? "[\n]\n" : "\n]\n" };
+  vec_insert(d.text, d.text.end(), tail, tail + std::strlen(tail));
+  return json_flush(d);
+}
+
+void trace_begin(LayoutTrace &t, Chart const &c) {
+  vec_reserve(t.chunk, TRACE_CHUNK + TRACE_RECORD_MAX);
+  trace_encode_header(c, t.chunk);
+  if (t.chunk.size() >= TRACE_CHUNK) { trace_flush(t); }
+}
+
+bool trace_end(LayoutTrace &t) {
+  trace_encode_end(t.count, t.chunk);
+  trace_flush(t);
+  return t.ok;
+}
 
 void trace_put(LayoutTrace &t, TraceEvent const &e) {
-  if (t.writer == nullptr) {
-    vec_push_back(t.events, e);
-    return;
-  }
-  TraceWriter &w{ *t.writer };
-  if (!w.ok) { return; }
-  trace_encode(e, w.chunk);
-  ++w.events;
-  if (w.chunk.size() >= TRACE_CHUNK) { writer_flush(w); }
-}
-
-TraceStream::TraceStream(Chart const &c, TraceTo const &to)
-    : json(json_out(to.write, to.ctx)),
-      to_file(to.path != nullptr),
-      open(to_file ? atomic_file_open(file, to.path) : (to.write != nullptr)),
-      queue(to_file ? atomic_file_write : json_write,
-            to_file ? static_cast<void *>(&file) : static_cast<void *>(&json),
-            TRACE_QUEUE_DEPTH),
-      writer{ .queue = &queue, .chunk = {}, .events = 0, .ok = open } {
-  trace.writer = &writer;
-  writer.chunk.reserve(TRACE_CHUNK + TRACE_RECORD_MAX);
-  if (open) { trace_encode_header(c, writer.chunk); }
-  if (writer.chunk.size() >= TRACE_CHUNK) { writer_flush(writer); }
-}
-
-TraceStream::~TraceStream() {
-  if (finished) { return; }
-  queue.close();
-  atomic_file_abandon(file);
-}
-
-bool TraceStream::finish() {
-  if (finished) { return false; }
-  finished = true;
-  if (writer.ok) {
-    trace_encode_end(writer.events, writer.chunk);
-    writer_flush(writer);
-  }
-  bool const queued{ queue.close() && writer.ok };
-  if (to_file) {
-    if (queued) { return atomic_file_commit(file); }
-    atomic_file_abandon(file);
-    return false;
-  }
-  return queued && json_finish(json);
-}
-
-bool trace_file_json(char const *path, TraceWrite write, void *ctx) {
-  std::FILE *const f{ (path != nullptr) ? std::fopen(path, "rb") : nullptr };
-  if (f == nullptr) { return false; }
-  JsonOut j{ json_out(write, ctx) };
-  std::vector<uint8_t> buffer(TRACE_CHUNK);
-  bool ok{ true };
-  for (;;) {
-    size_t const got{ std::fread(buffer.data(), 1, buffer.size(), f) };
-    ok = json_write(&j, buffer.data(), got) && (std::ferror(f) == 0);
-    if (!ok || (std::feof(f) != 0)) { break; }
-  }
-  std::ignore = std::fclose(f);
-  return ok && json_finish(j);
+  if (!t.ok) { return; }
+  trace_encode(e, t.chunk);
+  ++t.count;
+  if (t.chunk.size() >= TRACE_CHUNK) { trace_flush(t); }
 }
 
 }  // namespace scav

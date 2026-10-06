@@ -14,17 +14,17 @@ import scavtest  # noqa: E402
 
 # Standard headers libscavlayout may include.
 ALLOWED_SYSTEM = {
-    "cstdint", "bit", "limits", "vector", "array", "utility", "type_traits",
-    "cstring", "algorithm",
+    "cstdint", "cstddef", "bit", "limits", "vector", "array", "utility", "type_traits",
+    "cstring", "atomic", "algorithm",
     # The C spelling of cstdint, for the header that must compile as C.
     "stdint.h",
 }
 
 # `std::` algorithms that decide an order, banned in layout.
 BANNED_IN_LAYOUT = re.compile(
-    r"\bstd::(sort|stable_sort|partial_sort|partial_sort_copy|nth_element|partition|"
-    r"stable_partition|unique|unique_copy|shuffle|random_shuffle|next_permutation|"
-    r"prev_permutation|make_heap|push_heap|pop_heap|sort_heap)\b")
+    r"\bstd::(ranges::)?(sort|stable_sort|partial_sort|partial_sort_copy|nth_element|"
+    r"partition|stable_partition|unique|unique_copy|shuffle|random_shuffle|"
+    r"next_permutation|prev_permutation|make_heap|push_heap|pop_heap|sort_heap)\b")
 
 # Layout's own headers, public `scav/scav_*` headers, and src/-root `scav_*` headers.
 ALLOWED_QUOTED = re.compile(r"^(layout/|scav/scav_|scav_)[A-Za-z0-9_./]+\.h$")

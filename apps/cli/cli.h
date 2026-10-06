@@ -44,8 +44,8 @@ struct LayoutArgs {
   char const *profile{ "readable" };
   uint32_t row{ INVALID };
   SearchPins pins;
-  int32_t jitter_seed{ 0 };
-  int32_t search{ -1 };  // the profile's `search_cull`; -1 keeps the profile's
+  int32_t jitter_seed{ -1 };  // the profile's `jitter_seed`; -1 keeps the profile's
+  int32_t search{ -1 };       // the profile's `search_cull`; -1 keeps the profile's
   bool no_search{ false };
   bool no_text{ false };
   bool given{ false };  // any of the flags below appeared
@@ -98,6 +98,16 @@ int run_dump(char const *path,
              bool with_layout,
              DumpTrace const &trace,
              LayoutArgs const &args);
+// Runs `layout_trace`, streaming its trace through a writer thread into `trace.file`, or
+// as JSON to stdout; false when the trace was not written whole.
+bool trace_layout(Chart &c,
+                  scav_spaces const &s,
+                  scav_layout_opts const &o,
+                  std::vector<scav_placed> &placed,
+                  std::vector<Diagnostic> &diags,
+                  DumpTrace const &trace,
+                  LayoutArgs const &args,
+                  bool &laid);
 int run_trace(char const *path);
 int run_render(char const *path,
                char const *out_path,

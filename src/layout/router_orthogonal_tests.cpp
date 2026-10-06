@@ -4,6 +4,7 @@
 #include "layout/router_orthogonal.h"
 
 #include "layout/router.h"
+#include "layout/tests/trace_record.h"
 #include "layout/trace.h"
 #include "scav/scav_layout.h"
 #include "scav_int.h"
@@ -3017,11 +3018,11 @@ TEST_CASE(
   in.nets[0].dst = pt(3500, 3000);
   in.nets[1].seg = 7;
   auto const traced = [&](RouteOutput &out, TraceKind kind) {
-    LayoutTrace trace;
+    TraceRecord trace;
     trace_sink_set(&trace);
     ORTHO.route(in, out);
     trace_sink_set(nullptr);
-    return std::ranges::count_if(trace.events, [kind](TraceEvent const &e) {
+    return std::ranges::count_if(trace.events(), [kind](TraceEvent const &e) {
       return (e.kind == kind) && (e.seg.seg == 7);
     });
   };

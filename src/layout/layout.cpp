@@ -3688,22 +3688,26 @@ bool layout_trace(Chart &c,
                   scav_layout_opts const &o,
                   std::vector<scav_placed> &placed,
                   std::vector<Diagnostic> &diags,
-                  TraceTo const &to,
+                  TraceChunk sink,
+                  void *ctx,
                   bool &streamed,
                   uint32_t row,
                   TraceScope scope,
                   SearchPins const *pins) {
-  TraceStream stream{ c, to };
   streamed = false;
-  if (!stream.opened()) { return false; }
+  if (sink == nullptr) { return false; }
+  LayoutTrace trace;
+  trace.sink = sink;
+  trace.ctx = ctx;
+  trace_begin(trace, c);
   scav_layout_opts serial{ o };
   serial.threads = 1;
   bool laid{ false };
   if (scope != TraceScope::Shipped) {
     if (scope == TraceScope::Outline) {
-      trace_outline_set(&stream.sink());
+      trace_outline_set(&trace);
     } else {
-      trace_sink_set(&stream.sink());
+      trace_sink_set(&trace);
     }
     laid = layout_run(c,
                       s,
@@ -3725,7 +3729,7 @@ bool layout_trace(Chart &c,
     SearchPins taken;
     if (layout_run(c, s, o, placed, diags, nullptr, &won, row, nullptr, &taken, pins)) {
       serial.profile.portfolio_k = 0;
-      trace_sink_set(&stream.sink());
+      trace_sink_set(&trace);
       std::vector<Diagnostic> again;
       laid = layout_run(c,
                         s,
@@ -3741,7 +3745,7 @@ bool layout_trace(Chart &c,
       trace_sink_set(nullptr);
     }
   }
-  streamed = stream.finish();
+  streamed = trace_end(trace);
   return laid;
 }
 

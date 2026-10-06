@@ -11,6 +11,7 @@
 #include "layout/order.h"
 #include "layout/router.h"
 #include "layout/size.h"
+#include "layout/tests/trace_record.h"
 #include "layout/trace.h"
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
@@ -1086,11 +1087,11 @@ TEST_CASE("route: nothing is nudged for a router that asks for no margin") {
 
   // Segments nudging moves onto a lane.
   auto const lane_moves = [&](Router const &router) {
-    LayoutTrace trace;
+    TraceRecord trace;
     trace_sink_set(&trace);
     (void)route_transitions(c, g, o, z, {}, profile(), router);
     trace_sink_set(nullptr);
-    return std::ranges::count_if(trace.events, [](TraceEvent const &e) {
+    return std::ranges::count_if(trace.events(), [](TraceEvent const &e) {
       return e.kind == TraceKind::LaneAssigned;
     });
   };
@@ -1978,13 +1979,13 @@ TEST_CASE("route: an outer loop's face is traced with its segment and transition
   z.state[b.v] = { .x = 0, .y = 4000, .w = 1600, .h = 640 };
   z.sub[root.v] = { .x = 0, .y = 0, .w = 10000, .h = 10000 };
 
-  LayoutTrace trace;
+  TraceRecord trace;
   trace_sink_set(&trace);
   OrthogonalRouter const ortho;
   Routes const r{ route_transitions(c, g, o, z, {}, profile(), ortho) };
   trace_sink_set(nullptr);
   uint32_t faced{ 0 };
-  for (TraceEvent const &e : trace.events) {
+  for (TraceEvent const &e : trace.events()) {
     if (e.kind != TraceKind::LoopFaced) { continue; }
     ++faced;
     CHECK(e.port.trans == 1);

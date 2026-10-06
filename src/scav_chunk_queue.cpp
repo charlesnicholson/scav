@@ -1,9 +1,9 @@
-#include "layout/chunk_queue.h"
+#include "scav_chunk_queue.h"
 
 #include "scav_thread.h"
 
+#include <cstddef>
 #include <cstdint>
-#include <utility>
 #include <vector>
 
 namespace scav {
@@ -15,19 +15,18 @@ ChunkQueue::ChunkQueue(ChunkWrite write_fn, void *write_ctx, uint32_t depth)
 
 ChunkQueue::~ChunkQueue() { close(); }
 
-bool ChunkQueue::push(std::vector<uint8_t> &chunk) {
+bool ChunkQueue::push(uint8_t const *data, size_t n) {
   if (!running) {
-    failed = failed || !write(ctx, chunk.data(), chunk.size());
-    chunk.clear();
+    failed = failed || !write(ctx, data, n);
     return !failed;
   }
   ScopedLock const held{ lock };
+#ifdef SCAV_TESTING
+  blocked += ((count == slots.size()) && !failed) ? 1U : 0U;
+#endif
   while ((count == slots.size()) && !failed) { changed.wait(lock); }
-  if (failed) {
-    chunk.clear();
-    return false;
-  }
-  std::swap(slots[(head + count) % slots.size()], chunk);
+  if (failed) { return false; }
+  slots[(head + count) % slots.size()].assign(data, data + n);
   ++count;
   changed.notify_all();
   return true;
@@ -46,6 +45,13 @@ bool ChunkQueue::close() {
   return !failed;
 }
 
+#ifdef SCAV_TESTING
+uint32_t ChunkQueue::test_blocked() {
+  ScopedLock const held{ lock };
+  return blocked;
+}
+#endif
+
 // Writes the chunk at `head` with the lock released; the producer fills only free slots.
 void ChunkQueue::drain(void *self) {
   ChunkQueue &q{ *static_cast<ChunkQueue *>(self) };
@@ -58,7 +64,6 @@ void ChunkQueue::drain(void *self) {
     q.lock.unlock();
     bool const wrote{ skip || q.write(q.ctx, chunk.data(), chunk.size()) };
     q.lock.lock();
-    chunk.clear();
     q.head = (q.head + 1U) % static_cast<uint32_t>(q.slots.size());
     --q.count;
     q.failed = q.failed || !wrote;

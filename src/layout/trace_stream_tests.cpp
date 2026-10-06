@@ -1,8 +1,9 @@
-// The trace's encoding, decoding and header; then streams: the file's replacement, failed
-// writes, and traced runs whose streamed JSON is their in-memory trace's.
+// The trace's encoding, decoding and header; a run's chunks; the JSON a decoder writes;
+// and traced runs, whose sink takes the stream their sinks record.
 
 #include "layout/trace_stream.h"
 
+#include "layout/tests/trace_record.h"
 #include "layout/trace.h"
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
@@ -13,16 +14,12 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>
 #include <limits>
 #include <ostream>
 #include <string>
 #include <string_view>
-#include <tuple>
 #include <type_traits>
 #include <vector>
-
-namespace scav { void trace_test_fail_write(uint32_t nth); }  // namespace scav
 
 namespace {
 
@@ -261,7 +258,7 @@ bool decode_in_pieces(std::vector<uint8_t> const &bytes,
                       TraceDecoder &d) {
   for (size_t at = 0; at < bytes.size(); at += piece) {
     size_t const n{ (bytes.size() - at < piece) ? (bytes.size() - at) : piece };
-    if (!trace_decode(d, bytes.data() + at, n, collect, &out)) { return false; }
+    if (!trace_decode_events(d, bytes.data() + at, n, collect, &out)) { return false; }
   }
   return trace_decode_whole(d);
 }
@@ -328,10 +325,43 @@ TEST_CASE("trace stream: the header carries every state's name, nameless ones em
   std::vector<TraceEvent> got;
   REQUIRE(decode_in_pieces(stream_of(c, {}), 3U, got, d));
   CHECK(got.empty());
-  REQUIRE(d.states.size() == 3U);
-  CHECK(d.states[0] == "Alpha");
-  CHECK(d.states[1].empty());
-  CHECK(d.states[2] == "Gamma");
+  CHECK(std::string_view{ d.names.data(), d.names.size() } == "AlphaGamma");
+  CHECK(d.name_end == std::vector<uint32_t>{ 5, 5, 10 });
+}
+
+TEST_CASE("trace stream: a header another build wrote is told apart from a broken one") {
+  Chart const c{ named_chart() };
+  std::vector<uint8_t> const good{ stream_of(c, every_event()) };
+  std::string_view const text{ reinterpret_cast<char const *>(good.data()), good.size() };
+  size_t const schema{ text.find("none") };
+  REQUIRE(schema != std::string_view::npos);
+  struct Case {
+    char const *what;
+    size_t at;
+    uint8_t flip;
+    size_t keep;
+    bool foreign;
+  };
+  size_t const all{ good.size() };
+  for (Case const &k :
+       { Case{ .what = "version", .at = 8, .flip = 1, .keep = all, .foreign = true },
+         Case{ .what = "schema",
+               .at = schema,
+               .flip = 0x20,
+               .keep = all,
+               .foreign = true },
+         Case{ .what = "magic", .at = 0, .flip = 1, .keep = all, .foreign = false },
+         Case{ .what = "cut", .at = 0, .flip = 0, .keep = all - 1U, .foreign = false } }) {
+    std::string const what{ k.what };
+    CAPTURE(what);
+    std::vector<uint8_t> bad{ good.begin(),
+                              good.begin() + static_cast<ptrdiff_t>(k.keep) };
+    bad[k.at] = static_cast<uint8_t>(bad[k.at] ^ k.flip);
+    TraceDecoder d;
+    bool const whole{ trace_decode(d, bad.data(), bad.size()) && trace_decode_end(d) };
+    CHECK_FALSE(whole);
+    CHECK(d.foreign == k.foreign);
+  }
 }
 
 TEST_CASE("trace stream: a malformed or partial stream is refused") {
@@ -539,215 +569,145 @@ TEST_CASE("trace stream: the header alone decodes every record") {
 
 namespace {
 
-std::string scratch(std::string_view name) {
-  return std::string{ SCAV_TEST_OUT_DIR } + "/trace_stream_" + std::string{ name };
-}
-
-bool exists(std::string const &path) {
-  std::FILE *const f{ std::fopen(path.c_str(), "rb") };
-  if (f == nullptr) { return false; }
-  std::ignore = std::fclose(f);
-  return true;
-}
-
-std::string contents(std::string const &path) {
-  std::vector<scav_byte> bytes;
-  if (!read_file(path.c_str(), bytes)) { return "<unreadable>"; }
-  return { reinterpret_cast<char const *>(bytes.data()), bytes.size() };
-}
-
-void put(std::string const &path, std::string_view text) {
-  REQUIRE(write_file(path.c_str(),
-                     reinterpret_cast<scav_byte const *>(text.data()),
-                     text.size()));
-}
-
-// Every kind at every value set, repeated past several chunks of stream.
-std::vector<TraceEvent> many_events() {
+// Every kind at every value set, repeated until its records pass `bytes`.
+std::vector<TraceEvent> events_past(size_t bytes) {
   std::vector<TraceEvent> const one{ every_event() };
+  size_t const each{ stream_of(Chart{}, one).size() - stream_of(Chart{}, {}).size() };
   std::vector<TraceEvent> out;
-  for (uint32_t k = 0; k < 400; ++k) { out.insert(out.end(), one.begin(), one.end()); }
-  return out;
-}
-
-bool append_text(void *ctx, char const *text, size_t n) {
-  static_cast<std::string *>(ctx)->append(text, n);
-  return true;
-}
-
-std::string json_of(LayoutTrace const &t, Chart const &c) {
-  std::vector<char> out;
-  trace_to_json(t, c, out);
-  return { out.begin(), out.end() };
-}
-
-// The events of the trace file at `path`; empty when it is not a whole stream.
-std::vector<TraceEvent> events_in(std::string const &path) {
-  std::vector<scav_byte> bytes;
-  std::vector<TraceEvent> out;
-  TraceDecoder d;
-  if (!read_file(path.c_str(), bytes) ||
-      !trace_decode(d, bytes.data(), bytes.size(), collect, &out) ||
-      !trace_decode_whole(d)) {
-    out.clear();
+  for (size_t k = 0; k * each < bytes; ++k) {
+    out.insert(out.end(), one.begin(), one.end());
   }
   return out;
 }
 
-bool same_events(std::vector<TraceEvent> const &a, std::vector<TraceEvent> const &b) {
-  if (a.size() != b.size()) { return false; }
-  for (size_t k = 0; k < a.size(); ++k) {
-    if (values(a[k]) != values(b[k])) { return false; }
-  }
-  return true;
-}
+// Past two chunks of stream.
+std::vector<TraceEvent> many_events() { return events_past((5U * TRACE_CHUNK) / 2U); }
 
-// Fails the `nth` file write for its scope.
-struct FailGuard {
-  explicit FailGuard(uint32_t nth) { trace_test_fail_write(nth); }
-  ~FailGuard() { trace_test_fail_write(0); }
-  FailGuard(FailGuard const &) = delete;
-  FailGuard &operator=(FailGuard const &) = delete;
+// The chunks a sink took, and the one it refuses; 0 refuses none.
+struct Chunks {
+  std::vector<std::vector<uint8_t>> taken;
+  uint32_t refuse{ 0 };
 };
+
+bool take_chunk(void *ctx, uint8_t const *data, size_t n) {
+  auto &c{ *static_cast<Chunks *>(ctx) };
+  if (c.taken.size() + 1U == c.refuse) { return false; }
+  c.taken.emplace_back(data, data + n);
+  return true;
+}
+
+// Everything `layout_trace`'s stream would carry for `events` on chart `c`, in chunks.
+Chunks streamed(Chart const &c, std::vector<TraceEvent> const &events, uint32_t refuse) {
+  Chunks out{ .taken = {}, .refuse = refuse };
+  LayoutTrace t;
+  t.sink = take_chunk;
+  t.ctx = &out;
+  trace_begin(t, c);
+  for (TraceEvent const &e : events) { trace_put(t, e); }
+  CHECK(trace_end(t) == (refuse == 0));
+  return out;
+}
+
+// The JSON a decoder writes for `bytes` fed `piece` bytes at a time, and each write's
+// size; empty when the decode fails.
+std::string json_in_pieces(std::vector<uint8_t> const &bytes,
+                           size_t piece,
+                           std::vector<size_t> *writes = nullptr) {
+  struct Out {
+    std::string text;
+    std::vector<size_t> *writes;
+  };
+  Out out{ .text = {}, .writes = writes };
+  TraceDecoder d;
+  d.write = [](void *ctx, char const *text, size_t n) {
+    auto &o{ *static_cast<Out *>(ctx) };
+    o.text.append(text, n);
+    if (o.writes != nullptr) { o.writes->push_back(n); }
+    return true;
+  };
+  d.ctx = &out;
+  for (size_t at = 0; at < bytes.size(); at += piece) {
+    size_t const n{ (bytes.size() - at < piece) ? (bytes.size() - at) : piece };
+    if (!trace_decode(d, bytes.data() + at, n)) { return {}; }
+  }
+  return trace_decode_end(d) ? out.text : std::string{};
+}
 
 }  // namespace
 
-TEST_CASE("trace stream: a file appears only once its stream finishes whole") {
+TEST_CASE(
+    "trace stream: a run's stream reaches its sink whole, in chunks of TRACE_CHUNK") {
   Chart const c{ named_chart() };
-  std::string const path{ scratch("whole.trace") };
-  std::string const temp{ path + ".tmp" };
-  std::ignore = std::remove(path.c_str());
-  std::ignore = std::remove(temp.c_str());
   std::vector<TraceEvent> const events{ many_events() };
-  LayoutTrace want;
-  {
-    TraceStream s{ c, { .path = path.c_str(), .write = nullptr, .ctx = nullptr } };
-    REQUIRE(s.opened());
-    for (TraceEvent const &e : events) {
-      trace_put(s.sink(), e);
-      want.events.push_back(e);
+  Chunks const got{ streamed(c, events, 0) };
+  REQUIRE(got.taken.size() >= 3U);
+  std::vector<uint8_t> joined;
+  for (size_t k = 0; k < got.taken.size(); ++k) {
+    CAPTURE(k);
+    if ((k + 1U) < got.taken.size()) {
+      CHECK(got.taken[k].size() >= TRACE_CHUNK);
+      CHECK(got.taken[k].size() < TRACE_CHUNK + TRACE_RECORD_MAX);
     }
-    CHECK_FALSE(exists(path));
-    CHECK(exists(temp));
-    CHECK(s.finish());
+    joined.insert(joined.end(), got.taken[k].begin(), got.taken[k].end());
   }
-  CHECK_FALSE(exists(temp));
-  CHECK(same_events(events_in(path), events));
-  std::string json;
-  REQUIRE(trace_file_json(path.c_str(), append_text, &json));
-  CHECK(json == json_of(want, c));
+  CHECK(joined == stream_of(c, events));
 }
 
-TEST_CASE("trace stream: finishing replaces a file; an unfinished stream leaves it") {
+TEST_CASE("trace stream: a sink that refuses a chunk is handed no more") {
   Chart const c{ named_chart() };
-  std::string const path{ scratch("replaced.trace") };
-  std::string const temp{ path + ".tmp" };
-  put(path, "previous");
-  std::vector<TraceEvent> const events{ many_events() };
-  {
-    TraceStream s{ c, { .path = path.c_str(), .write = nullptr, .ctx = nullptr } };
-    REQUIRE(s.opened());
-    for (TraceEvent const &e : events) { trace_put(s.sink(), e); }
-    CHECK(contents(path) == "previous");
-  }
-  CHECK(contents(path) == "previous");
-  CHECK_FALSE(exists(temp));
-  {
-    TraceStream s{ c, { .path = path.c_str(), .write = nullptr, .ctx = nullptr } };
-    REQUIRE(s.opened());
-    for (TraceEvent const &e : events) { trace_put(s.sink(), e); }
-    CHECK(contents(path) == "previous");
-    CHECK(s.finish());
-  }
-  CHECK_FALSE(exists(temp));
-  CHECK(same_events(events_in(path), events));
+  Chunks const got{ streamed(c, many_events(), 2) };
+  CHECK(got.taken.size() == 1U);
 }
 
-TEST_CASE("trace stream: a failed write leaves no temp and the file as it was") {
+TEST_CASE("trace stream: a decoder writes one JSON array, whatever the pieces it is fed") {
   Chart const c{ named_chart() };
-  std::string const path{ scratch("failed.trace") };
-  std::string const temp{ path + ".tmp" };
-  std::vector<TraceEvent> const events{ many_events() };
-  for (bool const had : { false, true }) {
-    CAPTURE(had);
-    if (had) {
-      put(path, "previous");
-    } else {
-      std::ignore = std::remove(path.c_str());
-    }
-    {
-      FailGuard const failing{ 2 };
-      TraceStream s{ c, { .path = path.c_str(), .write = nullptr, .ctx = nullptr } };
-      REQUIRE(s.opened());
-      for (TraceEvent const &e : events) { trace_put(s.sink(), e); }
-      CHECK_FALSE(s.finish());
-    }
-    CHECK_FALSE(exists(temp));
-    if (had) {
-      CHECK(contents(path) == "previous");
-    } else {
-      CHECK_FALSE(exists(path));
-    }
-  }
-}
-
-TEST_CASE("trace stream: a file that cannot be created takes no events") {
-  Chart const c{ named_chart() };
-  std::string const path{ scratch("no_such_dir/x.trace") };
-  TraceStream s{ c, { .path = path.c_str(), .write = nullptr, .ctx = nullptr } };
-  CHECK_FALSE(s.opened());
-  trace_put(s.sink(), make(static_cast<uint32_t>(TraceKind::NetPlanned), 1));
-  CHECK_FALSE(s.finish());
-  CHECK_FALSE(exists(path));
-  TraceStream neither{ c, { .path = nullptr, .write = nullptr, .ctx = nullptr } };
-  CHECK_FALSE(neither.opened());
-  CHECK_FALSE(neither.finish());
-}
-
-TEST_CASE("trace stream: JSON whose write fails fails the stream") {
-  Chart const c{ named_chart() };
-  TraceWrite const refuse = [](void * /*ctx*/, char const * /*text*/, size_t /*n*/) {
-    return false;
-  };
-  TraceStream s{ c, { .path = nullptr, .write = refuse, .ctx = nullptr } };
-  REQUIRE(s.opened());
-  for (TraceEvent const &e : many_events()) { trace_put(s.sink(), e); }
-  CHECK_FALSE(s.finish());
-}
-
-TEST_CASE("trace stream: a JSON stream writes what the in-memory trace writes") {
-  Chart const c{ named_chart() };
-  for (bool const empty : { true, false }) {
-    CAPTURE(empty);
-    std::vector<TraceEvent> const events{ empty ? std::vector<TraceEvent>{}
-                                                : many_events() };
-    LayoutTrace want;
-    std::string json;
-    {
-      TraceStream s{ c, { .path = nullptr, .write = append_text, .ctx = &json } };
-      REQUIRE(s.opened());
-      for (TraceEvent const &e : events) {
-        trace_put(s.sink(), e);
-        want.events.push_back(e);
-      }
-      CHECK(s.finish());
-    }
-    CHECK(json == json_of(want, c));
-  }
-}
-
-TEST_CASE("trace stream: a file that is not a whole trace is refused") {
-  Chart const c{ named_chart() };
-  std::string const path{ scratch("cut.trace") };
-  std::string json;
-  CHECK_FALSE(trace_file_json(scratch("absent.trace").c_str(), append_text, &json));
   std::vector<uint8_t> const bytes{ stream_of(c, every_event()) };
-  REQUIRE(write_file(path.c_str(), bytes.data(), bytes.size() - 1U));
-  CHECK_FALSE(trace_file_json(path.c_str(), append_text, &json));
-  REQUIRE(write_file(path.c_str(), bytes.data(), bytes.size()));
-  json.clear();
-  CHECK(trace_file_json(path.c_str(), append_text, &json));
-  CHECK(json.starts_with("[\n  {\"i\":0,\"kind\":\"none\""));
+  std::string const whole{ json_in_pieces(bytes, bytes.size()) };
+  REQUIRE(whole.starts_with("[\n  {\"i\":0,\"kind\":\"none\""));
+  CHECK(whole.ends_with("}\n]\n"));
+  CHECK(whole.find("\"state\":\"Alpha\"") != std::string::npos);
+  CHECK(whole.find("\"state\":\"#1\"") != std::string::npos);
+  for (size_t const piece : { size_t{ 1 }, size_t{ 7 }, size_t{ 4093 } }) {
+    CAPTURE(piece);
+    CHECK(json_in_pieces(bytes, piece) == whole);
+  }
+  CHECK(json_in_pieces(stream_of(c, {}), 3) == "[\n]\n");
+}
+
+TEST_CASE("trace stream: a decoder writes in pieces of about TRACE_JSON_FLUSH") {
+  Chart const c{ named_chart() };
+  std::vector<uint8_t> const bytes{ stream_of(c, events_past(TRACE_JSON_FLUSH / 2U)) };
+  std::vector<size_t> writes;
+  std::string const json{ json_in_pieces(bytes, TRACE_CHUNK, &writes) };
+  REQUIRE(writes.size() >= 3U);
+  for (size_t k = 0; (k + 1U) < writes.size(); ++k) {
+    CAPTURE(k);
+    CHECK(writes[k] >= TRACE_JSON_FLUSH);
+    CHECK(writes[k] < TRACE_JSON_FLUSH + 4096U);
+  }
+  CHECK(json == json_in_pieces(bytes, bytes.size()));
+}
+
+TEST_CASE("trace stream: a decoder with no write checks the stream and writes nothing") {
+  Chart const c{ named_chart() };
+  std::vector<uint8_t> const good{ stream_of(c, every_event()) };
+  for (size_t const n : { good.size(), good.size() - 1U, good.size() / 2U }) {
+    CAPTURE(n);
+    TraceDecoder d;
+    bool const fed{ trace_decode(d, good.data(), n) };
+    CHECK(fed);
+    CHECK(trace_decode_end(d) == (n == good.size()));
+    CHECK(d.text.empty());
+  }
+}
+
+TEST_CASE("trace stream: a decoder whose write fails fails the decode") {
+  Chart const c{ named_chart() };
+  std::vector<uint8_t> const bytes{ stream_of(c, events_past(TRACE_JSON_FLUSH / 2U)) };
+  TraceDecoder d;
+  d.write = [](void * /*ctx*/, char const * /*text*/, size_t /*n*/) { return false; };
+  CHECK_FALSE(trace_decode(d, bytes.data(), bytes.size()));
+  CHECK_FALSE(trace_decode_end(d));
 }
 
 namespace {
@@ -763,14 +723,14 @@ Chart gauntlet(char const *name) {
   return c;
 }
 
-// The trace `layout_trace` streams for `scope`, recorded in memory with the sinks set
-// directly, as JSON.
-std::string in_memory(Chart &c, scav_layout_opts const &o, TraceScope scope) {
+// The stream `layout_trace` hands its sink for `scope`, recorded with the sinks set
+// directly.
+std::vector<uint8_t> recorded(Chart &c, scav_layout_opts const &o, TraceScope scope) {
   std::vector<scav_placed> placed;
   std::vector<Diagnostic> diags;
   scav_layout_opts serial{ o };
   serial.threads = 1;
-  LayoutTrace t;
+  TraceRecord t{ c };
   if (scope == TraceScope::Shipped) {
     uint32_t won{ 0 };
     SearchPins taken;
@@ -798,43 +758,57 @@ std::string in_memory(Chart &c, scav_layout_opts const &o, TraceScope scope) {
   }
   trace_outline_set(nullptr);
   trace_sink_set(nullptr);
-  return json_of(t, c);
+  t.end();
+  return t.bytes;
 }
 
 }  // namespace
 
-TEST_CASE("trace stream: a traced run streams the JSON its in-memory trace makes") {
+TEST_CASE("trace stream: a traced run hands its sink the stream its sinks record") {
   scav_layout_opts opts{};
   REQUIRE(profile_named("readable", opts.profile));
-  for (char const *name : { "folded.scav", "loop.scav" }) {
-    for (TraceScope const scope :
-         { TraceScope::Shipped, TraceScope::Search, TraceScope::Outline }) {
-      std::string const chart{ name };
-      CAPTURE(chart);
-      CAPTURE(static_cast<uint32_t>(scope));
-      Chart streamed_chart{ gauntlet(name) };
-      Chart memory_chart{ gauntlet(name) };
-      std::vector<scav_placed> placed;
-      std::vector<Diagnostic> diags;
-      std::string json;
-      bool streamed{ false };
-      CHECK(layout_trace(streamed_chart,
-                         {},
-                         opts,
-                         placed,
-                         diags,
-                         { .path = nullptr, .write = append_text, .ctx = &json },
-                         streamed,
-                         INVALID,
-                         scope));
-      CHECK(streamed);
-      CHECK(trace_sink() == nullptr);
-      CHECK(trace_outline() == nullptr);
-      std::string const want{ in_memory(memory_chart, opts, scope) };
-      CHECK(want.size() > 4U);
-      CHECK(json == want);
-      CHECK(layout_coordinate_hash(streamed_chart) ==
-            layout_coordinate_hash(memory_chart));
+  for (TraceScope const scope :
+       { TraceScope::Shipped, TraceScope::Search, TraceScope::Outline }) {
+    CAPTURE(static_cast<uint32_t>(scope));
+    Chart streamed_chart{ gauntlet("loop.scav") };
+    Chart recorded_chart{ gauntlet("loop.scav") };
+    std::vector<scav_placed> placed;
+    std::vector<Diagnostic> diags;
+    Chunks got;
+    bool streamed{ false };
+    CHECK(layout_trace(streamed_chart,
+                       {},
+                       opts,
+                       placed,
+                       diags,
+                       take_chunk,
+                       &got,
+                       streamed,
+                       INVALID,
+                       scope));
+    CHECK(streamed);
+    CHECK(trace_sink() == nullptr);
+    CHECK(trace_outline() == nullptr);
+    std::vector<uint8_t> joined;
+    for (std::vector<uint8_t> const &chunk : got.taken) {
+      joined.insert(joined.end(), chunk.begin(), chunk.end());
     }
+    std::vector<uint8_t> const want{ recorded(recorded_chart, opts, scope) };
+    CHECK(json_in_pieces(want, want.size()).size() > 4U);
+    CHECK(joined == want);
+    CHECK(layout_coordinate_hash(streamed_chart) ==
+          layout_coordinate_hash(recorded_chart));
   }
+}
+
+TEST_CASE("trace stream: a null sink runs nothing") {
+  Chart c{ gauntlet("loop.scav") };
+  scav_layout_opts opts{};
+  REQUIRE(profile_named("readable", opts.profile));
+  std::vector<scav_placed> placed;
+  std::vector<Diagnostic> diags;
+  bool streamed{ true };
+  CHECK_FALSE(layout_trace(c, {}, opts, placed, diags, nullptr, nullptr, streamed));
+  CHECK_FALSE(streamed);
+  CHECK(placed.empty());
 }

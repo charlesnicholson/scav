@@ -38,7 +38,6 @@ void ConditionVariable::notify_all() {
   static_cast<std::atomic<uint32_t> *>(impl)->fetch_add(1U, std::memory_order_release);
 }
 
-// No thread starts, so `impl` stays null.
 Thread::~Thread() { join(); }
 bool Thread::start(void (* /*fn*/)(void *), void * /*ctx*/) {
   impl = nullptr;
