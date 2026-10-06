@@ -28,6 +28,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <utility>
@@ -666,8 +667,8 @@ bool lay_facing(Candidate &out,
 bool test_degrade{ false };
 Mutex test_degrade_lock;
 std::vector<int32_t> test_degrade_drawing;  // state rects then route points
-uint64_t test_degraded{ 0 };
-uint64_t test_taken_degraded{ 0 };
+std::atomic<uint64_t> test_degraded{ 0 };
+std::atomic<uint64_t> test_taken_degraded{ 0 };
 
 // Counts a net of `out` outside its region where `out` routes the recorded drawing.
 void degrade_for_test(Candidate &out) {
@@ -992,33 +993,33 @@ bool same_scored(Scored const &a, Scored const &b) {
 bool test_prefix_shortcut{ true };
 bool test_prefix_verify{ false };
 Mutex test_prefix_lock;
-uint64_t test_prefix_used{ 0 };
-uint64_t test_prefix_mismatches{ 0 };
+std::atomic<uint64_t> test_prefix_used{ 0 };
+std::atomic<uint64_t> test_prefix_mismatches{ 0 };
 
 // Test switches: score moves through the candidate memo; verify each move it answers
 // against a lay-out without it. The counters tally answers and mismatches.
 bool test_candidate_memo{ true };
 bool test_candidate_memo_verify{ false };
 uint32_t test_candidate_memo_empty{ 0 };  // empty it before every this-many labellings
-uint32_t test_candidate_memo_labellings{ 0 };
+std::atomic<uint32_t> test_candidate_memo_labellings{ 0 };
 uint64_t test_candidate_memo_budget{ CandidateMemo::BUDGET };
-uint32_t test_candidate_memos_built{ 0 };  // candidate memos layout_run built
+std::atomic<uint32_t> test_candidate_memos_built{ 0 };  // candidate memos layout_run built
 Mutex test_candidate_memo_lock;
-uint64_t test_candidate_memo_deduped{ 0 };
-uint64_t test_candidate_memo_drawn{ 0 };
-uint64_t test_candidate_memo_faced{ 0 };
-uint64_t test_candidate_memo_mismatches{ 0 };
+std::atomic<uint64_t> test_candidate_memo_deduped{ 0 };
+std::atomic<uint64_t> test_candidate_memo_drawn{ 0 };
+std::atomic<uint64_t> test_candidate_memo_faced{ 0 };
+std::atomic<uint64_t> test_candidate_memo_mismatches{ 0 };
 
 // Test switches: leave unrouted a move whose route bound reaches the incumbent; check each
 // bound against its move routed. The counters tally pruned moves, checks and failures.
 bool test_route_bound{ true };
 bool test_cost_stop{ true };  // stop a routed move's count at the incumbent
-uint64_t test_cost_stopped{ 0 };
+std::atomic<uint64_t> test_cost_stopped{ 0 };
 bool test_route_bound_verify{ false };
 Mutex test_route_bound_lock;
-uint64_t test_route_bound_pruned{ 0 };
-uint64_t test_route_bound_checked{ 0 };
-uint64_t test_route_bound_mismatches{ 0 };
+std::atomic<uint64_t> test_route_bound_pruned{ 0 };
+std::atomic<uint64_t> test_route_bound_checked{ 0 };
+std::atomic<uint64_t> test_route_bound_mismatches{ 0 };
 #endif
 
 // True when every path box fits `chart`; a placed box then lies inside it.
@@ -1657,7 +1658,7 @@ Scored score_move(Chart const &c,
 // Test switch: leave no-op faces unscored; the counter tallies those left.
 bool test_skip_noop_faces{ true };
 Mutex test_noop_lock;
-uint64_t test_noop_faces{ 0 };
+std::atomic<uint64_t> test_noop_faces{ 0 };
 #endif
 
 // True when a face with no router effect may go unscored.
@@ -1676,8 +1677,8 @@ bool skipping_noop_faces() {
 bool test_cull{ true };
 bool test_cull_verify{ false };
 Mutex test_cull_lock;
-std::array<uint64_t, TRACE_MOVES> test_culled{};
-uint64_t test_cull_mismatches{ 0 };
+std::array<std::atomic<uint64_t>, TRACE_MOVES> test_culled{};
+std::atomic<uint64_t> test_cull_mismatches{ 0 };
 #endif
 
 // True when a move of `kind` that changes nothing goes unoffered.
@@ -1698,9 +1699,9 @@ bool culling(MoveKind kind) {
 bool test_label_bound{ true };
 bool test_label_bound_verify{ false };
 Mutex test_label_bound_lock;
-uint64_t test_label_bound_skipped{ 0 };
-uint64_t test_label_bound_labelled{ 0 };
-uint64_t test_label_bound_mismatches{ 0 };
+std::atomic<uint64_t> test_label_bound_skipped{ 0 };
+std::atomic<uint64_t> test_label_bound_labelled{ 0 };
+std::atomic<uint64_t> test_label_bound_mismatches{ 0 };
 #endif
 
 // True when a candidate's bound may still beat `incumbent`.
@@ -1915,14 +1916,14 @@ void verify_bounded_round(uint32_t n,
 // the counters tally those checked and those that beat the incumbent.
 bool test_dont_look_verify{ false };
 Mutex test_dont_look_lock;
-uint64_t test_dont_look_checked{ 0 };
-uint64_t test_dont_look_mismatches{ 0 };
+std::atomic<uint64_t> test_dont_look_checked{ 0 };
+std::atomic<uint64_t> test_dont_look_mismatches{ 0 };
 
 // Test switch: score each bounded round's moves again after its labelling and set their
 // bits again; the counters tally moves scored again and bits that differ.
 bool test_bound_replay{ false };
-uint64_t test_bound_replayed{ 0 };
-uint64_t test_bound_replay_mismatches{ 0 };
+std::atomic<uint64_t> test_bound_replayed{ 0 };
+std::atomic<uint64_t> test_bound_replay_mismatches{ 0 };
 #endif
 
 // One layout's search counts, added to by its threads; a null `to` counts nothing.
@@ -2755,10 +2756,10 @@ struct SearchMemo {
 // search; the counters tally hits and mismatches.
 bool test_search_memo{ true };
 bool test_search_memo_verify{ false };
-bool test_no_search{ false };               // forces a zero move budget
-bool test_row_alias{ true };                // rows whose canonical rows match search once
-uint32_t test_search_memo_hits{ 0 };        // under the layout's memo lock
-uint32_t test_search_memo_mismatches{ 0 };  // under the layout's memo lock
+bool test_no_search{ false };  // forces a zero move budget
+bool test_row_alias{ true };   // rows whose canonical rows match search once
+std::atomic<uint32_t> test_search_memo_hits{ 0 };
+std::atomic<uint32_t> test_search_memo_mismatches{ 0 };
 // Per row of this thread's last searched layout: each schedule's cost, and the one kept.
 thread_local std::vector<Cost> test_schedule_first, test_schedule_second,
     test_schedule_kept;
@@ -3803,12 +3804,14 @@ void layout_test_cull(bool on, bool verify) {
   test_cull = on;
   test_cull_verify = verify;
   ScopedLock const held{ test_cull_lock };
-  test_culled = {};
+  for (std::atomic<uint64_t> &k : test_culled) { k = 0; }
   test_cull_mismatches = 0;
 }
 std::array<uint64_t, TRACE_MOVES> layout_test_culled() {
   ScopedLock const held{ test_cull_lock };
-  return test_culled;
+  std::array<uint64_t, TRACE_MOVES> out{};
+  for (uint32_t k = 0; k < TRACE_MOVES; ++k) { out[k] = test_culled[k]; }
+  return out;
 }
 uint64_t layout_test_cull_mismatches() {
   ScopedLock const held{ test_cull_lock };

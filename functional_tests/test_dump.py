@@ -591,10 +591,12 @@ class TestDump(unittest.TestCase):
 
         argv = [str(self.exe), verb, *[str(a) for a in args]]
         print(f"+ {' '.join(argv)}  (files capped at {cap} bytes)", flush=True)
+        env = dict(os.environ)
+        if "LLVM_PROFILE_FILE" in env:  # a cut profile stays out of the merge
+            env["LLVM_PROFILE_FILE"] = str(self.cfg.scratch_dir / "capped-%p.profraw")
         with open(stdout or os.devnull, "w", encoding="utf-8") as out:
             done = subprocess.run(argv, stdout=out, stderr=subprocess.PIPE, text=True,
-                                  cwd=self.cfg.repo_root, preexec_fn=limit)
-        # A coverage build's profile is a file the cap also stops.
+                                  cwd=self.cfg.repo_root, preexec_fn=limit, env=env)
         done.stderr = "".join(line for line in done.stderr.splitlines(keepends=True)
                               if not line.startswith("LLVM Profile Error"))
         return done
