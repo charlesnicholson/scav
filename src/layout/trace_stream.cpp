@@ -3,10 +3,10 @@
 
 #include "layout/trace_stream.h"
 
-#include "layout/chunk_queue.h"
 #include "layout/trace.h"
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
+#include "scav_chunk_queue.h"
 #include "scav_vec.h"
 
 #include <array>
@@ -519,7 +519,8 @@ JsonOut json_out(TraceWrite write, void *ctx) {
 
 // Queues the chunk and makes room for another.
 void writer_flush(TraceWriter &w) {
-  if (!w.chunk.empty()) { w.ok = w.queue->push(w.chunk) && w.ok; }
+  if (!w.chunk.empty()) { w.ok = w.queue->push(w.chunk.data(), w.chunk.size()) && w.ok; }
+  w.chunk.clear();
   if (w.chunk.capacity() < TRACE_CHUNK + TRACE_RECORD_MAX) {
     w.chunk.reserve(TRACE_CHUNK + TRACE_RECORD_MAX);
   }

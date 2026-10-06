@@ -1,7 +1,8 @@
-#ifndef SCAV_LAYOUT_CHUNK_QUEUE_H_INCLUDED
-#define SCAV_LAYOUT_CHUNK_QUEUE_H_INCLUDED
+#ifndef SCAV_CHUNK_QUEUE_H_INCLUDED
+#define SCAV_CHUNK_QUEUE_H_INCLUDED
 
-// A bounded FIFO of byte chunks that one writer thread drains in push order.
+// A bounded FIFO of byte chunks from one producer, drained in push order by one writer
+// thread.
 
 #include "scav_thread.h"
 
@@ -23,14 +24,18 @@ class ChunkQueue {
   ChunkQueue(ChunkQueue const &) = delete;
   ChunkQueue &operator=(ChunkQueue const &) = delete;
 
-  // Queues `chunk` and leaves it empty, holding a written chunk's storage. False once a
-  // write has failed; the queue then drops every chunk.
-  bool push(std::vector<uint8_t> &chunk);
+  // Copies `data[0..n)` into a free slot. False once a write has failed; the queue then
+  // drops every chunk.
+  bool push(uint8_t const *data, size_t n);
 
   // Writes every queued chunk and joins the writer; false when a write failed.
   bool close();
 
   [[nodiscard]] bool threaded() const { return running; }
+
+#ifdef SCAV_TESTING
+  uint32_t test_blocked();  // pushes that found every slot taken
+#endif
 
  private:
   static void drain(void *self);  // the writer thread's loop
@@ -46,9 +51,12 @@ class ChunkQueue {
   bool closing{ false };  // under `lock`
   bool failed{ false };   // under `lock`
   bool running{ false };  // the producer's
+#ifdef SCAV_TESTING
+  uint32_t blocked{ 0 };  // under `lock`
+#endif
   Thread writer;
 };
 
 }  // namespace scav
 
-#endif  // SCAV_LAYOUT_CHUNK_QUEUE_H_INCLUDED
+#endif  // SCAV_CHUNK_QUEUE_H_INCLUDED

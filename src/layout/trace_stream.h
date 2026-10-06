@@ -4,10 +4,10 @@
 // The trace's binary encoding and its streaming. A stream is a header naming every kind,
 // its fields and their types, and the chart's states; one record per event; an end record.
 
-#include "layout/chunk_queue.h"
 #include "layout/trace.h"
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
+#include "scav_chunk_queue.h"
 
 #include <cstddef>
 #include <cstdint>
