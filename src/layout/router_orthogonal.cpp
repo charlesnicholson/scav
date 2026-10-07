@@ -1311,8 +1311,8 @@ bool search_planes(OrthoGrid const &g,
   };
 
   ortho_open_clear(open);
-  uint32_t const one[1]{ from };
-  uint32_t const *const first{ (starts != nullptr) ? starts->data() : one };
+  std::array<uint32_t, 1> const one{ from };
+  uint32_t const *const first{ (starts != nullptr) ? starts->data() : one.data() };
   size_t const count{ (starts != nullptr) ? starts->size() : 1 };
   for (size_t i = 0; i < count; ++i) {
     uint32_t const at{ first[i] };
@@ -1350,7 +1350,8 @@ bool search_planes(OrthoGrid const &g,
     if ((before != INVALID) && ((before / 2) != (node / 2))) {
       scav_point const a{ g.point(before / 2) };
       scav_point const b{ g.point(node / 2) };
-      way = ((node % 2) == 0) ? ((b.x > a.x) ? 1 : -1) : ((b.y > a.y) ? 1 : -1);
+      bool const ahead{ ((node % 2) == 0) ? (b.x > a.x) : (b.y > a.y) };
+      way = ahead ? 1 : -1;
     }
     out[node % 2] = { .cost = cost,
                       .start = root % 2,
@@ -1395,7 +1396,8 @@ bool search_planes(OrthoGrid const &g,
     bool const end_turn{ (start && (plane == from_plane)) || ((v == to) && fixed_goal) };
     bool const way_turn{ (start && ((waypoints & 1U) != 0)) ||
                          ((v == to) && ((waypoints & 2U) != 0)) };
-    Wide const switch_w{ way_turn ? way_turn_w : (end_turn ? end_turn_w : turn_w) };
+    Wide switch_w{ end_turn ? end_turn_w : turn_w };
+    if (way_turn) { switch_w = way_turn_w; }
     relax(node ^ 1U, switch_w, heuristic(dx, dy, 1 - plane));
     // A seed's first move back against its heading turns twice.
     int32_t const back{ (here.parent == INVALID) ? -heading[plane] : 0 };

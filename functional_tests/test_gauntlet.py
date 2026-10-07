@@ -69,7 +69,7 @@ class TestGauntlet(unittest.TestCase):
         # below it and level with it.
         out = self.run_scav("dump", "--layout", CHARTS / "fanwide.scav")
         self.assertEqual(out.returncode, 0, out.stderr)
-        boxes = {m[1]: tuple(map(int, m[2:6])) for m in re.finditer(
+        boxes = {m[1]: tuple(map(int, m.group(2, 3, 4, 5))) for m in re.finditer(
             r"^  state (\S+) (-?\d+),(-?\d+) (\d+)x(\d+)", out.stdout, re.M)}
         rank_sep = int(re.search(r" rank_sep (\d+)", out.stdout)[1])
         sx, sy, sw, sh = boxes["S0"]

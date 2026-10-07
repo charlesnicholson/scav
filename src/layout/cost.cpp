@@ -1357,7 +1357,8 @@ CostTerms cost_terms(CostContext const &ctx,
         (c.states[c.transitions[tr].src.v].kind == StateKind::Initial)) {
       scav_point const a{ r.points[route.off + route.len - 2] };
       scav_point const b{ r.points[route.off + route.len - 1] };
-      int32_t const quarters{ (b.x < a.x) ? 4 : ((b.y < a.y) ? 1 : 0) };
+      int32_t quarters{ (b.y < a.y) ? 1 : 0 };
+      if (b.x < a.x) { quarters = 4; }
       t.backward_starts += quarters;
       if (quarters > 0) { blame(by(p.w_backward_starts * quarters), tr, INVALID, em); }
     }
