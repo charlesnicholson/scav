@@ -516,8 +516,9 @@ SCAV_COLD void CandidateMemo::box_faces(SearchPins const *pins,
       continue;
     }
     uint32_t const end{ (seg << 3U) | (fp.end << 2U) };
-    auto const had{ std::ranges::find_if(faces,
-                                         [end](uint32_t f) { return (f & ~3U) == end; }) };
+    auto *const had{ std::ranges::find_if(faces, [end](uint32_t f) {
+      return (f & ~3U) == end;
+    }) };
     if (had != faces.end()) {
       *had = end | fp.face;
     } else {

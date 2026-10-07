@@ -63,6 +63,7 @@ class PodVector : public PodVectorBase {
   PodVector(PodVector &&o) noexcept : PodVectorBase() { swap(o); }
   ~PodVector() { release(ptr); }
 
+  // NOLINTNEXTLINE(cert-oop54-cpp): copy_from leaves a self-assignment unchanged
   PodVector &operator=(PodVector const &o) {
     copy_from(o, sizeof(T));
     return *this;
@@ -90,7 +91,7 @@ class PodVector : public PodVectorBase {
       data()[count] = x;
       ++count;
     } else {
-      push_grow(&x, sizeof(T));
+      push_grow(static_cast<void const *>(&x), sizeof(T));
     }
   }
 
@@ -111,7 +112,7 @@ class PodVector : public PodVectorBase {
       append_fill(n - count, nullptr, sizeof(T));
     } else {
       T const x = T();
-      append_fill(n - count, &x, sizeof(T));
+      append_fill(n - count, static_cast<void const *>(&x), sizeof(T));
     }
   }
 
@@ -119,24 +120,28 @@ class PodVector : public PodVectorBase {
     if (n <= count) {
       count = static_cast<uint32_t>(n);
     } else {
-      append_fill(n - count, &x, sizeof(T));
+      append_fill(n - count, static_cast<void const *>(&x), sizeof(T));
     }
   }
 
   void reserve(size_t n) { PodVectorBase::reserve(n, sizeof(T)); }
 
-  void assign(size_t n, T const &x) { assign_fill(n, &x, sizeof(T)); }
+  void assign(size_t n, T const &x) {
+    assign_fill(n, static_cast<void const *>(&x), sizeof(T));
+  }
   void assign(T const *first, T const *last) {
-    assign_copy(first, static_cast<size_t>(last - first), sizeof(T));
+    assign_copy(static_cast<void const *>(first),
+                static_cast<size_t>(last - first),
+                sizeof(T));
   }
   void assign(std::initializer_list<T> il) {
-    assign_copy(il.begin(), il.size(), sizeof(T));
+    assign_copy(static_cast<void const *>(il.begin()), il.size(), sizeof(T));
   }
 
   T *insert(T const *pos, T const &x) { return insert(pos, &x, &x + 1); }
   T *insert(T const *pos, T const *first, T const *last) {
     return static_cast<T *>(insert_copy(static_cast<size_t>(pos - data()),
-                                        first,
+                                        static_cast<void const *>(first),
                                         static_cast<size_t>(last - first),
                                         sizeof(T)));
   }

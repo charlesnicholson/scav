@@ -1658,8 +1658,9 @@ CostTerms cost_bound(Chart const &c,
   // The face `faces` names at end `end` of segment `seg`, else INVALID.
   auto const named = [&faces](uint32_t seg, uint32_t end) {
     uint32_t const at{ (seg << 3U) | (end << 2U) };
-    auto const hit{ std::ranges::find_if(faces,
-                                         [at](uint32_t f) { return (f & ~3U) == at; }) };
+    auto const *const hit{ std::ranges::find_if(faces, [at](uint32_t f) {
+      return (f & ~3U) == at;
+    }) };
     return (hit != faces.end()) ? (*hit & 3U) : INVALID;
   };
   for (uint32_t tr = 0; tr < c.transitions.size(); ++tr) {

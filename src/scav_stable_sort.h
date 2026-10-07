@@ -30,7 +30,7 @@ inline constexpr size_t SCAV_SORT_SMALL{ 32 };
 // Sorts `v` stably; `scratch` grows as needed and its contents are left unspecified.
 template <typename V, typename Less>
 void scav_stable_sort(V &v, V &scratch, Less less) {
-  using T = typename V::value_type;
+  using T = V::value_type;
   size_t const n{ v.size() };
   if (n < 2) { return; }
   if (n <= SCAV_SORT_SMALL) {

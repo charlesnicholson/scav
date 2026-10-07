@@ -80,7 +80,7 @@ scav_profile one_row(scav_profile const &p) {
 // int32 blocks.
 template <typename V>
 void column_holds(Chart const &c, char const *name, V const &rows) {
-  using T = typename V::value_type;
+  using T = V::value_type;
   static_assert((sizeof(T) % sizeof(int32_t)) == 0, "geometry PODs are int32 blocks");
   constexpr uint32_t WORDS{ sizeof(T) / sizeof(int32_t) };
   ColumnId const id{ column_find(c, name) };

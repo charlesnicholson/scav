@@ -43,8 +43,7 @@ void fill_words(Byte *d, size_t n, W w) {
   for (size_t i = 0; i < n; ++i) { std::memcpy(d + (i * sizeof(W)), &w, sizeof(W)); }
 }
 
-// Writes n copies of the elem bytes at x to dst, or zeros when x is null; x may lie in
-// dst.
+// Writes n copies of the elem bytes at x, or zeros for a null x, to dst; x may lie in dst.
 void fill(void *dst, size_t n, void const *x, size_t elem) {
   if (n == 0) { return; }
   auto *const d{ static_cast<Byte *>(dst) };
@@ -114,7 +113,7 @@ void PodVectorBase::append_fill(size_t n, void const *x, size_t elem) {
 void PodVectorBase::assign_fill(size_t n, void const *x, size_t elem) {
   if (n > cap) {
     void *const fresh{ checked(std::malloc(bytes_of(n, elem))) };
-    fill(fresh, n, x, elem);  // before the free, which may hold x
+    fill(fresh, n, x, elem);  // x may lie in the storage freed next
     std::free(ptr);
     ptr = fresh;
     cap = static_cast<uint32_t>(n);

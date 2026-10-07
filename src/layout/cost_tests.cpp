@@ -231,7 +231,7 @@ TEST_CASE("cost: a crossing route's bend in a state it only passes through costs
 
   // The same from the source's end: Dst -> Src along the route reversed.
   auto const reversed = [](PodVector<scav_point> line) {
-    std::reverse(line.begin(), line.end());
+    std::ranges::reverse(line);
     return line;
   };
   CHECK(transit_terms(k, { {}, reversed(jog_at(250)) }).transit_bends == 2);

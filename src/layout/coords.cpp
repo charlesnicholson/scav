@@ -112,7 +112,7 @@ void view_of(CoordGraph const &g, bool upward, bool rightward, Scratch &sc) {
     PodVector<uint32_t> const &from{ g.layers[upward ? (count - 1 - i) : i] };
     PodVector<uint32_t> &to{ v.layers[i] };
     to.assign(from.begin(), from.end());
-    if (rightward) { std::reverse(to.begin(), to.end()); }
+    if (rightward) { std::ranges::reverse(to); }
   }
   v.pos.assign(n, 0);
   v.layer.assign(n, INVALID);

@@ -690,7 +690,7 @@ TEST_CASE("label: an earlier leg of the route outranks a later one") {
                                    { .x = 400, .y = 150 },
                                    { .x = 400, .y = 350 } };
   PodVector<scav_point> back{ cup };
-  std::reverse(back.begin(), back.end());
+  std::ranges::reverse(back);
   scav_rect const wall{ .x = 20, .y = 110, .w = 460, .h = 80 };
   uint32_t fell{ 0 };
   scav_rect const left{ on_route(cup, { wall }, CHART, LABEL, fell) };

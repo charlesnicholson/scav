@@ -134,6 +134,7 @@ void differential(uint64_t seed) {
         break;
       case 7: {
         std::vector<T> src;
+        src.reserve(n);
         for (size_t i = 0; i < n; ++i) { src.push_back(make<T>(r + i)); }
         got.assign(src.data(), src.data() + src.size());
         want.assign(src.begin(), src.end());
@@ -145,6 +146,7 @@ void differential(uint64_t seed) {
         break;
       case 9: {
         std::vector<T> src;
+        src.reserve(n % 7U);
         for (size_t i = 0; i < (n % 7U); ++i) { src.push_back(make<T>(r ^ i)); }
         got.insert(got.begin() + pos, src.data(), src.data() + src.size());
         want.insert(want.begin() + pos, src.begin(), src.end());
@@ -233,7 +235,8 @@ TEST_CASE("pod_vector: an empty vector owns no storage") {
   PodVector<uint32_t> const copy{ v };
   CHECK(copy.capacity() == 0);
   CHECK(copy.data() == nullptr);
-  PodVector<uint32_t> moved{ std::move(v) };
+  PodVector<uint32_t> none;
+  PodVector<uint32_t> const moved{ std::move(none) };
   CHECK(moved.capacity() == 0);
 
   v.reserve(0);
@@ -312,7 +315,7 @@ TEST_CASE("pod_vector: resize value-initializes and keeps the prefix") {
   for (Init const &e : i) { CHECK(e == Init{}); }
   PodVector<W12> w;
   w.resize(3);
-  for (W12 const &e : w) { CHECK(e == W12{ 0, 0, 0 }); }
+  for (W12 const &e : w) { CHECK(e == W12{ .a = 0, .b = 0, .c = 0 }); }
 }
 
 TEST_CASE(
@@ -325,10 +328,10 @@ TEST_CASE(
   b.push_back(b.back());
   CHECK(b[2] == make<Big>(2));
 
-  auto e{ full<W12>({ { 1, 2, 3 } }) };
+  auto e{ full<W12>({ { .a = 1, .b = 2, .c = 3 } }) };
   W12 &made{ e.emplace_back(e[0]) };
   CHECK(&made == &e.back());
-  CHECK(e == PodVector<W12>{ { 1, 2, 3 }, { 1, 2, 3 } });
+  CHECK(e == PodVector<W12>{ { .a = 1, .b = 2, .c = 3 }, { .a = 1, .b = 2, .c = 3 } });
 
   auto s{ full<uint32_t>({ 4, 5, 6 }) };
   uint32_t *const at{ s.insert(s.begin(), s[2]) };
@@ -407,11 +410,13 @@ TEST_CASE("pod_vector: copy, move, swap and self-assignment") {
   uint32_t const *const storage{ b.data() };
   PodVector<uint32_t> c{ std::move(b) };
   CHECK(c.data() == storage);
-  CHECK(b.empty());  // NOLINT(bugprone-use-after-move)
-  CHECK(b.capacity() == 0);
+  // NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
+  CHECK(b.empty());
+  CHECK(b.capacity() == 0);  // NOLINT(clang-analyzer-cplusplus.Move)
   b = std::move(c);
   CHECK(b.data() == storage);
-  CHECK(c.capacity() == 0);  // NOLINT(bugprone-use-after-move)
+  // NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
+  CHECK(c.capacity() == 0);
 
   a.swap(b);
   CHECK(a == PodVector<uint32_t>{ 1, 2, 3, 4 });
