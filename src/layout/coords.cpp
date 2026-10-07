@@ -49,7 +49,7 @@ struct Scratch {
   Vector<uint32_t> count, fill, root, align, sink;
   Vector<uint32_t> pending, succ_count, succ_off, succ, order;
   Vector<int64_t> offset, shift;
-  std::vector<std::vector<std::pair<uint32_t, uint32_t>>> neighborings;
+  std::vector<Vector<std::array<uint32_t, 2>>> neighborings;  // left, right
   Vector<uint8_t> mark, placed;
   std::array<Vector<int64_t>, 4> pass;
 };
@@ -282,13 +282,13 @@ void compact(CoordGraph const &g, Scratch &sc, Vector<int64_t> &x) {
 
   // Second correction: records class adjacencies by the sink layer of the right class,
   // then propagates shifts in layer order; a right class's shift is final when read.
-  std::vector<std::vector<std::pair<uint32_t, uint32_t>>> &neighborings{ sc.neighborings };
+  std::vector<Vector<std::array<uint32_t, 2>>> &neighborings{ sc.neighborings };
   vec_resize(neighborings, v.layers.size());
-  for (std::vector<std::pair<uint32_t, uint32_t>> &at : neighborings) { at.clear(); }
+  for (Vector<std::array<uint32_t, 2>> &at : neighborings) { at.clear(); }
   for (Vector<uint32_t> const &lay : v.layers) {
     for (auto k = static_cast<uint32_t>(lay.size()); k-- > 1;) {
       if (sink[lay[k - 1]] != sink[lay[k]]) {
-        vec_emplace_back(neighborings[v.layer[sink[lay[k]]]], lay[k - 1], lay[k]);
+        neighborings[v.layer[sink[lay[k]]]].push_back({ lay[k - 1], lay[k] });
       }
     }
   }
@@ -297,9 +297,9 @@ void compact(CoordGraph const &g, Scratch &sc, Vector<int64_t> &x) {
       uint32_t const first{ sink[v.layers[i][0]] };
       if (shift[first] == SHIFT_INF) { shift[first] = 0; }
     }
-    for (std::pair<uint32_t, uint32_t> const &pair : neighborings[i]) {
-      uint32_t const left{ pair.first };
-      uint32_t const right{ pair.second };
+    for (std::array<uint32_t, 2> const &pair : neighborings[i]) {
+      uint32_t const left{ pair[0] };
+      uint32_t const right{ pair[1] };
       int64_t const base{ (shift[sink[right]] == SHIFT_INF) ? 0 : shift[sink[right]] };
       int64_t const want{ base + x[right] - (x[left] + sep_between(g, left, right)) };
       shift[sink[left]] = imin(shift[sink[left]], want);

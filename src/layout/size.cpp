@@ -104,6 +104,12 @@ bool bare_pseudostate(Chart const &c,
   return true;
 }
 
+// A pseudostate the seating pass moved, levelled or declined.
+struct Seated {
+  uint32_t state;
+  SeatHow how;
+};
+
 // One component laid out at one wrap width, packed or stacked.
 struct Shape {
   Vector<scav_point> at;
@@ -111,8 +117,8 @@ struct Shape {
   bool ok{ true };
   // Trace records, emitted for the kept shape.
   Vector<TraceFold> cuts;
-  std::vector<std::pair<uint32_t, SeatHow>> seated;
-  std::vector<std::pair<uint32_t, int32_t>> centred;
+  Vector<Seated> seated;
+  Vector<TraceShift> centred;
   Vector<TracePiece> packed;
   Vector<TraceGap> lanes;
   Vector<TraceCarry> carried;
@@ -861,12 +867,12 @@ void Sizer::seat_pseudostates(ChunkView const &v,
     };
     if (clear(x, y)) {
       shape.at[at] = { .x = static_cast<int32_t>(x), .y = static_cast<int32_t>(y) };
-      vec_emplace_back(shape.seated, nd.subject, SeatHow::Moved);
+      shape.seated.push_back({ .state = nd.subject, .how = SeatHow::Moved });
     } else if (clear(shape.at[at].x, y)) {
       shape.at[at].y = static_cast<int32_t>(y);
-      vec_emplace_back(shape.seated, nd.subject, SeatHow::Levelled);
+      shape.seated.push_back({ .state = nd.subject, .how = SeatHow::Levelled });
     } else {
-      vec_emplace_back(shape.seated, nd.subject, SeatHow::Declined);
+      shape.seated.push_back({ .state = nd.subject, .how = SeatHow::Declined });
     }
   }
 }
@@ -1522,7 +1528,9 @@ void Sizer::lay_out_sub(uint32_t m) {
           // On its group's centre line, where it has one.
           Wide const from_edge{ (line[at] == 0) ? flush : Wide{ inset[at] } };
           if (from_edge != flush) {
-            vec_emplace_back(shape.centred, nd.subject, static_cast<int32_t>(from_edge));
+            shape.centred.push_back({ .state = nd.subject,
+                                      .seg = INVALID,
+                                      .by = static_cast<int32_t>(from_edge) });
           }
           // Piece-local; the packing below places the piece.
           shape.at[at] = { .x = static_cast<int32_t>(layer_x[r - first] + from_edge),
@@ -1834,16 +1842,14 @@ void Sizer::lay_out_sub(uint32_t m) {
     for (TracePiece const &piece : best.packed) {
       trace_emit({ .kind = TraceKind::PiecePacked, .frame = m, .piece = piece });
     }
-    for (auto const &[state, by] : best.centred) {
-      trace_emit({ .kind = TraceKind::ColumnCentred,
-                   .frame = m,
-                   .shift = { .state = state, .seg = INVALID, .by = by } });
+    for (TraceShift const &shift : best.centred) {
+      trace_emit({ .kind = TraceKind::ColumnCentred, .frame = m, .shift = shift });
     }
-    for (auto const &[state, how] : best.seated) {
+    for (Seated const &seat : best.seated) {
       trace_emit({ .kind = TraceKind::PseudostateSeated,
-                   .pass = static_cast<uint16_t>(how),
+                   .pass = static_cast<uint16_t>(seat.how),
                    .frame = m,
-                   .rank = { .state = state, .rank = 0 } });
+                   .rank = { .state = seat.state, .rank = 0 } });
     }
     for (TraceGap const &gap : best.lanes) {
       trace_emit({ .kind = TraceKind::GapCharged,
