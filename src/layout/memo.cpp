@@ -7,6 +7,7 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <type_traits>
 #include <vector>
 
 namespace scav {
@@ -155,6 +156,12 @@ bool Memo::find(std::vector<uint32_t> const &key, int32_t const *&at, uint32_t &
   len = slot.value_len;
   return true;
 }
+
+KeyIndex::KeyIndex(KeyIndex &&) noexcept = default;
+KeyIndex &KeyIndex::operator=(KeyIndex &&) noexcept = default;
+KeyIndex::~KeyIndex() = default;
+static_assert(std::is_nothrow_move_constructible_v<KeyIndex> &&
+              std::is_nothrow_move_assignable_v<KeyIndex>);
 
 size_t KeyIndex::slot_of(uint32_t const *key, uint32_t len, uint64_t hash) const {
   size_t const mask{ slots.size() - 1 };

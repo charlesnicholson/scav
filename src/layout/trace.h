@@ -297,6 +297,8 @@ inline constexpr uint32_t TRACE_MOVES{ 8 };  // `TRACE_MOVE_*` values
 // Per `TRACE_MOVE_*`: moves offered, answered by the candidate memo, taken, culled
 // unoffered as changing nothing, and left unscored by don't-look bits in a taking round.
 struct SearchStats {
+  SearchStats();  // out of line in trace.cpp
+
   std::array<uint64_t, TRACE_MOVES> offered{}, deduped{}, taken{}, culled{}, skipped{};
   std::array<uint64_t, TRACE_MOVES> pruned{};   // route bound reached the incumbent
   std::array<uint64_t, TRACE_MOVES> stopped{};  // routed, then Tier 2 reached it

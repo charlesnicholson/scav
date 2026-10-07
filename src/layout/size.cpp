@@ -17,10 +17,17 @@
 
 #include <array>
 #include <cstdint>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
 namespace scav {
+
+SizedLayout::SizedLayout(SizedLayout &&) noexcept = default;
+SizedLayout &SizedLayout::operator=(SizedLayout &&) noexcept = default;
+SizedLayout::~SizedLayout() = default;
+static_assert(std::is_nothrow_move_constructible_v<SizedLayout> &&
+              std::is_nothrow_move_assignable_v<SizedLayout>);
 
 // Test entry points: a hole's ratio and every state's hole.
 SCAV_INTERNAL_BEGIN

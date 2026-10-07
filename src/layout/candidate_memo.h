@@ -11,6 +11,7 @@
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
 #include "scav_thread.h"
+#include "scav_vec.h"
 
 #include <array>
 #include <atomic>
@@ -209,6 +210,8 @@ class CandidateMemo {
   static constexpr uint32_t SHARD_BITS{ 6 };
   static constexpr uint32_t SHARDS{ 1U << SHARD_BITS };
   struct IndexShard {
+    SCAV_NOINLINE IndexShard();
+
     Mutex lock;
     KeyIndex keys;
     uint32_t base{ 0 };  // numbers issued before the shard last emptied

@@ -27,6 +27,13 @@ uint64_t memo_hash(uint32_t const *key, size_t len);  // the same over `key[0..l
 // sit back to back in one arena, slots at their hash's high word, and a hit compares all.
 class KeyIndex {
  public:
+  KeyIndex() = default;
+  KeyIndex(KeyIndex const &) = default;
+  KeyIndex &operator=(KeyIndex const &) = default;
+  KeyIndex(KeyIndex &&) noexcept;  // moves and the destructor are out of line
+  KeyIndex &operator=(KeyIndex &&) noexcept;
+  ~KeyIndex();
+
   // The number of `key[0..len)`, or INVALID; `hash` is the hash it was stored under.
   [[nodiscard]] uint32_t find(uint32_t const *key, uint32_t len, uint64_t hash) const;
 

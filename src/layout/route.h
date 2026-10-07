@@ -19,6 +19,13 @@
 namespace scav {
 
 struct Routes {
+  Routes() = default;
+  Routes(Routes const &) = default;
+  Routes &operator=(Routes const &) = default;
+  Routes(Routes &&) noexcept;  // moves and the destructor are out of line
+  Routes &operator=(Routes &&) noexcept;
+  ~Routes();
+
   std::vector<scav_point> points;
   std::vector<scav_port_slot> slots;
   std::vector<scav_span> route, port;  // parallel to transitions

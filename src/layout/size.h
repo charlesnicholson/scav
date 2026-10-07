@@ -20,6 +20,13 @@ namespace scav {
 // Everything the geometry columns need except the routes, all root-absolute.
 // Tombstones stay all-zero.
 struct SizedLayout {
+  SizedLayout() = default;
+  SizedLayout(SizedLayout const &) = default;
+  SizedLayout &operator=(SizedLayout const &) = default;
+  SizedLayout(SizedLayout &&) noexcept;  // moves and the destructor are out of line
+  SizedLayout &operator=(SizedLayout &&) noexcept;
+  ~SizedLayout();
+
   std::vector<scav_rect> state, before, after;  // parallel to states
   std::vector<scav_rect> lead, trail;           // parallel to states: the side bands
   std::vector<scav_rect> loop;      // parallel to states: its inner loops' room

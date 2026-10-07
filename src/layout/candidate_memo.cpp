@@ -96,6 +96,8 @@ bool number_blocks(uint32_t serial,
 
 }  // namespace
 
+CandidateMemo::IndexShard::IndexShard() = default;
+
 CandidateMemo::CandidateMemo(Chart const &c, SplitGraph const &g, uint64_t bytes)
     : chart(c), graph(g), serial(memo_serial()), budget(bytes) {
   usable = (c.states.size() < ID_LIMIT) && (g.segments.size() < ID_LIMIT) &&

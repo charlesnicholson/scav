@@ -25,10 +25,17 @@
 #include <bit>
 #include <cstdint>
 #include <cstring>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
 namespace scav {
+
+Routes::Routes(Routes &&) noexcept = default;
+Routes &Routes::operator=(Routes &&) noexcept = default;
+Routes::~Routes() = default;
+static_assert(std::is_nothrow_move_constructible_v<Routes> &&
+              std::is_nothrow_move_assignable_v<Routes>);
 
 namespace {
 

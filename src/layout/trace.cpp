@@ -6,6 +6,7 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <type_traits>
 #include <vector>
 
 namespace scav {
@@ -183,6 +184,9 @@ LayoutTrace *trace_sink() { return g_sink; }
 void trace_sink_set(LayoutTrace *t) { g_sink = t; }
 LayoutTrace *trace_outline() { return g_outline; }
 void trace_outline_set(LayoutTrace *t) { g_outline = t; }
+
+SearchStats::SearchStats() = default;
+static_assert(std::is_trivially_copyable_v<SearchStats>);
 
 void search_stats_to_json(SearchStats const &st, std::vector<char> &out) {
   Json j{ out };

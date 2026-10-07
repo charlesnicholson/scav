@@ -31,6 +31,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -306,6 +307,13 @@ bool inflate(scav_profile &p, int32_t by) {
 }
 
 struct Candidate {
+  SCAV_NOINLINE Candidate();
+  SCAV_NOINLINE Candidate(Candidate const &);
+  SCAV_NOINLINE Candidate(Candidate &&) noexcept;
+  SCAV_NOINLINE Candidate &operator=(Candidate const &);
+  SCAV_NOINLINE Candidate &operator=(Candidate &&) noexcept;
+  SCAV_NOINLINE ~Candidate();
+
   SizedLayout sized;
   Routes routes;
   uint32_t inflations{ 0 };
@@ -316,6 +324,14 @@ struct Candidate {
   scav_rect sized_chart{};  // `sized.chart` before the routes and labels covered it
   bool retried{ false };    // the spacing retry sized the laid ordering again
 };
+Candidate::Candidate() = default;
+Candidate::Candidate(Candidate const &) = default;
+Candidate::Candidate(Candidate &&) noexcept = default;
+Candidate &Candidate::operator=(Candidate const &) = default;
+Candidate &Candidate::operator=(Candidate &&) noexcept = default;
+Candidate::~Candidate() = default;
+static_assert(std::is_nothrow_move_constructible_v<Candidate> &&
+              std::is_nothrow_move_assignable_v<Candidate>);
 
 bool same_rect(scav_rect const &a, scav_rect const &b) {
   return (a.x == b.x) && (a.y == b.y) && (a.w == b.w) && (a.h == b.h);
@@ -867,11 +883,26 @@ namespace {
 
 // A Level 1 search's result: the best candidate reached, its cost, and its pins.
 struct Improved {
+  SCAV_NOINLINE Improved();
+  SCAV_NOINLINE Improved(Improved const &);
+  SCAV_NOINLINE Improved(Improved &&) noexcept;
+  SCAV_NOINLINE Improved &operator=(Improved const &);
+  SCAV_NOINLINE Improved &operator=(Improved &&) noexcept;
+  SCAV_NOINLINE ~Improved();
+
   Candidate best;
   Cost cost{};
   SearchPins held;
   bool viable{ false };  // the start laid out
 };
+Improved::Improved() = default;
+Improved::Improved(Improved const &) = default;
+Improved::Improved(Improved &&) noexcept = default;
+Improved &Improved::operator=(Improved const &) = default;
+Improved &Improved::operator=(Improved &&) noexcept = default;
+Improved::~Improved() = default;
+static_assert(std::is_nothrow_move_constructible_v<Improved> &&
+              std::is_nothrow_move_assignable_v<Improved>);
 
 // `Orient` is a kick only.
 enum class MoveKind : uint32_t { Rank, Cut, Reverse, Face, Side, Fold, Orient, Loop };
