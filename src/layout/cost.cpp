@@ -1633,12 +1633,12 @@ CostTerms cost_terms(CostContext const &ctx,
   return t;
 }
 
-CostTerms cost_terms(Chart const &c,
-                     SplitGraph const &g,
-                     SizedLayout const &z,
-                     Routes const &r,
-                     scav_spaces const &s,
-                     scav_profile const &p) {
+SCAV_COLD CostTerms cost_terms(Chart const &c,
+                               SplitGraph const &g,
+                               SizedLayout const &z,
+                               Routes const &r,
+                               scav_spaces const &s,
+                               scav_profile const &p) {
   return cost_terms(cost_context(c, g), c, g, z, r, s, p);
 }
 
@@ -1748,11 +1748,11 @@ CostTerms cost_bound(Chart const &c,
   return t;
 }
 
-CostTerms cost_columns(Chart const &c,
-                       SplitGraph const &g,
-                       scav_profile const &p,
-                       scav_spaces const &s,
-                       std::vector<scav_rect> const &placed) {
+SCAV_COLD CostTerms cost_columns(Chart const &c,
+                                 SplitGraph const &g,
+                                 scav_profile const &p,
+                                 scav_spaces const &s,
+                                 std::vector<scav_rect> const &placed) {
   auto const rows = [&c](char const *name, auto &out) {
     ColumnId const id{ column_find(c, name) };
     if (id.v == INVALID) { return; }
@@ -1806,10 +1806,10 @@ std::array<Wide, TIER2_TERMS> weighted_terms(CostTerms const &t, scav_profile co
 
 }  // namespace
 
-CostTerms layout_cost(Chart const &c,
-                      scav_profile const &p,
-                      scav_spaces const &s,
-                      std::vector<scav_rect> const &placed) {
+SCAV_COLD CostTerms layout_cost(Chart const &c,
+                                scav_profile const &p,
+                                scav_spaces const &s,
+                                std::vector<scav_rect> const &placed) {
   return cost_columns(c, decompose(c), p, s, placed);
 }
 
