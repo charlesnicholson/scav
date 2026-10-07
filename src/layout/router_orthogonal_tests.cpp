@@ -1121,6 +1121,8 @@ TEST_CASE("ortho: arrivals that crowd a short face part evenly between its inset
   std::vector<int32_t> const corner{ 20, 0 };
   std::vector<RouteNet> nets;
   std::vector<scav_point> at;
+  nets.reserve(12);
+  at.reserve(24);
   for (int32_t k = 0; k < 12; ++k) {
     nets.push_back({ .src = pt(-950, -400 + (k * 80)),
                      .dst = pt(50, 50),
@@ -1130,9 +1132,9 @@ TEST_CASE("ortho: arrivals that crowd a short face part evenly between its inset
     at.push_back(pt(0, 50));
   }
   ortho_spread_attachments(boxes, seats_of(nets, {}, corner), aims(nets), 8, 24, at);
-  std::vector<int32_t> ys;
-  for (uint32_t k = 0; k < 12; ++k) { ys.push_back(at[(2 * k) + 1].y); }
-  std::sort(ys.begin(), ys.end());
+  std::vector<int32_t> ys(12);
+  for (uint32_t k = 0; k < 12; ++k) { ys[k] = at[(2 * k) + 1].y; }
+  std::ranges::sort(ys);
   CHECK(ys.front() >= 20);
   CHECK(ys.back() <= 80);
   for (uint32_t k = 1; k < ys.size(); ++k) {
