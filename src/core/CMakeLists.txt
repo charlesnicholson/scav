@@ -3,6 +3,7 @@
 scav_static_library(scavcore
   # src/-root primitives belonging to no library; core compiles them, so anything
   # linking core reaches them.
+  ../scav_vector.cpp
   ../scav_xxhash.cpp
   # Core-wide sources outside the three subsystems: the C API and the diagnostics table.
   c_api.cpp
