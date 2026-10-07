@@ -1340,9 +1340,9 @@ constexpr std::array<char const *, 2> SCALE_ROUTERS{ "orthogonal", "straight" };
 // One row per cell, chart-major then profile then router: through_box, box_overlap,
 // bends, corridor, crossings, excess_len, adjacency, label, label_near, aspect, area.
 constexpr std::array<std::array<int64_t, 11>, 8> SCALE_PINNED{
-  { { 0, 0, 2544, 0, 0, 2000888, 0, 0, 0, 2764964, 36418952256 },
+  { { 0, 0, 2544, 0, 0, 1998744, 0, 0, 0, 2764964, 36418952256 },
     { 21608, 0, 3072, 46749232, 52856, 95492256, 0, 0, 0, 2764964, 36418952256 },
-    { 0, 0, 2544, 0, 0, 1230640, 0, 0, 0, 640768, 14447836160 },
+    { 0, 0, 2544, 0, 0, 1231656, 0, 0, 0, 640768, 14447836160 },
     { 22248, 0, 3072, 31627520, 52552, 57525032, 0, 0, 0, 640768, 14447836160 },
     { 0, 0, 1218, 0, 80, 2581659, 0, 0, 0, 73344, 3667557376 },
     { 2088, 0, 319, 0, 265, 7295646, 0, 0, 0, 73344, 3667557376 },

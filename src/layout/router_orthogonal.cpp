@@ -626,9 +626,7 @@ void ortho_spread_attachments(std::vector<scav_rect> const &boxes,
       if (alone) {
         // Arrivals: `by` apart about the point, fitted to the face, low aims low.
         Wide const gaps{ count - 1 };
-        Wide const by{ (room >= (gaps * apart))
-                           ? apart
-                           : imin(Wide{ clear }, run.len / (gaps + 2)) };
+        Wide const by{ (room >= (gaps * apart)) ? apart : (room / gaps) };
         if (by <= 0) { continue; }
         Wide const lo{ Wide{ run.lo } + run.inset };
         Wide const from{
@@ -686,7 +684,9 @@ void ortho_spread_attachments(std::vector<scav_rect> const &boxes,
   }
 }
 
-void ortho_order_arrivals(std::vector<scav_rect> const &boxes,
+void ortho_order_arrivals(std::vector<RouteNet> const &nets,
+                          std::vector<scav_rect> const &boxes,
+                          int32_t clear,
                           std::vector<uint32_t> const &groups,
                           std::vector<scav_point> &points,
                           std::vector<scav_span> const &spans,
@@ -762,21 +762,30 @@ void ortho_order_arrivals(std::vector<scav_rect> const &boxes,
     bool const along_y{ face < 2 };
     bool ok{ true };
     for (uint32_t k = 0; ok && (k < moving.size()); ++k) {
-      scav_point const a{ points[moving[k].end - 2] };
-      scav_point const b{ points[moving[k].end - 1] };
-      scav_point const e{ points[moving[k].end] };
+      uint32_t const end{ moving[k].end };
+      RouteNet const &net{ nets[moving[k].slot / 2] };
+      scav_point const a{ points[end - 2] };
+      scav_point const b{ points[end - 1] };
+      scav_point const e{ points[end] };
       int32_t const to{ seats[k] };
       int32_t const a_along{ along_y ? a.y : a.x };
       ok = ((a_along < to) == (a_along < (along_y ? b.y : b.x))) && (a_along != to);
+      // A first leg out of a box keeps the ring the router seated it at.
+      if ((end - 2) == spans[moving[k].slot / 2].off) {
+        ok = ok && ((net.src_obstacle >= boxes.size()) ||
+                    (distance(a_along, to) >= imax(clear, net.src_clear)));
+      }
       int32_t const lo{ imin(a_along, to) };
       int32_t const hi{ imax(a_along, to) };
       int32_t const near{ along_y ? imin(b.x, e.x) : imin(b.y, e.y) };
       int32_t const far{ along_y ? imax(b.x, e.x) : imax(b.y, e.y) };
-      for (scav_rect const &r : boxes) {
-        if (!ok) { break; }
+      // No moved leg enters a box, or the clearance round any box but the net's own.
+      for (uint32_t r = 0; ok && (r < boxes.size()); ++r) {
+        bool const own{ (r == net.src_obstacle) || (r == net.dst_obstacle) };
+        scav_rect const q{ own ? boxes[r] : grow(boxes[r], clear) };
         ok = along_y
-                 ? !(ortho_blocks_v(r, a.x, lo, hi) || ortho_blocks_h(r, to, near, far))
-                 : !(ortho_blocks_h(r, a.y, lo, hi) || ortho_blocks_v(r, to, near, far));
+                 ? !(ortho_blocks_v(q, a.x, lo, hi) || ortho_blocks_h(q, to, near, far))
+                 : !(ortho_blocks_h(q, a.y, lo, hi) || ortho_blocks_v(q, to, near, far));
       }
     }
     if (!ok) { continue; }
@@ -979,6 +988,8 @@ void ortho_clear_occupied(std::vector<RouteNet> const &nets,
                           std::vector<int32_t> &stuck) {
   vec_assign(stuck, nets.size(), 0);
   if (occupied.empty()) { return; }
+  thread_local std::vector<uint32_t> cleared;  // slots moved off an occupied span
+  cleared.clear();
   for (Seat const &s : table) {
     uint32_t const face{ face_at(s, boxes, at) };
     if (s.inscribed || (face == INVALID)) { continue; }
@@ -991,12 +1002,23 @@ void ortho_clear_occupied(std::vector<RouteNet> const &nets,
       ++stuck[s.slot / 2];
       continue;
     }
+    // The occupied spans, plus `clear` either side of each seat this pass moved off one.
+    thread_local std::vector<OccupiedSpan> taken;
+    taken = occupied;
+    for (uint32_t const k : cleared) {
+      uint32_t const at_face{ face_at(table[k], boxes, at) };
+      if ((table[k].box != s.box) || (at_face == INVALID)) { continue; }
+      int32_t const pos{ (at_face < 2) ? at[k].y : at[k].x };
+      vec_push_back(
+          taken,
+          { .obstacle = s.box, .face = at_face, .lo = pos - clear, .len = 2 * clear });
+    }
     // Face `f`'s free position nearest `pos` and its distance from the aim, -1 for none.
     scav_rect const &r{ boxes[s.box] };
     scav_point const aim{ toward[s.slot] };
     auto const free_on = [&](uint32_t f, int32_t pos, scav_point &got) {
       FaceRun const run{ face_run(r, f, clear, s.arc) };
-      if ((run.len <= (2 * run.inset)) || !occupied_free(occupied,
+      if ((run.len <= (2 * run.inset)) || !occupied_free(taken,
                                                          s.box,
                                                          f,
                                                          run.lo + run.inset,
@@ -1031,6 +1053,7 @@ void ortho_clear_occupied(std::vector<RouteNet> const &nets,
       continue;
     }
     seat = best;
+    vec_push_back(cleared, s.slot);
 
     // A far end level with the old seat on a parallel face moves level with the new one.
     Seat const &twin{ table[s.slot ^ 1U] };
@@ -2111,7 +2134,13 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
     i = j;
   }
   was = seat;
-  ortho_order_arrivals(in.obstacles, groups, out.points, out.net_points, seat);
+  ortho_order_arrivals(in.nets,
+                       in.obstacles,
+                       bumper,
+                       groups,
+                       out.points,
+                       out.net_points,
+                       seat);
   moved(SeatPass::Order);
 }
 

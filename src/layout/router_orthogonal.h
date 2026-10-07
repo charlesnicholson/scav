@@ -185,10 +185,11 @@ void ortho_clear_occupied(std::vector<RouteNet> const &nets,
                           std::vector<scav_point> &at,
                           std::vector<int32_t> &stuck);
 
-// Permutes the seats of each INVALID-ended run of `groups` so no leg into a last bend
-// crosses another's run in; moves only last bends and ends, and no run whose moved leg
-// enters a box.
-void ortho_order_arrivals(std::vector<scav_rect> const &boxes,
+// Reorders each INVALID-ended run of `groups` so no leg into a last bend crosses another's
+// run in; moves only last bends and ends, and leaves a run a move brings within `clear`.
+void ortho_order_arrivals(std::vector<RouteNet> const &nets,
+                          std::vector<scav_rect> const &boxes,
+                          int32_t clear,
                           std::vector<uint32_t> const &groups,
                           std::vector<scav_point> &points,
                           std::vector<scav_span> const &spans,
