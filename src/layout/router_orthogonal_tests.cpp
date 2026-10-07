@@ -9,6 +9,7 @@
 #include "scav/scav_layout.h"
 #include "scav_int.h"
 #include "scav_stable_sort.h"
+#include "scav_vector.h"
 
 #include "doctest.h"
 
@@ -24,7 +25,7 @@ namespace scav {
 // Test-only prototype of the SCAV_INTERNAL turn count in `cost.cpp`.
 int32_t cost_path_turns(scav_rect const &s,
                         uint32_t s_face,
-                        std::vector<scav_point> const &via,
+                        Vector<scav_point> const &via,
                         scav_rect const &t,
                         uint32_t t_face);
 
@@ -51,8 +52,8 @@ scav_profile profile() {
 }
 
 // Each end's aim where no net has a waypoint: the other end, `2 * nets.size()` points.
-std::vector<scav_point> aims(std::vector<RouteNet> const &nets) {
-  std::vector<scav_point> out;
+Vector<scav_point> aims(Vector<RouteNet> const &nets) {
+  Vector<scav_point> out;
   for (RouteNet const &net : nets) {
     out.push_back(net.dst);
     out.push_back(net.src);
@@ -93,8 +94,8 @@ Wide reference_cost(OrthoGrid const &g,
                     uint32_t from_plane = INVALID,
                     uint32_t to_plane = INVALID) {
   size_t const nodes{ size_t{ g.nx() } * g.ny() * 2 };
-  std::vector<Wide> dist(nodes, -1);
-  std::vector<uint8_t> done(nodes, 0);
+  Vector<Wide> dist(nodes, -1);
+  Vector<uint8_t> done(nodes, 0);
   for (uint32_t plane = 0; plane < 2; ++plane) {
     if ((from_plane >= 2) || (plane == from_plane)) {
       dist[(size_t{ from } * 2) + plane] = 0;
@@ -147,7 +148,7 @@ Wide reference_cost(OrthoGrid const &g,
 // Length plus one bend per direction change, over a vertex path, and one more
 // at each end whose fixed plane its first or last leg does not run in.
 Wide path_cost(OrthoGrid const &g,
-               std::vector<uint32_t> const &path,
+               Vector<uint32_t> const &path,
                Wide bend,
                uint32_t from_plane = INVALID,
                uint32_t to_plane = INVALID) {
@@ -169,7 +170,7 @@ Wide path_cost(OrthoGrid const &g,
 
 // The bends `path_cost` counts on a vertex path, end turns included.
 Wide bends_of(OrthoGrid const &g,
-              std::vector<uint32_t> const &path,
+              Vector<uint32_t> const &path,
               uint32_t from_plane,
               uint32_t to_plane) {
   return path_cost(g, path, 1, from_plane, to_plane) -
@@ -190,16 +191,16 @@ int32_t route_bends(RouteOutput const &out, uint32_t n) {
 }
 
 // The seat table `route` builds.
-std::vector<Seat> seats_of(std::vector<RouteNet> const &nets,
-                           std::vector<uint8_t> const &inscribed = {},
-                           std::vector<int32_t> const &corner = {}) {
-  std::vector<Seat> out;
+Vector<Seat> seats_of(Vector<RouteNet> const &nets,
+                      Vector<uint8_t> const &inscribed = {},
+                      Vector<int32_t> const &corner = {}) {
+  Vector<Seat> out;
   ortho_seats(nets, inscribed, corner, out);
   return out;
 }
 
 // Every step is one grid edge, in bounds, and passable.
-void check_path_is_walkable(OrthoGrid const &g, std::vector<uint32_t> const &path) {
+void check_path_is_walkable(OrthoGrid const &g, Vector<uint32_t> const &path) {
   for (uint32_t k = 0; (k + 1) < path.size(); ++k) {
     uint32_t const ax{ path[k] % g.nx() };
     uint32_t const ay{ path[k] / g.nx() };
@@ -223,8 +224,7 @@ void check_path_is_walkable(OrthoGrid const &g, std::vector<uint32_t> const &pat
 }
 
 // Checks `got` against `want` point by point with this file's `operator==`.
-void check_points(std::vector<scav_point> const &got,
-                  std::vector<scav_point> const &want) {
+void check_points(Vector<scav_point> const &got, Vector<scav_point> const &want) {
   REQUIRE(got.size() == want.size());
   for (uint32_t i = 0; i < got.size(); ++i) {
     CAPTURE(i);
@@ -248,10 +248,10 @@ constexpr uint32_t plane_of(uint32_t k) { return (k < 2) ? k : INVALID; }
 // A second A* in the same total `(f, g, node)` order, on parallel arrays and a binary
 // heap. Its paths must equal `ortho_search`'s node for node.
 struct ReferenceSearch {
-  std::vector<Wide> best;
-  std::vector<uint32_t> parent, stamp;
-  std::vector<Wide> heap_f, heap_g;
-  std::vector<uint32_t> heap_node;
+  Vector<Wide> best;
+  Vector<uint32_t> parent, stamp;
+  Vector<Wide> heap_f, heap_g;
+  Vector<uint32_t> heap_node;
   uint32_t generation{ 0 };
   uint32_t expansions{ 0 };
   // Pops tied with the next entry on `f`, and on both `f` and `g`.
@@ -313,7 +313,7 @@ struct ReferenceSearch {
               uint32_t to,
               Wide bend,
               uint32_t budget,
-              std::vector<uint32_t> &out,
+              Vector<uint32_t> &out,
               uint32_t from_plane = INVALID,
               uint32_t to_plane = INVALID) {
     out.clear();
@@ -401,7 +401,7 @@ struct ReferenceSearch {
       }
     }
     if (reached == INVALID) { return false; }
-    std::vector<uint32_t> back;
+    Vector<uint32_t> back;
     for (uint32_t node = reached; node != INVALID; node = parent[node]) {
       back.push_back(node / 2);
     }
@@ -507,29 +507,29 @@ TEST_CASE("ortho: the two predicates agree with the cost scorer's own") {
 // --- Line condensing and lookup ---
 
 TEST_CASE("ortho: condensing sorts, deduplicates, and keeps negatives") {
-  std::vector<int32_t> empty;
+  Vector<int32_t> empty;
   ortho_sort_unique(empty);
   CHECK(empty.empty());
 
-  std::vector<int32_t> one{ 7 };
+  Vector<int32_t> one{ 7 };
   ortho_sort_unique(one);
-  CHECK(one == std::vector<int32_t>{ 7 });
+  CHECK(one == Vector<int32_t>{ 7 });
 
-  std::vector<int32_t> same{ 3, 3, 3, 3 };
+  Vector<int32_t> same{ 3, 3, 3, 3 };
   ortho_sort_unique(same);
-  CHECK(same == std::vector<int32_t>{ 3 });
+  CHECK(same == Vector<int32_t>{ 3 });
 
-  std::vector<int32_t> sorted{ 1, 2, 3 };
+  Vector<int32_t> sorted{ 1, 2, 3 };
   ortho_sort_unique(sorted);
-  CHECK(sorted == std::vector<int32_t>{ 1, 2, 3 });
+  CHECK(sorted == Vector<int32_t>{ 1, 2, 3 });
 
-  std::vector<int32_t> mixed{ 5, -3, 5, 0, -3, 12, 0 };
+  Vector<int32_t> mixed{ 5, -3, 5, 0, -3, 12, 0 };
   ortho_sort_unique(mixed);
-  CHECK(mixed == std::vector<int32_t>{ -3, 0, 5, 12 });
+  CHECK(mixed == Vector<int32_t>{ -3, 0, 5, 12 });
 
-  std::vector<int32_t> reversed{ 9, 8, 7, 6, 5 };
+  Vector<int32_t> reversed{ 9, 8, 7, 6, 5 };
   ortho_sort_unique(reversed);
-  CHECK(reversed == std::vector<int32_t>{ 5, 6, 7, 8, 9 });
+  CHECK(reversed == Vector<int32_t>{ 5, 6, 7, 8, 9 });
 }
 
 TEST_CASE("ortho: condensing a long list is the stable sort's order, deduplicated") {
@@ -544,12 +544,12 @@ TEST_CASE("ortho: condensing a long list is the stable sort's order, deduplicate
     CAPTURE(trial);
     uint32_t const n{ 33 + (next() % 400) };
     uint32_t const shift{ (trial % 4) * 8 };
-    std::vector<int32_t> got;
+    Vector<int32_t> got;
     for (uint32_t i = 0; i < n; ++i) {
       uint32_t const raw{ (trial % 3 == 0) ? (next() % 50U) : next() };
       got.push_back(static_cast<int32_t>(raw << shift));
     }
-    std::vector<int32_t> want{ got };
+    Vector<int32_t> want{ got };
     scav_stable_sort(want, [](int32_t a, int32_t b) { return a < b; });
     uint32_t kept{ 0 };
     for (uint32_t i = 0; i < want.size(); ++i) {
@@ -562,7 +562,7 @@ TEST_CASE("ortho: condensing a long list is the stable sort's order, deduplicate
 }
 
 TEST_CASE("ortho: the line lookup finds every value it was given") {
-  std::vector<int32_t> const lines{ -40, -5, 0, 3, 17, 200 };
+  Vector<int32_t> const lines{ -40, -5, 0, 3, 17, 200 };
   for (uint32_t i = 0; i < lines.size(); ++i) {
     CAPTURE(i);
     CHECK(ortho_index_of(lines, lines[i]) == i);
@@ -572,7 +572,7 @@ TEST_CASE("ortho: the line lookup finds every value it was given") {
   CHECK(ortho_index_of(lines, -1000) == 0);
   CHECK(ortho_index_of(lines, 1000) == 5);
 
-  std::vector<int32_t> const single{ 42 };
+  Vector<int32_t> const single{ 42 };
   CHECK(ortho_index_of(single, 42) == 0);
   CHECK(ortho_index_of(single, 0) == 0);
 }
@@ -580,7 +580,7 @@ TEST_CASE("ortho: the line lookup finds every value it was given") {
 // --- The escape off a box ---
 
 TEST_CASE("ortho: escaping leaves a point that is not strictly inside alone") {
-  std::vector<scav_rect> const boxes{ rect(10, 10, 20, 20) };
+  Vector<scav_rect> const boxes{ rect(10, 10, 20, 20) };
   CHECK((ortho_escape(pt(0, 0), pt(100, 0), boxes) == pt(0, 0)));
   CHECK((ortho_escape(pt(50, 50), pt(0, 0), boxes) == pt(50, 50)));
   // A point on a border counts as outside.
@@ -593,7 +593,7 @@ TEST_CASE("ortho: escaping leaves a point that is not strictly inside alone") {
 }
 
 TEST_CASE("ortho: escaping moves to the border nearest where the route is going") {
-  std::vector<scav_rect> const boxes{ rect(10, 10, 20, 20) };
+  Vector<scav_rect> const boxes{ rect(10, 10, 20, 20) };
   scav_point const centre{ pt(20, 20) };
 
   CHECK((ortho_escape(centre, pt(100, 20), boxes) == pt(30, 20)));   // right
@@ -608,7 +608,7 @@ TEST_CASE("ortho: escaping moves to the border nearest where the route is going"
 
 TEST_CASE("ortho: an elongated box is left through a long face, not an end") {
   // The exit axis is the one the target lies farther outside the box on.
-  std::vector<scav_rect> const bar{ rect(0, 0, 4, 60) };  // 4x60, ends at top and bottom
+  Vector<scav_rect> const bar{ rect(0, 0, 4, 60) };  // 4x60, ends at top and bottom
   scav_point const centre{ pt(2, 30) };
 
   // Targets far to either side, level with the bar near an end, exit by a long face.
@@ -621,7 +621,7 @@ TEST_CASE("ortho: an elongated box is left through a long face, not an end") {
   CHECK((ortho_escape(centre, pt(2, 500), bar) == pt(2, 60)));
 
   // The same on the transposed 60x4 bar.
-  std::vector<scav_rect> const flat{ rect(0, 0, 60, 4) };
+  Vector<scav_rect> const flat{ rect(0, 0, 60, 4) };
   CHECK((ortho_escape(pt(30, 2), pt(1, 500), flat) == pt(30, 4)));
   CHECK((ortho_escape(pt(30, 2), pt(1, -500), flat) == pt(30, 0)));
   CHECK((ortho_escape(pt(30, 2), pt(-500, 2), flat) == pt(0, 2)));
@@ -659,12 +659,12 @@ TEST_CASE("ortho: an attachment is held off the corners of its own face") {
 
 TEST_CASE("ortho: two ends wanting one seat are pushed apart along the face") {
   // A net each way between two boxes, starting on the same point of each face.
-  std::vector<scav_rect> const boxes{ rect(0, 0, 100, 100), rect(400, 0, 100, 100) };
-  std::vector<RouteNet> const nets{
+  Vector<scav_rect> const boxes{ rect(0, 0, 100, 100), rect(400, 0, 100, 100) };
+  Vector<RouteNet> const nets{
     { .src = pt(50, 50), .dst = pt(450, 50), .src_obstacle = 0, .dst_obstacle = 1 },
     { .src = pt(450, 50), .dst = pt(50, 50), .src_obstacle = 1, .dst_obstacle = 0 },
   };
-  std::vector<scav_point> at{ pt(100, 50), pt(400, 50), pt(400, 50), pt(100, 50) };
+  Vector<scav_point> at{ pt(100, 50), pt(400, 50), pt(400, 50), pt(100, 50) };
   ortho_spread_attachments(boxes, seats_of(nets), aims(nets), 8, 0, at);
 
   // Seats are ordered by the net's direction through the face: net 0 runs + and takes
@@ -677,16 +677,16 @@ TEST_CASE("ortho: two ends wanting one seat are pushed apart along the face") {
 
 TEST_CASE("ortho: a seat the spread lands on a third is separated in its turn") {
   // The spread sweeps until no seat moves.
-  std::vector<scav_rect> const boxes{ rect(0, 0, 100, 300) };
-  std::vector<RouteNet> const nets{
+  Vector<scav_rect> const boxes{ rect(0, 0, 100, 300) };
+  Vector<RouteNet> const nets{
     { .src = pt(50, 150), .dst = pt(900, 10), .src_obstacle = 0 },
     { .src = pt(900, 20), .dst = pt(50, 150), .dst_obstacle = 0 },
     { .src = pt(50, 150), .dst = pt(900, 30), .src_obstacle = 0 },
   };
   // A mixed pair on the right face at 150 and a departure at 154, where the first
   // sweep moves the pair's arrival.
-  std::vector<scav_point> at{ pt(100, 150), pt(900, 10),  pt(900, 20),
-                              pt(100, 150), pt(100, 154), pt(900, 30) };
+  Vector<scav_point> at{ pt(100, 150), pt(900, 10),  pt(900, 20),
+                         pt(100, 150), pt(100, 154), pt(900, 30) };
   ortho_spread_attachments(boxes, seats_of(nets), aims(nets), 8, 0, at);
   CHECK((at[0] == pt(100, 146)));  // the pair's departure, one half-step down
   CHECK((at[3] == pt(100, 158)));  // its arrival, moved on again by the second sweep
@@ -695,75 +695,76 @@ TEST_CASE("ortho: a seat the spread lands on a third is separated in its turn") 
 
 TEST_CASE("ortho: an inscribed glyph's mixed midpoint is moved onto another face") {
   // Of the mixed pair, the end aimed farther outside the face's span moves.
-  std::vector<scav_rect> const boxes{ rect(0, 0, 100, 100) };
-  std::vector<uint8_t> const inscribed{ 1 };
-  std::vector<RouteNet> const nets{
+  Vector<scav_rect> const boxes{ rect(0, 0, 100, 100) };
+  Vector<uint8_t> const inscribed{ 1 };
+  Vector<RouteNet> const nets{
     { .src = pt(900, 50), .dst = pt(50, 50), .dst_obstacle = 0 },
     { .src = pt(50, 50), .dst = pt(900, 900), .src_obstacle = 0 },
   };
-  std::vector<scav_point> toward{ pt(50, 50), pt(900, 50), pt(900, 900), pt(50, 50) };
-  std::vector<scav_point> at{ pt(900, 50), pt(100, 50), pt(100, 50), pt(900, 900) };
+  Vector<scav_point> toward{ pt(50, 50), pt(900, 50), pt(900, 900), pt(50, 50) };
+  Vector<scav_point> at{ pt(900, 50), pt(100, 50), pt(100, 50), pt(900, 900) };
   ortho_reface_attachments(boxes, seats_of(nets, inscribed), toward, at);
   CHECK((at[1] == pt(100, 50)));  // the arrival keeps the face it was aimed along
   CHECK((at[2] == pt(50, 100)));  // and the departure takes the midpoint below it
 
   // Seats already on different faces, or on a non-inscribed box, stay where they are.
-  std::vector<scav_point> apart{ pt(900, 50), pt(100, 50), pt(0, 50), pt(900, 900) };
+  Vector<scav_point> apart{ pt(900, 50), pt(100, 50), pt(0, 50), pt(900, 900) };
   ortho_reface_attachments(boxes, seats_of(nets, inscribed), toward, apart);
   CHECK((apart[1] == pt(100, 50)));
   CHECK((apart[2] == pt(0, 50)));
-  std::vector<scav_point> filled{ pt(900, 50), pt(100, 50), pt(100, 50), pt(900, 900) };
+  Vector<scav_point> filled{ pt(900, 50), pt(100, 50), pt(100, 50), pt(900, 900) };
   ortho_reface_attachments(boxes, seats_of(nets), toward, filled);
   CHECK((filled[2] == pt(100, 50)));
 }
 
 TEST_CASE("ortho: a mark with no free face keeps both ends on the one it has") {
   // An arrival on each face; the departure on the right midpoint stays stacked there.
-  std::vector<scav_rect> const boxes{ rect(0, 0, 100, 100) };
-  std::vector<uint8_t> const inscribed{ 1 };
-  std::vector<RouteNet> const nets{
+  Vector<scav_rect> const boxes{ rect(0, 0, 100, 100) };
+  Vector<uint8_t> const inscribed{ 1 };
+  Vector<RouteNet> const nets{
     { .src = pt(900, 50), .dst = pt(50, 50), .dst_obstacle = 0 },
     { .src = pt(-900, 50), .dst = pt(50, 50), .dst_obstacle = 0 },
     { .src = pt(50, -900), .dst = pt(50, 50), .dst_obstacle = 0 },
     { .src = pt(50, 900), .dst = pt(50, 50), .dst_obstacle = 0 },
     { .src = pt(50, 50), .dst = pt(900, 900), .src_obstacle = 0 },
   };
-  std::vector<scav_point> toward{ pt(50, 50),   pt(900, 50),  pt(50, 50), pt(-900, 50),
-                                  pt(50, 50),   pt(50, -900), pt(50, 50), pt(50, 900),
-                                  pt(900, 900), pt(50, 50) };
-  std::vector<scav_point> at{ pt(900, 50),  pt(100, 50), pt(-900, 50), pt(0, 50),
-                              pt(50, -900), pt(50, 0),   pt(50, 900),  pt(50, 100),
-                              pt(100, 50),  pt(900, 900) };
+  Vector<scav_point> toward{ pt(50, 50),   pt(900, 50),  pt(50, 50), pt(-900, 50),
+                             pt(50, 50),   pt(50, -900), pt(50, 50), pt(50, 900),
+                             pt(900, 900), pt(50, 50) };
+  Vector<scav_point> at{
+    pt(900, 50), pt(100, 50), pt(-900, 50), pt(0, 50),   pt(50, -900),
+    pt(50, 0),   pt(50, 900), pt(50, 100),  pt(100, 50), pt(900, 900)
+  };
   ortho_reface_attachments(boxes, seats_of(nets, inscribed), toward, at);
   CHECK((at[1] == pt(100, 50)));
   CHECK((at[8] == pt(100, 50)));
 }
 
 TEST_CASE("ortho: two parallel faces with room in common seat one coordinate") {
-  std::vector<scav_rect> const boxes{ rect(0, 0, 100, 300), rect(400, 100, 100, 300) };
-  std::vector<RouteNet> const nets{
+  Vector<scav_rect> const boxes{ rect(0, 0, 100, 300), rect(400, 100, 100, 300) };
+  Vector<RouteNet> const nets{
     { .src = pt(50, 150), .dst = pt(450, 250), .src_obstacle = 0, .dst_obstacle = 1 },
   };
-  std::vector<scav_point> at{ pt(100, 250), pt(400, 150) };
+  Vector<scav_point> at{ pt(100, 250), pt(400, 150) };
   ortho_align_attachments(nets, boxes, seats_of(nets), at);
   CHECK((at[0] == pt(100, 200)));  // halfway between the two centres, 150 and 250
   CHECK((at[1] == pt(400, 200)));
 
   // The reverse net aligns on the same coordinate.
-  std::vector<RouteNet> const back{
+  Vector<RouteNet> const back{
     { .src = pt(450, 250), .dst = pt(50, 150), .src_obstacle = 1, .dst_obstacle = 0 },
   };
-  std::vector<scav_point> other{ pt(400, 150), pt(100, 250) };
+  Vector<scav_point> other{ pt(400, 150), pt(100, 250) };
   ortho_align_attachments(back, boxes, seats_of(back), other);
   CHECK((other[0] == pt(400, 200)));
   CHECK((other[1] == pt(100, 200)));
 
   // Clamped into what the shorter face can seat when the midpoint is off it.
-  std::vector<scav_rect> const stubby{ rect(0, 0, 100, 300), rect(400, 200, 100, 40) };
-  std::vector<RouteNet> const short_face{
+  Vector<scav_rect> const stubby{ rect(0, 0, 100, 300), rect(400, 200, 100, 40) };
+  Vector<RouteNet> const short_face{
     { .src = pt(50, 150), .dst = pt(450, 220), .src_obstacle = 0, .dst_obstacle = 1 },
   };
-  std::vector<scav_point> reach{ pt(100, 220), pt(400, 208) };
+  Vector<scav_point> reach{ pt(100, 220), pt(400, 208) };
   ortho_align_attachments(short_face, stubby, seats_of(short_face), reach);
   // Halfway is 185; with no corner array a face seats to one unit of each end.
   CHECK((reach[0] == pt(100, 201)));
@@ -772,24 +773,23 @@ TEST_CASE("ortho: two parallel faces with room in common seat one coordinate") {
 
 TEST_CASE("ortho: faces the clearance would keep apart still align on their arcs") {
   // Faces overlapping by 163, one more than twice the 81 arc.
-  std::vector<scav_rect> const near{ rect(0, 0, 400, 653), rect(1000, 490, 400, 653) };
-  std::vector<int32_t> const arcs{ 81, 81 };
-  std::vector<RouteNet> const across{
+  Vector<scav_rect> const near{ rect(0, 0, 400, 653), rect(1000, 490, 400, 653) };
+  Vector<int32_t> const arcs{ 81, 81 };
+  Vector<RouteNet> const across{
     { .src = pt(400, 326), .dst = pt(1000, 816), .src_obstacle = 0, .dst_obstacle = 1 },
   };
-  std::vector<scav_point> at{ pt(400, 557), pt(1000, 586) };
+  Vector<scav_point> at{ pt(400, 557), pt(1000, 586) };
   ortho_align_attachments(across, near, seats_of(across, {}, arcs), at);
   CHECK(at[0].y == at[1].y);
   // Inside both arcs: 81 off each face's ends is 81..572 and 571..1062.
   CHECK(at[0].y == 571);
 
   // Arc-inset runs that miss, 81..572 and 681..1172, leave both seats unchanged.
-  std::vector<scav_rect> const far_apart{ rect(0, 0, 400, 653),
-                                          rect(1000, 600, 400, 653) };
-  std::vector<RouteNet> const missed{
+  Vector<scav_rect> const far_apart{ rect(0, 0, 400, 653), rect(1000, 600, 400, 653) };
+  Vector<RouteNet> const missed{
     { .src = pt(400, 326), .dst = pt(1000, 926), .src_obstacle = 0, .dst_obstacle = 1 },
   };
-  std::vector<scav_point> ends{ pt(400, 572), pt(1000, 681) };
+  Vector<scav_point> ends{ pt(400, 572), pt(1000, 681) };
   ortho_align_attachments(missed, far_apart, seats_of(missed, {}, arcs), ends);
   CHECK(ends[0].y == 572);  // its own face's last seat, and no nearer
   CHECK(ends[1].y == 681);
@@ -797,54 +797,54 @@ TEST_CASE("ortho: faces the clearance would keep apart still align on their arcs
 
 TEST_CASE("ortho: faces with no run in common, or a corridor, are left alone") {
   // Perpendicular faces, disjoint faces, and a net with a waypoint keep their seats.
-  std::vector<scav_rect> const apart{ rect(0, 0, 100, 100), rect(400, 900, 100, 100) };
-  std::vector<RouteNet> const nets{
+  Vector<scav_rect> const apart{ rect(0, 0, 100, 100), rect(400, 900, 100, 100) };
+  Vector<RouteNet> const nets{
     { .src = pt(50, 50), .dst = pt(450, 950), .src_obstacle = 0, .dst_obstacle = 1 },
   };
-  std::vector<scav_point> perpendicular{ pt(50, 100), pt(400, 950) };
+  Vector<scav_point> perpendicular{ pt(50, 100), pt(400, 950) };
   ortho_align_attachments(nets, apart, seats_of(nets), perpendicular);
   CHECK((perpendicular[0] == pt(50, 100)));
   CHECK((perpendicular[1] == pt(400, 950)));
 
-  std::vector<scav_point> disjoint{ pt(100, 92), pt(400, 908) };
+  Vector<scav_point> disjoint{ pt(100, 92), pt(400, 908) };
   ortho_align_attachments(nets, apart, seats_of(nets), disjoint);
   CHECK((disjoint[0] == pt(100, 92)));
   CHECK((disjoint[1] == pt(400, 908)));
 
-  std::vector<RouteNet> const threaded{ { .src = pt(50, 50),
-                                          .dst = pt(450, 950),
-                                          .src_obstacle = 0,
-                                          .dst_obstacle = 1,
-                                          .waypoint_off = 0,
-                                          .waypoint_len = 1 } };
-  std::vector<scav_point> corridor{ pt(100, 50), pt(400, 950) };
+  Vector<RouteNet> const threaded{ { .src = pt(50, 50),
+                                     .dst = pt(450, 950),
+                                     .src_obstacle = 0,
+                                     .dst_obstacle = 1,
+                                     .waypoint_off = 0,
+                                     .waypoint_len = 1 } };
+  Vector<scav_point> corridor{ pt(100, 50), pt(400, 950) };
   ortho_align_attachments(threaded, apart, seats_of(threaded), corridor);
   CHECK((corridor[0] == pt(100, 50)));
   CHECK((corridor[1] == pt(400, 950)));
 
   // An inscribed end keeps its midpoint seat and the other end aligns to it.
-  std::vector<scav_rect> const boxes{ rect(0, 0, 100, 300), rect(400, 100, 100, 300) };
-  std::vector<uint8_t> const inscribed{ 1, 0 };
-  std::vector<RouteNet> const from_glyph{
+  Vector<scav_rect> const boxes{ rect(0, 0, 100, 300), rect(400, 100, 100, 300) };
+  Vector<uint8_t> const inscribed{ 1, 0 };
+  Vector<RouteNet> const from_glyph{
     { .src = pt(50, 150), .dst = pt(450, 250), .src_obstacle = 0, .dst_obstacle = 1 },
   };
-  std::vector<scav_point> glyph{ pt(100, 150), pt(400, 290) };
+  Vector<scav_point> glyph{ pt(100, 150), pt(400, 290) };
   ortho_align_attachments(from_glyph, boxes, seats_of(from_glyph, inscribed), glyph);
   CHECK((glyph[0] == pt(100, 150)));
   CHECK((glyph[1] == pt(400, 150)));
 }
 
 TEST_CASE("ortho: two boxes' seats a hair apart are pushed to the pitch") {
-  std::vector<scav_rect> const boxes{ rect(0, 0, 100, 400),
-                                      rect(0, 500, 100, 400),
-                                      rect(900, 0, 100, 400),
-                                      rect(900, 500, 100, 400) };
-  std::vector<RouteNet> const nets{
+  Vector<scav_rect> const boxes{ rect(0, 0, 100, 400),
+                                 rect(0, 500, 100, 400),
+                                 rect(900, 0, 100, 400),
+                                 rect(900, 500, 100, 400) };
+  Vector<RouteNet> const nets{
     { .src = pt(50, 200), .dst = pt(950, 200), .src_obstacle = 0, .dst_obstacle = 2 },
     { .src = pt(50, 700), .dst = pt(950, 700), .src_obstacle = 1, .dst_obstacle = 3 },
   };
   // Two straight runs the length of the frame, 120 apart against a 200 pitch.
-  std::vector<scav_point> at{ pt(100, 390), pt(900, 390), pt(100, 510), pt(900, 510) };
+  Vector<scav_point> at{ pt(100, 390), pt(900, 390), pt(100, 510), pt(900, 510) };
   ortho_separate_attachments(nets, boxes, seats_of(nets), aims(nets), 8, 200, at);
   CHECK((at[2].y - at[0].y) >= 200);
   // Each run is still one straight line.
@@ -858,56 +858,56 @@ TEST_CASE("ortho: two boxes' seats a hair apart are pushed to the pitch") {
 }
 
 TEST_CASE("ortho: a pair already a pitch apart, or crossing, is left alone") {
-  std::vector<scav_rect> const boxes{ rect(0, 0, 100, 400),
-                                      rect(0, 500, 100, 400),
-                                      rect(900, 0, 100, 900) };
-  std::vector<RouteNet> const nets{
+  Vector<scav_rect> const boxes{ rect(0, 0, 100, 400),
+                                 rect(0, 500, 100, 400),
+                                 rect(900, 0, 100, 900) };
+  Vector<RouteNet> const nets{
     { .src = pt(50, 200), .dst = pt(950, 450), .src_obstacle = 0, .dst_obstacle = 2 },
     { .src = pt(50, 700), .dst = pt(950, 450), .src_obstacle = 1, .dst_obstacle = 2 },
   };
-  std::vector<scav_point> far{ pt(100, 100), pt(900, 100), pt(100, 800), pt(900, 800) };
-  std::vector<scav_point> const held{ far };
+  Vector<scav_point> far{ pt(100, 100), pt(900, 100), pt(100, 800), pt(900, 800) };
+  Vector<scav_point> const held{ far };
   ortho_separate_attachments(nets, boxes, seats_of(nets), aims(nets), 8, 200, far);
   for (uint32_t i = 0; i < far.size(); ++i) { CHECK((far[i] == held[i])); }
 
   // Legs with disjoint x spans, 100..300 and 700..900, keep their seats.
-  std::vector<scav_rect> const apart{ rect(0, 0, 100, 400),
-                                      rect(600, 0, 100, 400),
-                                      rect(300, 0, 100, 400),
-                                      rect(900, 0, 100, 400) };
-  std::vector<RouteNet> const past{
+  Vector<scav_rect> const apart{ rect(0, 0, 100, 400),
+                                 rect(600, 0, 100, 400),
+                                 rect(300, 0, 100, 400),
+                                 rect(900, 0, 100, 400) };
+  Vector<RouteNet> const past{
     { .src = pt(50, 200), .dst = pt(350, 200), .src_obstacle = 0, .dst_obstacle = 2 },
     { .src = pt(650, 210), .dst = pt(950, 210), .src_obstacle = 1, .dst_obstacle = 3 },
   };
-  std::vector<scav_point> ends{ pt(100, 200), pt(300, 200), pt(700, 210), pt(900, 210) };
-  std::vector<scav_point> const kept{ ends };
+  Vector<scav_point> ends{ pt(100, 200), pt(300, 200), pt(700, 210), pt(900, 210) };
+  Vector<scav_point> const kept{ ends };
   ortho_separate_attachments(past, apart, seats_of(past), aims(past), 8, 200, ends);
   for (uint32_t i = 0; i < ends.size(); ++i) { CHECK((ends[i] == kept[i])); }
 }
 
 TEST_CASE("ortho: a fan's far ends are not pushed apart") {
-  std::vector<scav_rect> const boxes{ rect(0, 0, 100, 400),
-                                      rect(0, 500, 100, 400),
-                                      rect(900, 0, 100, 900) };
-  std::vector<RouteNet> const fan{
+  Vector<scav_rect> const boxes{ rect(0, 0, 100, 400),
+                                 rect(0, 500, 100, 400),
+                                 rect(900, 0, 100, 900) };
+  Vector<RouteNet> const fan{
     { .src = pt(50, 200), .dst = pt(950, 450), .src_obstacle = 0, .dst_obstacle = 2 },
     { .src = pt(50, 700), .dst = pt(950, 450), .src_obstacle = 1, .dst_obstacle = 2 },
   };
-  std::vector<scav_point> at{ pt(100, 390), pt(900, 390), pt(100, 510), pt(900, 510) };
-  std::vector<scav_point> const held{ at };
+  Vector<scav_point> at{ pt(100, 390), pt(900, 390), pt(100, 510), pt(900, 510) };
+  Vector<scav_point> const held{ at };
   // Both arrivals are at box 2; the legs run 120 apart against a 200 pitch.
   ortho_separate_attachments(fan, boxes, seats_of(fan), aims(fan), 8, 200, at);
   for (uint32_t i = 0; i < at.size(); ++i) { CHECK((at[i] == held[i])); }
 }
 
 TEST_CASE("ortho: separating a pair at one box moves whole nets, not seats") {
-  std::vector<scav_rect> const boxes{ rect(0, 0, 100, 400), rect(900, 0, 100, 400) };
-  std::vector<RouteNet> const nets{
+  Vector<scav_rect> const boxes{ rect(0, 0, 100, 400), rect(900, 0, 100, 400) };
+  Vector<RouteNet> const nets{
     { .src = pt(50, 200), .dst = pt(950, 200), .src_obstacle = 0, .dst_obstacle = 1 },
     { .src = pt(950, 200), .dst = pt(50, 200), .src_obstacle = 1, .dst_obstacle = 0 },
   };
   // Both nets start straight on y = 200, stacked at both boxes.
-  std::vector<scav_point> at{ pt(100, 200), pt(900, 200), pt(900, 200), pt(100, 200) };
+  Vector<scav_point> at{ pt(100, 200), pt(900, 200), pt(900, 200), pt(100, 200) };
   ortho_spread_attachments(boxes, seats_of(nets), aims(nets), 8, 0, at);
 
   // Separated at both boxes.
@@ -925,18 +925,18 @@ TEST_CASE("ortho: separating a pair at one box moves whole nets, not seats") {
 
 TEST_CASE("ortho: the separation never seats an end on another seat of its face") {
   // Net 1's arrival on box 0, pushed down off net 2's leg, would land on net 0's.
-  std::vector<scav_rect> const boxes{ rect(1000, 0, 400, 400),
-                                      rect(0, 80, 100, 40),
-                                      rect(-200, 90, 100, 40),
-                                      rect(200, 110, 100, 100),
-                                      rect(700, 110, 100, 100) };
-  std::vector<RouteNet> const nets{
+  Vector<scav_rect> const boxes{ rect(1000, 0, 400, 400),
+                                 rect(0, 80, 100, 40),
+                                 rect(-200, 90, 100, 40),
+                                 rect(200, 110, 100, 100),
+                                 rect(700, 110, 100, 100) };
+  Vector<RouteNet> const nets{
     { .src = pt(50, 100), .dst = pt(1200, 200), .src_obstacle = 1, .dst_obstacle = 0 },
     { .src = pt(-150, 110), .dst = pt(1200, 200), .src_obstacle = 2, .dst_obstacle = 0 },
     { .src = pt(250, 160), .dst = pt(750, 160), .src_obstacle = 3, .dst_obstacle = 4 },
   };
-  std::vector<scav_point> at{ pt(100, 100),  pt(1000, 100), pt(-100, 110),
-                              pt(1000, 110), pt(300, 120),  pt(700, 120) };
+  Vector<scav_point> at{ pt(100, 100),  pt(1000, 100), pt(-100, 110),
+                         pt(1000, 110), pt(300, 120),  pt(700, 120) };
   ortho_separate_attachments(nets, boxes, seats_of(nets), aims(nets), 8, 30, at);
   CHECK((at[1] == pt(1000, 100)));
   CHECK(at[3].y != at[1].y);
@@ -944,13 +944,13 @@ TEST_CASE("ortho: the separation never seats an end on another seat of its face"
 
 TEST_CASE("ortho: a far end that cannot follow keeps its seat and takes the bend") {
   // Box 1 is an inscribed glyph: one seat per face.
-  std::vector<scav_rect> const boxes{ rect(0, 0, 100, 400), rect(900, 0, 100, 400) };
-  std::vector<uint8_t> const glyph{ 0, 1 };
-  std::vector<RouteNet> const nets{
+  Vector<scav_rect> const boxes{ rect(0, 0, 100, 400), rect(900, 0, 100, 400) };
+  Vector<uint8_t> const glyph{ 0, 1 };
+  Vector<RouteNet> const nets{
     { .src = pt(50, 200), .dst = pt(950, 200), .src_obstacle = 0, .dst_obstacle = 1 },
     { .src = pt(950, 200), .dst = pt(50, 200), .src_obstacle = 1, .dst_obstacle = 0 },
   };
-  std::vector<scav_point> at{ pt(100, 200), pt(900, 200), pt(900, 200), pt(100, 200) };
+  Vector<scav_point> at{ pt(100, 200), pt(900, 200), pt(900, 200), pt(100, 200) };
   ortho_spread_attachments(boxes, seats_of(nets, glyph), aims(nets), 8, 0, at);
 
   CHECK(at[0].y != at[3].y);  // separated at the box that can
@@ -961,14 +961,14 @@ TEST_CASE("ortho: a far end that cannot follow keeps its seat and takes the bend
 TEST_CASE(
     "ortho: arrivals sharing a seat part in the order their aims lie along the face") {
   // Three arrivals on one point of the left face take a seat each, a step apart about it.
-  std::vector<scav_rect> const boxes{ rect(0, 0, 100, 100), rect(-1000, 0, 100, 100) };
-  std::vector<RouteNet> const nets{
+  Vector<scav_rect> const boxes{ rect(0, 0, 100, 100), rect(-1000, 0, 100, 100) };
+  Vector<RouteNet> const nets{
     { .src = pt(-900, 10), .dst = pt(50, 50), .src_obstacle = 1, .dst_obstacle = 0 },
     { .src = pt(-900, 90), .dst = pt(50, 50), .src_obstacle = 1, .dst_obstacle = 0 },
     { .src = pt(-900, 50), .dst = pt(50, 50), .src_obstacle = 1, .dst_obstacle = 0 },
   };
-  std::vector<scav_point> at{ pt(-900, 10), pt(0, 50),    pt(-900, 90),
-                              pt(0, 50),    pt(-900, 50), pt(0, 50) };
+  Vector<scav_point> at{ pt(-900, 10), pt(0, 50),    pt(-900, 90),
+                         pt(0, 50),    pt(-900, 50), pt(0, 50) };
   ortho_spread_attachments(boxes, seats_of(nets), aims(nets), 8, 0, at);
   CHECK((at[1] == pt(0, 42)));
   CHECK((at[5] == pt(0, 50)));
@@ -978,14 +978,14 @@ TEST_CASE(
 TEST_CASE(
     "ortho: arrivals clamped to a face's end part inward, the nearest aim outermost") {
   // `fanin`'s shape: three aims below and left of the bottom face, one above the next.
-  std::vector<scav_rect> const boxes{ rect(1000, 0, 400, 200) };
-  std::vector<RouteNet> const nets{
+  Vector<scav_rect> const boxes{ rect(1000, 0, 400, 200) };
+  Vector<RouteNet> const nets{
     { .src = pt(500, 700), .dst = pt(1200, 100), .dst_obstacle = 0 },
     { .src = pt(500, 300), .dst = pt(1200, 100), .dst_obstacle = 0 },
     { .src = pt(500, 500), .dst = pt(1200, 100), .dst_obstacle = 0 },
   };
-  std::vector<scav_point> at{ pt(500, 700),  pt(1008, 200), pt(500, 300),
-                              pt(1008, 200), pt(500, 500),  pt(1008, 200) };
+  Vector<scav_point> at{ pt(500, 700),  pt(1008, 200), pt(500, 300),
+                         pt(1008, 200), pt(500, 500),  pt(1008, 200) };
   ortho_spread_attachments(boxes, seats_of(nets), aims(nets), 8, 0, at);
   CHECK((at[3] == pt(1008, 200)));  // the nearest aim
   CHECK((at[5] == pt(1016, 200)));
@@ -996,13 +996,13 @@ namespace {
 
 // Routes laid end to end, one per net, as `RouteOutput` keeps them.
 struct Laid {
-  std::vector<scav_point> points;
-  std::vector<scav_span> spans;
+  Vector<scav_point> points;
+  Vector<scav_span> spans;
 };
 
-Laid laid_of(std::vector<std::vector<scav_point>> const &routes) {
+Laid laid_of(std::vector<Vector<scav_point>> const &routes) {
   Laid l;
-  for (std::vector<scav_point> const &route : routes) {
+  for (Vector<scav_point> const &route : routes) {
     l.spans.push_back({ .off = static_cast<uint32_t>(l.points.size()),
                         .len = static_cast<uint32_t>(route.size()) });
     for (scav_point const &at : route) { l.points.push_back(at); }
@@ -1011,13 +1011,13 @@ Laid laid_of(std::vector<std::vector<scav_point>> const &routes) {
 }
 
 // `n` nets arriving at box 0 from no box.
-std::vector<RouteNet> into_box(uint32_t n) {
-  std::vector<RouteNet> nets(n);
+Vector<RouteNet> into_box(uint32_t n) {
+  Vector<RouteNet> nets(n);
   for (RouteNet &net : nets) { net.dst_obstacle = 0; }
   return nets;
 }
 
-std::vector<scav_point> route_of(Laid const &l, uint32_t net) {
+Vector<scav_point> route_of(Laid const &l, uint32_t net) {
   scav_span const s{ l.spans[net] };
   return { l.points.begin() + s.off, l.points.begin() + s.off + s.len };
 }
@@ -1028,10 +1028,10 @@ TEST_CASE(
     "ortho: arrivals from below take seats outward in the order their last bends near") {
   // Both come up from below to the left face; net 1's leg up, nearer the face, crosses
   // net 0's run in until net 1 takes the seat further down.
-  std::vector<scav_rect> const boxes{ rect(1000, 0, 400, 400) };
+  Vector<scav_rect> const boxes{ rect(1000, 0, 400, 400) };
   Laid l{ laid_of({ { pt(800, 900), pt(800, 220), pt(1000, 220) },
                     { pt(900, 800), pt(900, 180), pt(1000, 180) } }) };
-  std::vector<scav_point> at{ pt(800, 900), pt(1000, 220), pt(900, 800), pt(1000, 180) };
+  Vector<scav_point> at{ pt(800, 900), pt(1000, 220), pt(900, 800), pt(1000, 180) };
   ortho_order_arrivals(into_box(2), boxes, 8, { 1, 3, INVALID }, l.points, l.spans, at);
   check_points(route_of(l, 0), { pt(800, 900), pt(800, 180), pt(1000, 180) });
   check_points(route_of(l, 1), { pt(900, 800), pt(900, 220), pt(1000, 220) });
@@ -1041,12 +1041,12 @@ TEST_CASE(
 
 TEST_CASE("ortho: arrivals from both sides part to their own sides, nearest outermost") {
   // Nets 0 and 1 come down from above, net 2 up from below; seats in the wrong order.
-  std::vector<scav_rect> const boxes{ rect(1000, 0, 400, 400) };
+  Vector<scav_rect> const boxes{ rect(1000, 0, 400, 400) };
   Laid l{ laid_of({ { pt(700, -500), pt(700, 220), pt(1000, 220) },
                     { pt(900, -400), pt(900, 180), pt(1000, 180) },
                     { pt(800, 900), pt(800, 140), pt(1000, 140) } }) };
-  std::vector<scav_point> at{ pt(700, -500), pt(1000, 220), pt(900, -400),
-                              pt(1000, 180), pt(800, 900),  pt(1000, 140) };
+  Vector<scav_point> at{ pt(700, -500), pt(1000, 220), pt(900, -400),
+                         pt(1000, 180), pt(800, 900),  pt(1000, 140) };
   ortho_order_arrivals(into_box(3), boxes, 8, { 1, 3, 5, INVALID }, l.points, l.spans, at);
   CHECK(at[3].y == 140);  // from above, nearest: the top seat
   CHECK(at[1].y == 180);
@@ -1058,22 +1058,22 @@ TEST_CASE(
     "ortho: of two legs down one line, the one led in from the face side seats first") {
   // Both come down x=900 to the left face; net 1's leg in starts nearer the face, so
   // nudging puts its leg nearer, and it takes the upper seat or crosses net 0's run in.
-  std::vector<scav_rect> const boxes{ rect(1000, 0, 400, 400) };
+  Vector<scav_rect> const boxes{ rect(1000, 0, 400, 400) };
   Laid l{ laid_of({ { pt(500, -600), pt(900, -600), pt(900, 150), pt(1000, 150) },
                     { pt(980, -300), pt(900, -300), pt(900, 250), pt(1000, 250) } }) };
-  std::vector<scav_point> at{ pt(500, -600), pt(1000, 150), pt(980, -300), pt(1000, 250) };
+  Vector<scav_point> at{ pt(500, -600), pt(1000, 150), pt(980, -300), pt(1000, 250) };
   ortho_order_arrivals(into_box(2), boxes, 8, { 1, 3, INVALID }, l.points, l.spans, at);
   CHECK(at[3].y == 150);
   CHECK(at[1].y == 250);
 }
 
 TEST_CASE("ortho: a straight arrival keeps its seat and the others order around it") {
-  std::vector<scav_rect> const boxes{ rect(1000, 0, 400, 400) };
+  Vector<scav_rect> const boxes{ rect(1000, 0, 400, 400) };
   Laid l{ laid_of({ { pt(900, 800), pt(900, 180), pt(1000, 180) },
                     { pt(200, 200), pt(1000, 200) },
                     { pt(800, 900), pt(800, 220), pt(1000, 220) } }) };
-  std::vector<scav_point> at{ pt(900, 800),  pt(1000, 180), pt(200, 200),
-                              pt(1000, 200), pt(800, 900),  pt(1000, 220) };
+  Vector<scav_point> at{ pt(900, 800),  pt(1000, 180), pt(200, 200),
+                         pt(1000, 200), pt(800, 900),  pt(1000, 220) };
   ortho_order_arrivals(into_box(3), boxes, 8, { 1, 3, 5, INVALID }, l.points, l.spans, at);
   CHECK(at[3].y == 200);
   CHECK(at[1].y == 220);
@@ -1082,11 +1082,11 @@ TEST_CASE("ortho: a straight arrival keeps its seat and the others order around 
 
 TEST_CASE("ortho: a group is left whole when one reseated leg would enter a box") {
   // Net 0's run in at y=180 would pass through the box at x=850.
-  std::vector<scav_rect> const boxes{ rect(1000, 0, 400, 400), rect(850, 170, 30, 20) };
+  Vector<scav_rect> const boxes{ rect(1000, 0, 400, 400), rect(850, 170, 30, 20) };
   Laid l{ laid_of({ { pt(800, 900), pt(800, 220), pt(1000, 220) },
                     { pt(900, 800), pt(900, 180), pt(1000, 180) } }) };
   Laid const before{ l };
-  std::vector<scav_point> at{ pt(800, 900), pt(1000, 220), pt(900, 800), pt(1000, 180) };
+  Vector<scav_point> at{ pt(800, 900), pt(1000, 220), pt(900, 800), pt(1000, 180) };
   ortho_order_arrivals(into_box(2), boxes, 8, { 1, 3, INVALID }, l.points, l.spans, at);
   check_points(l.points, before.points);
   CHECK((at[1] == pt(1000, 220)));
@@ -1094,34 +1094,34 @@ TEST_CASE("ortho: a group is left whole when one reseated leg would enter a box"
 
 TEST_CASE("ortho: a group is left whole when one reseated leg would run along a box") {
   // Net 0's run in at y=180 would lie on the top edge of the box at x=850.
-  std::vector<scav_rect> const boxes{ rect(1000, 0, 400, 400), rect(850, 180, 30, 20) };
+  Vector<scav_rect> const boxes{ rect(1000, 0, 400, 400), rect(850, 180, 30, 20) };
   Laid l{ laid_of({ { pt(800, 900), pt(800, 220), pt(1000, 220) },
                     { pt(900, 800), pt(900, 180), pt(1000, 180) } }) };
   Laid const before{ l };
-  std::vector<scav_point> at{ pt(800, 900), pt(1000, 220), pt(900, 800), pt(1000, 180) };
+  Vector<scav_point> at{ pt(800, 900), pt(1000, 220), pt(900, 800), pt(1000, 180) };
   ortho_order_arrivals(into_box(2), boxes, 8, { 1, 3, INVALID }, l.points, l.spans, at);
   check_points(l.points, before.points);
 }
 
 TEST_CASE("ortho: a group is left whole when a first leg would end inside its ring") {
   // Net 1 leaves the top of box 1 at y=230; reseated at y=220 its first leg is 10 long.
-  std::vector<scav_rect> const boxes{ rect(1000, 0, 400, 400), rect(860, 230, 80, 40) };
-  std::vector<RouteNet> nets{ into_box(2) };
+  Vector<scav_rect> const boxes{ rect(1000, 0, 400, 400), rect(860, 230, 80, 40) };
+  Vector<RouteNet> nets{ into_box(2) };
   nets[1].src_obstacle = 1;
   Laid l{ laid_of({ { pt(800, 900), pt(800, 220), pt(1000, 220) },
                     { pt(900, 230), pt(900, 180), pt(1000, 180) } }) };
   Laid const before{ l };
-  std::vector<scav_point> at{ pt(800, 900), pt(1000, 220), pt(900, 230), pt(1000, 180) };
+  Vector<scav_point> at{ pt(800, 900), pt(1000, 220), pt(900, 230), pt(1000, 180) };
   ortho_order_arrivals(nets, boxes, 16, { 1, 3, INVALID }, l.points, l.spans, at);
   check_points(l.points, before.points);
 }
 
 TEST_CASE("ortho: arrivals that crowd a short face part evenly between its insets") {
   // Twelve arrivals at one point of a 100-long face with 20-unit corners: 60 to seat in.
-  std::vector<scav_rect> const boxes{ rect(0, 0, 100, 100), rect(-1000, -500, 100, 1100) };
-  std::vector<int32_t> const corner{ 20, 0 };
-  std::vector<RouteNet> nets;
-  std::vector<scav_point> at;
+  Vector<scav_rect> const boxes{ rect(0, 0, 100, 100), rect(-1000, -500, 100, 1100) };
+  Vector<int32_t> const corner{ 20, 0 };
+  Vector<RouteNet> nets;
+  Vector<scav_point> at;
   nets.reserve(12);
   at.reserve(24);
   for (int32_t k = 0; k < 12; ++k) {
@@ -1133,7 +1133,7 @@ TEST_CASE("ortho: arrivals that crowd a short face part evenly between its inset
     at.push_back(pt(0, 50));
   }
   ortho_spread_attachments(boxes, seats_of(nets, {}, corner), aims(nets), 8, 24, at);
-  std::vector<int32_t> ys(12);
+  Vector<int32_t> ys(12);
   for (uint32_t k = 0; k < 12; ++k) { ys[k] = at[(2 * k) + 1].y; }
   std::ranges::sort(ys);
   CHECK(ys.front() >= 20);
@@ -1145,12 +1145,12 @@ TEST_CASE("ortho: arrivals that crowd a short face part evenly between its inset
 }
 
 TEST_CASE("ortho: departures sharing a seat keep it") {
-  std::vector<scav_rect> const boxes{ rect(0, 0, 100, 100) };
-  std::vector<RouteNet> const nets{
+  Vector<scav_rect> const boxes{ rect(0, 0, 100, 100) };
+  Vector<RouteNet> const nets{
     { .src = pt(50, 50), .dst = pt(-900, 10), .src_obstacle = 0 },
     { .src = pt(50, 50), .dst = pt(-900, 90), .src_obstacle = 0 },
   };
-  std::vector<scav_point> at{ pt(0, 50), pt(-900, 10), pt(0, 50), pt(-900, 90) };
+  Vector<scav_point> at{ pt(0, 50), pt(-900, 10), pt(0, 50), pt(-900, 90) };
   ortho_spread_attachments(boxes, seats_of(nets), aims(nets), 8, 0, at);
   CHECK((at[0] == pt(0, 50)));
   CHECK((at[2] == pt(0, 50)));
@@ -1158,9 +1158,8 @@ TEST_CASE("ortho: departures sharing a seat keep it") {
 
 TEST_CASE("ortho: a leaning net seats its leg at the lower end of the shared run") {
   // Two boxes stacked, the lower one starting under the upper.
-  std::vector<scav_rect> const boxes{ rect(800, 0, 1204, 653),
-                                      rect(800, 1306, 1434, 653) };
-  std::vector<int32_t> const arcs{ 81, 81 };
+  Vector<scav_rect> const boxes{ rect(800, 0, 1204, 653), rect(800, 1306, 1434, 653) };
+  Vector<int32_t> const arcs{ 81, 81 };
   RouteNet const down{ .src = pt(1402, 326),
                        .dst = pt(1517, 1632),
                        .src_obstacle = 0,
@@ -1168,7 +1167,7 @@ TEST_CASE("ortho: a leaning net seats its leg at the lower end of the shared run
   RouteNet leaning{ down };
   leaning.lean = 1;
   auto const seat = [&](RouteNet const &net) {
-    std::vector<scav_point> at{ pt(1402, 653), pt(1517, 1306) };
+    Vector<scav_point> at{ pt(1402, 653), pt(1517, 1306) };
     ortho_align_attachments({ net }, boxes, seats_of({ net }, {}, arcs), at);
     CHECK(at[0].x == at[1].x);
     return at[0].x;
@@ -1182,7 +1181,7 @@ TEST_CASE("ortho: a leaning net seats its leg at the lower end of the shared run
                .src_obstacle = 1,
                .dst_obstacle = 0 };
   up.lean = 1;
-  std::vector<scav_point> back{ pt(1517, 1306), pt(1402, 653) };
+  Vector<scav_point> back{ pt(1517, 1306), pt(1402, 653) };
   ortho_align_attachments({ up }, boxes, seats_of({ up }, {}, arcs), back);
   CHECK((back[0] == pt(881, 1306)));
   CHECK((back[1] == pt(881, 653)));
@@ -1191,39 +1190,36 @@ TEST_CASE("ortho: a leaning net seats its leg at the lower end of the shared run
 TEST_CASE("ortho: a port's level seat keeps its point and a pseudostate's moves off it") {
   // A port's arrival and an initial dot's share one point of box 0's leading face.
   // The port's own point is the net's `src`; its seat is its aim.
-  std::vector<scav_rect> const boxes{ rect(1000, 0, 400, 400), rect(500, 150, 100, 100) };
-  std::vector<uint8_t> const glyph{ 0, 1 };
+  Vector<scav_rect> const boxes{ rect(1000, 0, 400, 400), rect(500, 150, 100, 100) };
+  Vector<uint8_t> const glyph{ 0, 1 };
   auto const spread = [&](int32_t port_y) {
-    std::vector<RouteNet> const nets{
+    Vector<RouteNet> const nets{
       { .src = pt(0, port_y), .dst = pt(1200, 200), .dst_obstacle = 0 },
       { .src = pt(550, 200), .dst = pt(1200, 200), .src_obstacle = 1, .dst_obstacle = 0 },
     };
-    std::vector<scav_point> at{ pt(1200, 200),
-                                pt(1000, 200),
-                                pt(600, 200),
-                                pt(1000, 200) };
+    Vector<scav_point> at{ pt(1200, 200), pt(1000, 200), pt(600, 200), pt(1000, 200) };
     ortho_spread_attachments(boxes, seats_of(nets, glyph), aims(nets), 8, 100, at);
     return at;
   };
-  std::vector<scav_point> const level{ spread(200) };
+  Vector<scav_point> const level{ spread(200) };
   CHECK((level[1] == pt(1000, 200)));
   CHECK((level[3] == pt(1000, 100)));  // a whole pitch off the port
   CHECK((level[2] == pt(600, 200)));
 
   // A port not level with its seat parts from the pseudostate, the port's lower aim low.
-  std::vector<scav_point> const off{ spread(50) };
+  Vector<scav_point> const off{ spread(50) };
   CHECK((off[1] == pt(1000, 150)));
   CHECK((off[3] == pt(1000, 250)));
 }
 
 TEST_CASE("ortho: a departure on a port's level seat takes the whole step") {
   // An arrival from a port and a departure to a box share a point.
-  std::vector<scav_rect> const boxes{ rect(1000, 0, 400, 400), rect(0, 600, 400, 400) };
-  std::vector<RouteNet> const nets{
+  Vector<scav_rect> const boxes{ rect(1000, 0, 400, 400), rect(0, 600, 400, 400) };
+  Vector<RouteNet> const nets{
     { .src = pt(-500, 200), .dst = pt(1200, 200), .dst_obstacle = 0 },
     { .src = pt(1200, 200), .dst = pt(200, 800), .src_obstacle = 0, .dst_obstacle = 1 },
   };
-  std::vector<scav_point> at{ pt(1200, 200), pt(1000, 200), pt(1000, 200), pt(200, 600) };
+  Vector<scav_point> at{ pt(1200, 200), pt(1000, 200), pt(1000, 200), pt(200, 600) };
   ortho_spread_attachments(boxes, seats_of(nets), aims(nets), 8, 100, at);
   CHECK((at[1] == pt(1000, 200)));
   CHECK((at[2] == pt(1000, 300)));
@@ -1233,12 +1229,12 @@ TEST_CASE(
     "ortho: a step past the face's corner off a port's level seat goes the other way") {
   // The shared point is the left face's last seat; the departure's own direction
   // clamps back onto it.
-  std::vector<scav_rect> const boxes{ rect(1000, 0, 400, 400) };
-  std::vector<RouteNet> const nets{
+  Vector<scav_rect> const boxes{ rect(1000, 0, 400, 400) };
+  Vector<RouteNet> const nets{
     { .src = pt(-500, 392), .dst = pt(1200, 200), .dst_obstacle = 0 },
     { .src = pt(1200, 200), .dst = pt(-500, 900), .src_obstacle = 0 },
   };
-  std::vector<scav_point> at{ pt(-500, 392), pt(1000, 392), pt(1000, 392), pt(-500, 900) };
+  Vector<scav_point> at{ pt(-500, 392), pt(1000, 392), pt(1000, 392), pt(-500, 900) };
   ortho_spread_attachments(boxes, seats_of(nets), aims(nets), 8, 100, at);
   CHECK((at[1] == pt(1000, 392)));
   CHECK((at[2] == pt(1000, 292)));
@@ -1246,17 +1242,14 @@ TEST_CASE(
 
 TEST_CASE("ortho: a port's seat is level with its waypoint, not with the port past it") {
   // An arrival whose leg runs from a waypoint shares a seat with a departure.
-  std::vector<scav_rect> const boxes{ rect(1000, 0, 400, 400) };
+  Vector<scav_rect> const boxes{ rect(1000, 0, 400, 400) };
   auto const spread = [&](scav_point port, scav_point waypoint) {
-    std::vector<RouteNet> const nets{
+    Vector<RouteNet> const nets{
       { .src = port, .dst = pt(1200, 200), .dst_obstacle = 0, .waypoint_len = 1 },
       { .src = pt(1200, 200), .dst = pt(-500, 900), .src_obstacle = 0 },
     };
-    std::vector<scav_point> const toward{ waypoint,
-                                          waypoint,
-                                          pt(-500, 900),
-                                          pt(1200, 200) };
-    std::vector<scav_point> at{ waypoint, pt(1000, 200), pt(1000, 200), pt(-500, 900) };
+    Vector<scav_point> const toward{ waypoint, waypoint, pt(-500, 900), pt(1200, 200) };
+    Vector<scav_point> at{ waypoint, pt(1000, 200), pt(1000, 200), pt(-500, 900) };
     ortho_spread_attachments(boxes, seats_of(nets), toward, 8, 100, at);
     return std::pair<int32_t, int32_t>{ at[1].y, at[2].y };
   };
@@ -1269,14 +1262,14 @@ TEST_CASE("ortho: a port's seat is level with its waypoint, not with the port pa
 TEST_CASE("ortho: a port's level leg stays and the leg beside it takes the shortfall") {
   // A port's leg into box 0 at y = 390, and a leg from box 2 to box 1 at y = 510.
   // The port end sits at its aim, box 0's centre.
-  std::vector<scav_rect> const boxes{ rect(900, 0, 100, 400),
-                                      rect(1100, 500, 100, 400),
-                                      rect(0, 500, 100, 400) };
-  std::vector<RouteNet> const nets{
+  Vector<scav_rect> const boxes{ rect(900, 0, 100, 400),
+                                 rect(1100, 500, 100, 400),
+                                 rect(0, 500, 100, 400) };
+  Vector<RouteNet> const nets{
     { .src = pt(-500, 390), .dst = pt(950, 200), .dst_obstacle = 0 },
     { .src = pt(50, 700), .dst = pt(1150, 700), .src_obstacle = 2, .dst_obstacle = 1 },
   };
-  std::vector<scav_point> at{ pt(950, 200), pt(900, 390), pt(100, 510), pt(1100, 510) };
+  Vector<scav_point> at{ pt(950, 200), pt(900, 390), pt(100, 510), pt(1100, 510) };
   ortho_separate_attachments(nets, boxes, seats_of(nets), aims(nets), 8, 200, at);
   CHECK(at[1].y == 390);
   CHECK(at[3].y == 590);
@@ -1285,35 +1278,35 @@ TEST_CASE("ortho: a port's level leg stays and the leg beside it takes the short
 
 TEST_CASE("ortho: a port's leg is level with its waypoint, not with the port past it") {
   // The same two legs, the port's run from a waypoint.
-  std::vector<scav_rect> const boxes{ rect(900, 0, 100, 400),
-                                      rect(1100, 500, 100, 400),
-                                      rect(0, 500, 100, 400) };
+  Vector<scav_rect> const boxes{ rect(900, 0, 100, 400),
+                                 rect(1100, 500, 100, 400),
+                                 rect(0, 500, 100, 400) };
   auto const separate = [&](scav_point port, scav_point waypoint) {
-    std::vector<RouteNet> const nets{
+    Vector<RouteNet> const nets{
       { .src = port, .dst = pt(950, 200), .dst_obstacle = 0, .waypoint_len = 1 },
       { .src = pt(50, 700), .dst = pt(1150, 700), .src_obstacle = 2, .dst_obstacle = 1 },
     };
-    std::vector<scav_point> const toward{ waypoint, waypoint, pt(1150, 700), pt(50, 700) };
-    std::vector<scav_point> at{ waypoint, pt(900, 390), pt(100, 510), pt(1100, 510) };
+    Vector<scav_point> const toward{ waypoint, waypoint, pt(1150, 700), pt(50, 700) };
+    Vector<scav_point> at{ waypoint, pt(900, 390), pt(100, 510), pt(1100, 510) };
     ortho_separate_attachments(nets, boxes, seats_of(nets), toward, 8, 200, at);
     return at;
   };
-  std::vector<scav_point> const level{ separate(pt(-500, 100), pt(500, 390)) };
+  Vector<scav_point> const level{ separate(pt(-500, 100), pt(500, 390)) };
   CHECK(level[1].y == 390);
   CHECK(level[3].y == 590);
-  std::vector<scav_point> const bent{ separate(pt(-500, 390), pt(500, 100)) };
+  Vector<scav_point> const bent{ separate(pt(-500, 390), pt(500, 100)) };
   CHECK(bent[1].y < 390);  // takes its half of the shortfall
 }
 
 TEST_CASE("ortho: a face with no room for the seats leaves them where they are") {
   // A 4-wide box `h` high: a departure and an arrival on one point of its right face.
   auto const run = [](int32_t h, int32_t clear) {
-    std::vector<scav_rect> const boxes{ rect(0, 0, 4, h) };
-    std::vector<RouteNet> const nets{
+    Vector<scav_rect> const boxes{ rect(0, 0, 4, h) };
+    Vector<RouteNet> const nets{
       { .src = pt(2, h / 2), .dst = pt(900, 0), .src_obstacle = 0 },
       { .src = pt(900, h), .dst = pt(2, h / 2), .dst_obstacle = 0 },
     };
-    std::vector<scav_point> at{ pt(4, h / 2), pt(900, 0), pt(900, h), pt(4, h / 2) };
+    Vector<scav_point> at{ pt(4, h / 2), pt(900, 0), pt(900, h), pt(4, h / 2) };
     ortho_spread_attachments(boxes, seats_of(nets), aims(nets), clear, 0, at);
     return std::pair<scav_point, scav_point>{ at[0], at[3] };
   };
@@ -1333,8 +1326,8 @@ TEST_CASE("ortho: seats are spread a pitch apart where the face has room for one
   // Two facing boxes and a net each way, aligned on one line at both, with the
   // clearance far below the pitch.
   auto const run = [](int32_t h, int32_t pitch) {
-    std::vector<scav_rect> const boxes{ rect(0, 0, 100, h), rect(900, 0, 100, h) };
-    std::vector<RouteNet> const nets{
+    Vector<scav_rect> const boxes{ rect(0, 0, 100, h), rect(900, 0, 100, h) };
+    Vector<RouteNet> const nets{
       { .src = pt(50, h / 2),
         .dst = pt(950, h / 2),
         .src_obstacle = 0,
@@ -1344,10 +1337,10 @@ TEST_CASE("ortho: seats are spread a pitch apart where the face has room for one
         .src_obstacle = 1,
         .dst_obstacle = 0 },
     };
-    std::vector<scav_point> at{ pt(100, h / 2),
-                                pt(900, h / 2),
-                                pt(900, h / 2),
-                                pt(100, h / 2) };
+    Vector<scav_point> at{ pt(100, h / 2),
+                           pt(900, h / 2),
+                           pt(900, h / 2),
+                           pt(100, h / 2) };
     ortho_spread_attachments(boxes, seats_of(nets), aims(nets), 8, pitch, at);
     CHECK(at[0].y == at[1].y);
     CHECK(at[2].y == at[3].y);
@@ -1370,55 +1363,56 @@ TEST_CASE("ortho: seats are spread a pitch apart where the face has room for one
 
 TEST_CASE("ortho: seats do not depend on the order the nets arrive in") {
   // Two leaving and two arriving on one seat, handed over in both orders.
-  std::vector<scav_rect> const boxes{ rect(0, 0, 100, 100) };
+  Vector<scav_rect> const boxes{ rect(0, 0, 100, 100) };
   auto const run = [&boxes](bool flip) {
-    std::vector<RouteNet> nets{
+    Vector<RouteNet> nets{
       { .src = pt(50, 50), .dst = pt(900, 10), .src_obstacle = 0 },
       { .src = pt(900, 20), .dst = pt(50, 50), .dst_obstacle = 0 },
       { .src = pt(50, 50), .dst = pt(900, 30), .src_obstacle = 0 },
       { .src = pt(900, 40), .dst = pt(50, 50), .dst_obstacle = 0 },
     };
-    std::vector<scav_point> at{ pt(100, 50), pt(900, 10), pt(900, 20), pt(100, 50),
-                                pt(100, 50), pt(900, 30), pt(900, 40), pt(100, 50) };
+    Vector<scav_point> at{ pt(100, 50), pt(900, 10), pt(900, 20), pt(100, 50),
+                           pt(100, 50), pt(900, 30), pt(900, 40), pt(100, 50) };
     if (flip) {
-      std::vector<RouteNet> const rev{ nets[3], nets[2], nets[1], nets[0] };
+      Vector<RouteNet> const rev{ nets[3], nets[2], nets[1], nets[0] };
       nets = rev;
-      std::vector<scav_point> const back{ at[6], at[7], at[4], at[5],
-                                          at[2], at[3], at[0], at[1] };
+      Vector<scav_point> const back{
+        at[6], at[7], at[4], at[5], at[2], at[3], at[0], at[1]
+      };
       at = back;
       ortho_spread_attachments(boxes, seats_of(nets), aims(nets), 8, 0, at);
-      return std::vector<int32_t>{ at[6].y, at[5].y, at[2].y, at[1].y };
+      return Vector<int32_t>{ at[6].y, at[5].y, at[2].y, at[1].y };
     }
     ortho_spread_attachments(boxes, seats_of(nets), aims(nets), 8, 0, at);
-    return std::vector<int32_t>{ at[0].y, at[3].y, at[4].y, at[7].y };
+    return Vector<int32_t>{ at[0].y, at[3].y, at[4].y, at[7].y };
   };
-  std::vector<int32_t> const a{ run(false) };
-  std::vector<int32_t> const b{ run(true) };
+  Vector<int32_t> const a{ run(false) };
+  Vector<int32_t> const b{ run(true) };
   CHECK(a == b);
   // Both departures share one seat; the arrivals take one each above it.
-  CHECK(a == std::vector<int32_t>{ 46, 54, 46, 62 });
+  CHECK(a == Vector<int32_t>{ 46, 54, 46, 62 });
 }
 
 TEST_CASE("ortho: an equidistant escape is decided by the fixed side order") {
   // Point and target both at the centre: the tie goes to x, then to the left border.
-  std::vector<scav_rect> const boxes{ rect(0, 0, 20, 20) };
+  Vector<scav_rect> const boxes{ rect(0, 0, 20, 20) };
   CHECK((ortho_escape(pt(10, 10), pt(10, 10), boxes) == pt(0, 10)));
 
   // Of two boxes containing the point, the innermost wins in either list order.
-  std::vector<scav_rect> const nested{ rect(5, 5, 10, 10), rect(0, 0, 20, 20) };
+  Vector<scav_rect> const nested{ rect(5, 5, 10, 10), rect(0, 0, 20, 20) };
   CHECK((ortho_escape(pt(10, 10), pt(100, 10), nested) == pt(15, 10)));
-  std::vector<scav_rect> const other_way{ rect(0, 0, 20, 20), rect(5, 5, 10, 10) };
+  Vector<scav_rect> const other_way{ rect(0, 0, 20, 20), rect(5, 5, 10, 10) };
   CHECK((ortho_escape(pt(10, 10), pt(100, 10), other_way) == pt(15, 10)));
 
   // Equal areas: the first in list order wins.
-  std::vector<scav_rect> const twins{ rect(0, 0, 20, 20), rect(2, 2, 20, 20) };
+  Vector<scav_rect> const twins{ rect(0, 0, 20, 20), rect(2, 2, 20, 20) };
   CHECK((ortho_escape(pt(10, 10), pt(100, 10), twins) == pt(20, 10)));
 }
 
 // --- Polyline simplification ---
 
 TEST_CASE("ortho: simplifying drops repeats and the middle of collinear runs") {
-  std::vector<scav_point> to;
+  Vector<scav_point> to;
 
   ortho_simplify({}, to);
   CHECK(to.empty());
@@ -1466,7 +1460,7 @@ TEST_CASE("ortho: simplifying drops repeats and the middle of collinear runs") {
 TEST_CASE("ortho: simplifying across two calls closes the seam between them") {
   // Appending a second hop drops the shared anchor when the route runs straight
   // through it.
-  std::vector<scav_point> to;
+  Vector<scav_point> to;
   ortho_simplify({ pt(0, 0), pt(5, 0) }, to);
   ortho_simplify({ pt(5, 0), pt(9, 0) }, to);
   check_points(to, { pt(0, 0), pt(9, 0) });
@@ -1540,7 +1534,7 @@ TEST_CASE("ortho: a box with no width or no height still names a face") {
 }
 
 TEST_CASE("ortho: the box under a point is the innermost whose border holds it") {
-  std::vector<scav_rect> const boxes{ rect(0, 0, 100, 100), rect(0, 20, 40, 40) };
+  Vector<scav_rect> const boxes{ rect(0, 0, 100, 100), rect(0, 20, 40, 40) };
   // On both boxes' left edges: the smaller wins.
   CHECK(ortho_box_at(pt(0, 30), boxes) == 1);
   // On the outer box only.
@@ -1556,7 +1550,7 @@ TEST_CASE("ortho: the box under a point is the innermost whose border holds it")
   CHECK(ortho_box_at(pt(0, 0), {}) == INVALID);
 
   // Equal areas: the first in list order wins.
-  std::vector<scav_rect> const twins{ rect(0, 0, 10, 10), rect(0, 0, 10, 10) };
+  Vector<scav_rect> const twins{ rect(0, 0, 10, 10), rect(0, 0, 10, 10) };
   CHECK(ortho_box_at(pt(0, 5), twins) == 0);
 }
 
@@ -1581,8 +1575,8 @@ TEST_CASE("ortho: the ring point is one clearance straight out of the border") {
 TEST_CASE("ortho: an empty region is two lines each way and fully open") {
   OrthoGrid g;
   REQUIRE(ortho_grid(rect(0, 0, 100, 80), {}, {}, 8, g));
-  CHECK(g.xs == std::vector<int32_t>{ 0, 100 });
-  CHECK(g.ys == std::vector<int32_t>{ 0, 80 });
+  CHECK(g.xs == Vector<int32_t>{ 0, 100 });
+  CHECK(g.ys == Vector<int32_t>{ 0, 80 });
   CHECK(g.nx() == 2);
   CHECK(g.ny() == 2);
   for (uint8_t const at : g.pass_h) { CHECK(at != 0); }
@@ -1592,13 +1586,13 @@ TEST_CASE("ortho: an empty region is two lines each way and fully open") {
 TEST_CASE("ortho: the grid carries clearance lanes and never a box's own border") {
   OrthoGrid g;
   REQUIRE(ortho_grid(rect(0, 0, 100, 100), { rect(40, 40, 20, 20) }, {}, 5, g));
-  CHECK(g.xs == std::vector<int32_t>{ 0, 35, 65, 100 });
-  CHECK(g.ys == std::vector<int32_t>{ 0, 35, 65, 100 });
+  CHECK(g.xs == Vector<int32_t>{ 0, 35, 65, 100 });
+  CHECK(g.ys == Vector<int32_t>{ 0, 35, 65, 100 });
 
   // Zero clearance lays the lanes on the box borders.
   OrthoGrid tight;
   REQUIRE(ortho_grid(rect(0, 0, 100, 100), { rect(40, 40, 20, 20) }, {}, 0, tight));
-  CHECK(tight.xs == std::vector<int32_t>{ 0, 40, 60, 100 });
+  CHECK(tight.xs == Vector<int32_t>{ 0, 40, 60, 100 });
 }
 
 TEST_CASE("ortho: lines outside the region are dropped, so no route can leave") {
@@ -1612,15 +1606,15 @@ TEST_CASE("ortho: lines outside the region are dropped, so no route can leave") 
   // An anchor outside the region contributes no line either.
   OrthoGrid h;
   REQUIRE(ortho_grid(rect(0, 0, 100, 100), {}, { pt(-5, 50), pt(50, 500) }, 5, h));
-  CHECK(h.xs == std::vector<int32_t>{ 0, 100 });
-  CHECK(h.ys == std::vector<int32_t>{ 0, 100 });
+  CHECK(h.xs == Vector<int32_t>{ 0, 100 });
+  CHECK(h.ys == Vector<int32_t>{ 0, 100 });
 }
 
 TEST_CASE("ortho: anchors inside the region each get their own pair of lines") {
   OrthoGrid g;
   REQUIRE(ortho_grid(rect(0, 0, 100, 100), {}, { pt(17, 3), pt(17, 90) }, 5, g));
-  CHECK(g.xs == std::vector<int32_t>{ 0, 17, 100 });
-  CHECK(g.ys == std::vector<int32_t>{ 0, 3, 90, 100 });
+  CHECK(g.xs == Vector<int32_t>{ 0, 17, 100 });
+  CHECK(g.ys == Vector<int32_t>{ 0, 3, 90, 100 });
 }
 
 TEST_CASE("ortho: passability is closed exactly where a lane cuts a box") {
@@ -1645,7 +1639,7 @@ TEST_CASE("ortho: passability is closed exactly where a lane cuts a box") {
 
 TEST_CASE("ortho: a grid past the vertex budget is refused rather than built") {
   // 400 small boxes on strides of 13 and 11 lay enough lines to pass the cap.
-  std::vector<scav_rect> many;
+  Vector<scav_rect> many;
   many.reserve(400);
   for (int32_t i = 0; i < 400; ++i) { many.push_back(rect(i * 13, i * 11, 5, 7)); }
   OrthoGrid g;
@@ -1661,16 +1655,16 @@ TEST_CASE("ortho: a search to where it already is returns that one vertex") {
   OrthoGrid g;
   REQUIRE(ortho_grid(rect(0, 0, 100, 100), {}, {}, 5, g));
   OrthoScratch s;
-  std::vector<uint32_t> path;
+  Vector<uint32_t> path;
   REQUIRE(ortho_search(g, 0, 0, 100, s, path));
-  CHECK(path == std::vector<uint32_t>{ 0 });
+  CHECK(path == Vector<uint32_t>{ 0 });
 }
 
 TEST_CASE("ortho: an out-of-range endpoint is refused, not clamped") {
   OrthoGrid g;
   REQUIRE(ortho_grid(rect(0, 0, 100, 100), {}, {}, 5, g));
   OrthoScratch s;
-  std::vector<uint32_t> path{ 7 };
+  Vector<uint32_t> path{ 7 };
   CHECK(!ortho_search(g, 0, 999, 100, s, path));
   CHECK(path.empty());
   CHECK(!ortho_search(g, 999, 0, 100, s, path));
@@ -1682,11 +1676,11 @@ TEST_CASE("ortho: an open grid gives the straight run and no turn") {
   REQUIRE(ortho_grid(rect(0, 0, 100, 100), {}, {}, 5, g));
   REQUIRE(g.nx() == 2);
   OrthoScratch s;
-  std::vector<uint32_t> path;
+  Vector<uint32_t> path;
 
   // (0,0) to (100,0): one horizontal edge.
   REQUIRE(ortho_search(g, g.vertex(0, 0), g.vertex(1, 0), 500, s, path));
-  CHECK(path == std::vector<uint32_t>{ g.vertex(0, 0), g.vertex(1, 0) });
+  CHECK(path == Vector<uint32_t>{ g.vertex(0, 0), g.vertex(1, 0) });
   CHECK(path_cost(g, path, 500) == 100);
 
   // The diagonal corner costs both runs plus one bend.
@@ -1701,7 +1695,7 @@ TEST_CASE("ortho: a wall with no gap is unreachable rather than crossed") {
   // The obstacle spans past the region's top and bottom.
   REQUIRE(ortho_grid(rect(0, 0, 100, 100), { rect(40, -10, 20, 120) }, {}, 0, g));
   OrthoScratch s;
-  std::vector<uint32_t> path;
+  Vector<uint32_t> path;
   uint32_t const from{ g.vertex(0, ortho_index_of(g.ys, 50)) };
   uint32_t const to{ g.vertex(g.nx() - 1, ortho_index_of(g.ys, 50)) };
   // Every y line crosses the wall's interior: the two sides are disconnected.
@@ -1714,7 +1708,7 @@ TEST_CASE("ortho: a box in the way is routed around, never through") {
   OrthoGrid g;
   REQUIRE(ortho_grid(rect(0, 0, 100, 100), { box }, { pt(0, 50), pt(100, 50) }, 0, g));
   OrthoScratch s;
-  std::vector<uint32_t> path;
+  Vector<uint32_t> path;
   uint32_t const from{ g.vertex(ortho_index_of(g.xs, 0), ortho_index_of(g.ys, 50)) };
   uint32_t const to{ g.vertex(ortho_index_of(g.xs, 100), ortho_index_of(g.ys, 50)) };
   REQUIRE(ortho_search(g, from, to, 100, s, path));
@@ -1730,7 +1724,7 @@ TEST_CASE("ortho: the search returns an optimal path, checked against Dijkstra")
   for (uint32_t seed = 0; seed < 60; ++seed) {
     CAPTURE(seed);
     uint32_t const r{ mix(seed) };
-    std::vector<scav_rect> boxes;
+    Vector<scav_rect> boxes;
     uint32_t const count{ 1 + (r % 4U) };
     for (uint32_t i = 0; i < count; ++i) {
       uint32_t const q{ mix((seed * 31U) + i) };
@@ -1758,7 +1752,7 @@ TEST_CASE("ortho: the search returns an optimal path, checked against Dijkstra")
           auto const [from_plane, to_plane] = planes;
           CAPTURE(from_plane);
           CAPTURE(to_plane);
-          std::vector<uint32_t> path;
+          Vector<uint32_t> path;
           OrthoScratch s;
           bool const found{
             ortho_search(g, from, to, bend, s, path, from_plane, to_plane)
@@ -1801,10 +1795,10 @@ TEST_CASE("ortho: the search returns the reference search's path node for node" 
       uint32_t const to_plane{ ((trial % 3U) != 2U) ? INVALID : plane_of(pair % 3) };
       CAPTURE(from_plane);
       CAPTURE(to_plane);
-      std::vector<uint32_t> want;
-      std::vector<uint32_t> got;
+      Vector<uint32_t> want;
+      Vector<uint32_t> got;
       OrthoScratch fresh;
-      std::vector<uint32_t> alone;
+      Vector<uint32_t> alone;
       bool const a{
         reference
             .search(g, from, to, bend, ORTHO_EXPANSION_BUDGET, want, from_plane, to_plane)
@@ -1843,8 +1837,8 @@ TEST_CASE("ortho: the search returns the reference search's path node for node" 
   }
   for (uint32_t seed = 0; seed < 40; ++seed) {
     CAPTURE(seed);
-    std::vector<scav_rect> boxes;
-    std::vector<scav_point> anchors;
+    Vector<scav_rect> boxes;
+    Vector<scav_point> anchors;
     uint32_t const count{ 1 + (mix(seed + 77U) % 6U) };
     for (uint32_t i = 0; i < count; ++i) {
       uint32_t const q{ mix((seed * 37U) + i + 9000U) };
@@ -1874,8 +1868,8 @@ TEST_CASE("ortho: the bend penalty is what decides between two equal detours") {
   OrthoGrid g;
   REQUIRE(ortho_grid(rect(0, 0, 200, 200), { rect(50, 90, 100, 20) }, {}, 0, g));
   OrthoScratch s;
-  std::vector<uint32_t> cheap;
-  std::vector<uint32_t> dear;
+  Vector<uint32_t> cheap;
+  Vector<uint32_t> dear;
   uint32_t const from{ g.vertex(ortho_index_of(g.xs, 0), ortho_index_of(g.ys, 100)) };
   uint32_t const to{ g.vertex(ortho_index_of(g.xs, 200), ortho_index_of(g.ys, 100)) };
   REQUIRE(ortho_search(g, from, to, 0, s, cheap));
@@ -1893,17 +1887,17 @@ TEST_CASE("ortho: a lead and a stub at right angles take the one path that bends
   REQUIRE(g.nx() == 2);
   REQUIRE(g.ny() == 2);
   OrthoScratch s;
-  std::vector<uint32_t> path;
+  Vector<uint32_t> path;
   uint32_t const from{ g.vertex(0, 0) };
   uint32_t const to{ g.vertex(1, 1) };
 
   REQUIRE(ortho_search(g, from, to, 500, s, path, 0, 1));
-  CHECK(path == std::vector<uint32_t>{ from, g.vertex(1, 0), to });
+  CHECK(path == Vector<uint32_t>{ from, g.vertex(1, 0), to });
   CHECK(bends_of(g, path, 0, 1) == 1);
   CHECK(path_cost(g, path, 500, 0, 1) == 700);
 
   REQUIRE(ortho_search(g, from, to, 500, s, path, 1, 0));
-  CHECK(path == std::vector<uint32_t>{ from, g.vertex(0, 1), to });
+  CHECK(path == Vector<uint32_t>{ from, g.vertex(0, 1), to });
   CHECK(bends_of(g, path, 1, 0) == 1);
   CHECK(path_cost(g, path, 500, 1, 0) == 700);
 }
@@ -1916,7 +1910,7 @@ TEST_CASE("ortho: of equal paths, the one turning at a fixed end is taken") {
   REQUIRE(g.nx() == 3);
   REQUIRE(g.ny() == 2);
   OrthoScratch s;
-  std::vector<uint32_t> path;
+  Vector<uint32_t> path;
   REQUIRE(ortho_search(g, g.vertex(0, 0), g.vertex(2, 1), 500, s, path, 0, 0));
   CHECK(path_cost(g, path, 500, 0, 0) == 2100);
   uint32_t jog{ INVALID };
@@ -1934,7 +1928,7 @@ TEST_CASE("ortho: a lead and a stub facing on one line take the straight run") {
     OrthoGrid g;
     REQUIRE(ortho_grid(rect(0, 0, 200, 200), {}, { a, b }, 5, g));
     OrthoScratch s;
-    std::vector<uint32_t> path;
+    Vector<uint32_t> path;
     uint32_t const from{ g.vertex(ortho_index_of(g.xs, a.x), ortho_index_of(g.ys, a.y)) };
     uint32_t const to{ g.vertex(ortho_index_of(g.xs, b.x), ortho_index_of(g.ys, b.y)) };
     REQUIRE(ortho_search(g, from, to, 500, s, path, plane, plane));
@@ -1948,11 +1942,11 @@ TEST_CASE(
   OrthoGrid g;
   REQUIRE(ortho_grid(rect(0, 0, 100, 100), {}, {}, 5, g));
   OrthoScratch s;
-  std::vector<uint32_t> path;
+  Vector<uint32_t> path;
   uint32_t const from{ g.vertex(0, 0) };
   uint32_t const to{ g.vertex(1, 1) };
-  std::vector<uint32_t> const across{ from, g.vertex(1, 0), to };  // horizontal, then down
-  std::vector<uint32_t> const down{ from, g.vertex(0, 1), to };    // vertical, then across
+  Vector<uint32_t> const across{ from, g.vertex(1, 0), to };  // horizontal, then down
+  Vector<uint32_t> const down{ from, g.vertex(0, 1), to };    // vertical, then across
 
   // The start's plane is the first leg's; the goal takes the other.
   REQUIRE(ortho_search(g, from, to, 500, s, path, 0, INVALID));
@@ -1969,7 +1963,7 @@ TEST_CASE(
 
   // A one-vertex path whose ends fix different planes costs one bend.
   REQUIRE(ortho_search(g, from, from, 500, s, path, 0, 1));
-  CHECK(path == std::vector<uint32_t>{ from });
+  CHECK(path == Vector<uint32_t>{ from });
   CHECK(path_cost(g, path, 500, 0, 1) == 500);
 }
 
@@ -1979,11 +1973,10 @@ TEST_CASE("ortho: an end with no fixed plane is searched as it was") {
   OrthoGrid corner;
   REQUIRE(ortho_grid(rect(0, 0, 100, 100), {}, {}, 5, corner));
   OrthoScratch s;
-  std::vector<uint32_t> path;
+  Vector<uint32_t> path;
   REQUIRE(ortho_search(corner, corner.vertex(0, 0), corner.vertex(1, 1), 500, s, path));
-  CHECK(path == std::vector<uint32_t>{ corner.vertex(0, 0),
-                                       corner.vertex(0, 1),
-                                       corner.vertex(1, 1) });
+  CHECK(path ==
+        Vector<uint32_t>{ corner.vertex(0, 0), corner.vertex(0, 1), corner.vertex(1, 1) });
 
   OrthoGrid g;
   REQUIRE(ortho_grid(rect(0, 0, 120, 120),
@@ -1996,8 +1989,8 @@ TEST_CASE("ortho: an end with no fixed plane is searched as it was") {
     CAPTURE(trial);
     uint32_t const from{ mix(trial + 31U) % vertices };
     uint32_t const to{ mix(trial + 7777U) % vertices };
-    std::vector<uint32_t> implicit;
-    std::vector<uint32_t> named;
+    Vector<uint32_t> implicit;
+    Vector<uint32_t> named;
     bool const a{ ortho_search(g, from, to, 300, s, implicit) };
     bool const b{ ortho_search(g, from, to, 300, s, named, INVALID, INVALID) };
     CHECK(a == b);
@@ -2046,15 +2039,15 @@ TEST_CASE("ortho: no passable edge comes within a clearance of any box") {
 
 TEST_CASE("ortho: zero clearance is a real mode, and it is the re-seat") {
   // A 200 gap between boxes grown by 150 is sealed; at zero clearance it is open.
-  std::vector<scav_rect> const boxes{ rect(0, 400, 400, 200), rect(600, 400, 400, 200) };
-  std::vector<scav_point> const anchors{ pt(500, 0), pt(500, 1000) };
+  Vector<scav_rect> const boxes{ rect(0, 400, 400, 200), rect(600, 400, 400, 200) };
+  Vector<scav_point> const anchors{ pt(500, 0), pt(500, 1000) };
   OrthoGrid sealed;
   OrthoGrid open;
   REQUIRE(ortho_grid(rect(0, 0, 1000, 1000), boxes, anchors, 150, sealed));
   REQUIRE(ortho_grid(rect(0, 0, 1000, 1000), boxes, anchors, 0, open));
 
   OrthoScratch s;
-  std::vector<uint32_t> path;
+  Vector<uint32_t> path;
   auto const ends = [](OrthoGrid const &g) {
     return std::pair<uint32_t, uint32_t>{
       g.vertex(ortho_index_of(g.xs, 500), ortho_index_of(g.ys, 0)),
@@ -2078,8 +2071,8 @@ TEST_CASE("ortho: a reused scratch answers exactly as a fresh one does") {
     CAPTURE(trial);
     uint32_t const from{ mix(trial) % vertices };
     uint32_t const to{ mix(trial + 9999U) % vertices };
-    std::vector<uint32_t> reused;
-    std::vector<uint32_t> fresh;
+    Vector<uint32_t> reused;
+    Vector<uint32_t> fresh;
     OrthoScratch alone;
     bool const a{ ortho_search(g, from, to, 300, shared, reused) };
     bool const b{ ortho_search(g, from, to, 300, alone, fresh) };
@@ -2102,8 +2095,8 @@ TEST_CASE("ortho: two identical searches return identical paths") {
     uint32_t const to{ mix((trial * 5U) + 1U) % vertices };
     OrthoScratch s1;
     OrthoScratch s2;
-    std::vector<uint32_t> a;
-    std::vector<uint32_t> b;
+    Vector<uint32_t> a;
+    Vector<uint32_t> b;
     CHECK(ortho_search(g, from, to, 200, s1, a) == ortho_search(g, from, to, 200, s2, b));
     CHECK(a == b);
   }
@@ -2907,13 +2900,13 @@ TEST_CASE("ortho: a glyph inscribed in its box is met at the middle of a face") 
   CHECK((ortho_attach_box(pt(90, -900), odd, 8, true, 0) == pt(50, 0)));
 
   // The spread leaves two departures on an inscribed midpoint.
-  std::vector<scav_rect> const boxes{ dot };
-  std::vector<uint8_t> const inscribed{ 1 };
-  std::vector<RouteNet> const nets{
+  Vector<scav_rect> const boxes{ dot };
+  Vector<uint8_t> const inscribed{ 1 };
+  Vector<RouteNet> const nets{
     { .src = pt(50, 50), .dst = pt(900, 10), .src_obstacle = 0 },
     { .src = pt(50, 50), .dst = pt(900, 90), .src_obstacle = 0 },
   };
-  std::vector<scav_point> at{ pt(100, 50), pt(900, 10), pt(100, 50), pt(900, 90) };
+  Vector<scav_point> at{ pt(100, 50), pt(900, 10), pt(100, 50), pt(900, 90) };
   ortho_spread_attachments(boxes, seats_of(nets, inscribed), aims(nets), 8, 0, at);
   CHECK((at[0] == pt(100, 50)));
   CHECK((at[2] == pt(100, 50)));
@@ -3141,7 +3134,7 @@ TEST_CASE("ortho: the radix open list pops in the order one heap over every entr
   // Pushes between pops, some below the least popped `f`, and `f` crowded onto a few
   // values, `g` and node deciding often. The reference is a scan for the least.
   OrthoRadixHeap h;
-  std::vector<OrthoFrontierEntry> all;
+  Vector<OrthoFrontierEntry> all;
   uint32_t wrong{ 0 };
   uint32_t below{ 0 };
   uint32_t node{ 0 };
@@ -3204,15 +3197,15 @@ TEST_CASE("ortho: a loop's seats keep to one side of a point end on its face") {
   // a pitch clear.
   int32_t const clear{ 50 };
   int32_t const pitch{ 200 };
-  std::vector<scav_rect> const boxes{ rect(0, 0, 2000, 1000) };
-  std::vector<int32_t> const corner{ 0 };
-  std::vector<RouteNet> const nets{ { .src = pt(1000, 500),
-                                      .dst = pt(1000, 500),
-                                      .src_obstacle = 0,
-                                      .dst_obstacle = 0,
-                                      .loop = 256 },
-                                    { .src = pt(2000, 500), .dst = pt(3000, 500) } };
-  std::vector<scav_point> at{ pt(2000, 400), pt(2000, 600), pt(3000, 500), pt(2000, 500) };
+  Vector<scav_rect> const boxes{ rect(0, 0, 2000, 1000) };
+  Vector<int32_t> const corner{ 0 };
+  Vector<RouteNet> const nets{ { .src = pt(1000, 500),
+                                 .dst = pt(1000, 500),
+                                 .src_obstacle = 0,
+                                 .dst_obstacle = 0,
+                                 .loop = 256 },
+                               { .src = pt(2000, 500), .dst = pt(3000, 500) } };
+  Vector<scav_point> at{ pt(2000, 400), pt(2000, 600), pt(3000, 500), pt(2000, 500) };
   ortho_seat_loops(nets, boxes, seats_of(nets, {}, corner), {}, clear, pitch, at);
   CHECK(at[0].x == 2000);
   CHECK(at[1].x == 2000);
@@ -3228,17 +3221,17 @@ TEST_CASE("ortho: a loop's seats keep out of an occupied span on its face") {
   // The middle of the right face is occupied: both seats take one side of it.
   int32_t const clear{ 50 };
   int32_t const pitch{ 200 };
-  std::vector<scav_rect> const boxes{ rect(0, 0, 2000, 1000) };
-  std::vector<int32_t> const corner{ 0 };
-  std::vector<RouteNet> const nets{ { .src = pt(1000, 500),
-                                      .dst = pt(1000, 500),
-                                      .src_obstacle = 0,
-                                      .dst_obstacle = 0,
-                                      .loop = 256 } };
+  Vector<scav_rect> const boxes{ rect(0, 0, 2000, 1000) };
+  Vector<int32_t> const corner{ 0 };
+  Vector<RouteNet> const nets{ { .src = pt(1000, 500),
+                                 .dst = pt(1000, 500),
+                                 .src_obstacle = 0,
+                                 .dst_obstacle = 0,
+                                 .loop = 256 } };
   std::vector<OccupiedSpan> const occupied{
     { .obstacle = 0, .face = 1, .lo = 300, .len = 400 }
   };
-  std::vector<scav_point> at{ pt(2000, 400), pt(2000, 600) };
+  Vector<scav_point> at{ pt(2000, 400), pt(2000, 600) };
   ortho_seat_loops(nets, boxes, seats_of(nets, {}, corner), occupied, clear, pitch, at);
   for (uint32_t end = 0; end < 2; ++end) {
     CAPTURE(end);
@@ -3252,18 +3245,18 @@ TEST_CASE("ortho: a seat in an occupied span moves to its face's nearest free po
   // Arrivals level with the span's middle and near its low end; a face wholly occupied
   // sends its seat to another face.
   int32_t const clear{ 50 };
-  std::vector<scav_rect> const boxes{ rect(0, 0, 2000, 1000), rect(4000, 0, 1000, 1000) };
-  std::vector<int32_t> const corner{ 0, 0 };
-  std::vector<RouteNet> const nets{
+  Vector<scav_rect> const boxes{ rect(0, 0, 2000, 1000), rect(4000, 0, 1000, 1000) };
+  Vector<int32_t> const corner{ 0, 0 };
+  Vector<RouteNet> const nets{
     { .src = pt(4500, 500), .dst = pt(1000, 500), .src_obstacle = 1, .dst_obstacle = 0 },
     { .src = pt(3000, 330), .dst = pt(1000, 500), .dst_obstacle = 0 }
   };
   std::vector<OccupiedSpan> occupied{
     { .obstacle = 0, .face = 1, .lo = 300, .len = 260 }
   };
-  std::vector<scav_point> at{ pt(4000, 500), pt(2000, 500), pt(3000, 330), pt(2000, 330) };
-  std::vector<scav_point> toward{ at };
-  std::vector<int32_t> stuck;
+  Vector<scav_point> at{ pt(4000, 500), pt(2000, 500), pt(3000, 330), pt(2000, 330) };
+  Vector<scav_point> toward{ at };
+  Vector<int32_t> stuck;
   ortho_clear_occupied(nets,
                        boxes,
                        seats_of(nets, {}, corner),
@@ -3275,7 +3268,7 @@ TEST_CASE("ortho: a seat in an occupied span moves to its face's nearest free po
   CHECK((at[1] == pt(2000, 560)));  // the nearer edge
   CHECK((at[0] == pt(4000, 560)));  // its level far end follows
   CHECK((at[3] == pt(2000, 300)));
-  CHECK(stuck == std::vector<int32_t>{ 0, 0 });
+  CHECK(stuck == Vector<int32_t>{ 0, 0 });
 
   occupied = { { .obstacle = 0, .face = 1, .lo = -10, .len = 1020 } };
   at = { pt(4000, 500), pt(2000, 500), pt(3000, 330), pt(2000, 330) };
@@ -3290,28 +3283,28 @@ TEST_CASE("ortho: a seat in an occupied span moves to its face's nearest free po
                        stuck);
   CHECK(at[1].x != 2000);
   CHECK(at[3].y == 0);  // the top face, nearest its aim
-  CHECK(stuck == std::vector<int32_t>{ 0, 0 });
+  CHECK(stuck == Vector<int32_t>{ 0, 0 });
 }
 
 TEST_CASE("ortho: seats cleared from one occupied span take different free positions") {
   // Two arrivals inside the span would both move to its low edge.
-  std::vector<scav_rect> const boxes{ rect(1000, 0, 1000, 1000) };
-  std::vector<RouteNet> const nets{
+  Vector<scav_rect> const boxes{ rect(1000, 0, 1000, 1000) };
+  Vector<RouteNet> const nets{
     { .src = pt(3000, 320), .dst = pt(1500, 500), .dst_obstacle = 0 },
     { .src = pt(3000, 400), .dst = pt(1500, 500), .dst_obstacle = 0 },
   };
   std::vector<OccupiedSpan> const occupied{
     { .obstacle = 0, .face = 1, .lo = 300, .len = 260 }
   };
-  std::vector<scav_point> at{ pt(3000, 320), pt(2000, 320), pt(3000, 400), pt(2000, 400) };
-  std::vector<scav_point> const toward{ at };
-  std::vector<int32_t> stuck;
+  Vector<scav_point> at{ pt(3000, 320), pt(2000, 320), pt(3000, 400), pt(2000, 400) };
+  Vector<scav_point> const toward{ at };
+  Vector<int32_t> stuck;
   ortho_clear_occupied(nets, boxes, seats_of(nets), toward, occupied, 8, at, stuck);
   CHECK((at[1] == pt(2000, 300)));
   CHECK(at[3].x == 2000);
   CHECK(at[3].y != 300);
   CHECK(((at[3].y <= 300) || (at[3].y >= 560)));
-  CHECK(stuck == std::vector<int32_t>{ 0, 0 });
+  CHECK(stuck == Vector<int32_t>{ 0, 0 });
 }
 
 TEST_CASE(
@@ -3504,7 +3497,7 @@ TEST_CASE("ortho: an unpinned loop takes its box's least-used face, the right on
                                         pt(2500, 0),
                                         pt(2500, 5000) };
   struct Case {
-    std::vector<uint32_t> used;
+    Vector<uint32_t> used;
     uint32_t face;
   };
   std::vector<Case> const cases{ { .used = {}, .face = 1 },

@@ -105,7 +105,7 @@ struct Gap {
 };
 
 // Appends the gaps between each live state's live regions.
-void region_gaps(Chart const &c, SizedLayout const &z, std::vector<Gap> &out) {
+void region_gaps(Chart const &c, SizedLayout const &z, Vector<Gap> &out) {
   out.clear();
   for (uint32_t st = 0; st < c.states.size(); ++st) {
     Span const subs{ c.states[st].submachines };
@@ -141,8 +141,7 @@ void region_gaps(Chart const &c, SizedLayout const &z, std::vector<Gap> &out) {
         if (!clear) { continue; }
         int32_t const line{ vertical ? (gap.x + floor_div(gap.w, 2))
                                      : (gap.y + floor_div(gap.h, 2)) };
-        vec_push_back(
-            out,
+        out.push_back(
             { .low = a, .high = b, .vertical = vertical, .line = line, .rect = gap });
       }
     }
@@ -158,7 +157,7 @@ int32_t gap_face(Gap const &gap, uint32_t m) {
 
 // The gap beside region `frame` that `end` lies in, off `frame`'s face; INVALID where none
 // is.
-uint32_t gap_of(std::vector<Gap> const &gaps, uint32_t frame, scav_point end) {
+uint32_t gap_of(Vector<Gap> const &gaps, uint32_t frame, scav_point end) {
   for (uint32_t i = 0; i < gaps.size(); ++i) {
     Gap const &gap{ gaps[i] };
     if (((gap.low == frame) || (gap.high == frame)) && (end.x >= gap.rect.x) &&
@@ -176,7 +175,7 @@ uint32_t gap_of(std::vector<Gap> const &gaps, uint32_t frame, scav_point end) {
 // the face where a state of `frame` comes within `bumper` of that.
 bool gap_stub(Chart const &c,
               SizedLayout const &z,
-              std::vector<Gap> const &gaps,
+              Vector<Gap> const &gaps,
               int32_t band,
               int32_t bumper,
               uint32_t frame,
@@ -203,7 +202,7 @@ bool gap_stub(Chart const &c,
 
 // The gap a route from region `from` to region `to` crosses: the one between them, else
 // the first beside `from` on the side facing `to`; INVALID where none is.
-uint32_t gap_toward(std::vector<Gap> const &gaps,
+uint32_t gap_toward(Vector<Gap> const &gaps,
                     SizedLayout const &z,
                     uint32_t from,
                     uint32_t to) {
@@ -257,8 +256,8 @@ SCAV_COLD int32_t on_divider(Chart const &c,
                              uint32_t wanted,
                              std::array<DividerSide, 2> const &sides,
                              DividerRoom const &room,
-                             std::vector<OnDivider> &taken,
-                             std::vector<std::array<int32_t, 2>> &blocks) {
+                             Vector<OnDivider> &taken,
+                             Vector<std::array<int32_t, 2>> &blocks) {
   int32_t const lo{ gap.vertical ? gap.rect.y : gap.rect.x };
   int32_t const len{ gap.vertical ? gap.rect.h : gap.rect.w };
   int32_t const inset{ imin(room.clear, len / 2) };
@@ -267,7 +266,7 @@ SCAV_COLD int32_t on_divider(Chart const &c,
   blocks.clear();  // open intervals along the divider
   for (OnDivider const &had : taken) {
     if ((had.vertical == gap.vertical) && (had.line == gap.line)) {
-      vec_push_back(blocks, { had.along - room.clear, had.along + room.clear });
+      blocks.push_back({ had.along - room.clear, had.along + room.clear });
     }
   }
   std::array<std::array<int32_t, 2>, 4> beside{};  // off the face of a met state in reach
@@ -288,7 +287,7 @@ SCAV_COLD int32_t on_divider(Chart const &c,
       int32_t const along{ gap.vertical ? r.y : r.x };
       int32_t const extent{ gap.vertical ? r.h : r.w };
       if (st != side.meets) {
-        vec_push_back(blocks, { along, along + extent });
+        blocks.push_back({ along, along + extent });
         continue;
       }
       int32_t const in{ imin(room.clear, (extent / 2) - room.bumper) };
@@ -297,7 +296,7 @@ SCAV_COLD int32_t on_divider(Chart const &c,
     }
   }
   size_t const loose{ blocks.size() };
-  for (uint32_t k = 0; k < besides; ++k) { vec_push_back(blocks, beside[k]); }
+  for (uint32_t k = 0; k < besides; ++k) { blocks.push_back(beside[k]); }
   auto const held = [&](int32_t v) { return imin(imax(v, first), last); };
   int32_t const base{ held(want[0]) };
   int32_t at{ base };
@@ -328,7 +327,7 @@ SCAV_COLD int32_t on_divider(Chart const &c,
     found = found || (nearest >= 0);
     if (found) { break; }
   }
-  vec_push_back(taken, { .vertical = gap.vertical, .line = gap.line, .along = at });
+  taken.push_back({ .vertical = gap.vertical, .line = gap.line, .along = at });
   return at;
 }
 
@@ -351,13 +350,13 @@ void slide_slots(Chart const &c,
                  SplitGraph const &g,
                  SizedLayout const &z,
                  scav_profile const &p,
-                 std::vector<std::vector<uint32_t>> const &seg_bends,
-                 std::vector<Span> const &trans_nets,
-                 std::vector<scav_span> const &trans_slots,
-                 std::vector<uint32_t> const &slot_port,
+                 std::vector<Vector<uint32_t>> const &seg_bends,
+                 Vector<Span> const &trans_nets,
+                 Vector<scav_span> const &trans_slots,
+                 Vector<uint32_t> const &slot_port,
                  std::vector<OccupiedSpan> const &occupied,  // keyed by state
-                 std::vector<scav_port_slot> &slots,
-                 std::vector<Planned> &planned) {
+                 Vector<scav_port_slot> &slots,
+                 Vector<Planned> &planned) {
   int32_t const clear{ route_clearance(p) };
   int32_t const bumper{ box_clearance(p) };
   auto const state_of = [&](uint32_t i) { return g.ports[slot_port[i]].state.v; };
@@ -449,7 +448,7 @@ void slide_slots(Chart const &c,
   auto const slide = [&](Span nets, uint32_t i, uint32_t k, bool next) {
     Planned const &pn{ planned[nets.off + k + (next ? 1U : 0U)] };
     uint32_t const inner{ planned[nets.off + k + (next ? 0U : 1U)].frame };
-    std::vector<uint32_t> const &bends{ seg_bends[pn.seg] };
+    Vector<uint32_t> const &bends{ seg_bends[pn.seg] };
     if (bends.empty() && ((next ? pn.dst_state : pn.src_state) != INVALID)) { return; }
     scav_point to{ next ? pn.dst : pn.src };
     if (!bends.empty()) { to = z.node[next ? bends.front() : bends.back()]; }
@@ -632,19 +631,19 @@ bool same_but_shifted(RouteFrameCache const &a,
 
 // One frame's routes, written by the shard that owns the frame, read back in frame order.
 struct FrameRoutes {
-  std::vector<scav_point> points;
-  std::vector<scav_span> net_points;  // -> points, parallel to the frame's nets
-  std::vector<RouteMetrics> metrics;  // parallel to the frame's nets
+  Vector<scav_point> points;
+  Vector<scav_span> net_points;  // -> points, parallel to the frame's nets
+  Vector<RouteMetrics> metrics;  // parallel to the frame's nets
 };
 
 // Adds the turns of `fr`'s nets, planned as `nets` into `planned`, to `turned`, and moves
 // `sum`, the larger of each transition's `least` and its turns, summed.
 void count_turns(FrameRoutes const &fr,
-                 std::vector<uint32_t> const &nets,
-                 std::vector<Planned> const &planned,
+                 Vector<uint32_t> const &nets,
+                 Vector<Planned> const &planned,
                  SplitGraph const &g,
-                 std::vector<int32_t> const &least,
-                 std::vector<int32_t> &turned,
+                 Vector<int32_t> const &least,
+                 Vector<int32_t> &turned,
                  int64_t &sum) {
   for (uint32_t j = 0; (j < nets.size()) && (j < fr.net_points.size()); ++j) {
     uint32_t const t{ g.segments[planned[nets[j]].seg].trans.v };
@@ -665,14 +664,14 @@ void count_turns(FrameRoutes const &fr,
 struct FrameScratch {
   RouteInput in;
   RouteOutput ro;
-  std::vector<uint32_t> obstacle_index;  // -> in.obstacles; INVALID off this frame
-  std::vector<uint32_t> obstacle_states;
-  std::vector<scav_rect> own;
-  std::vector<scav_path_clear> keep;  // parallel to `in.nets`: each net's end clears
-  std::vector<uint8_t> in_chain;      // parallel to states; 1 on the frame owner's chain
-  std::vector<uint32_t> chain;        // -> states, the owner and its enclosing states
-  std::vector<scav_rect> walls;       // what the nudger keeps the frame's lanes out of
-  std::vector<uint64_t> pick;         // one bit per state, the gather's candidates
+  Vector<uint32_t> obstacle_index;  // -> in.obstacles; INVALID off this frame
+  Vector<uint32_t> obstacle_states;
+  Vector<scav_rect> own;
+  Vector<scav_path_clear> keep;  // parallel to `in.nets`: each net's end clears
+  Vector<uint8_t> in_chain;      // parallel to states; 1 on the frame owner's chain
+  Vector<uint32_t> chain;        // -> states, the owner and its enclosing states
+  Vector<scav_rect> walls;       // what the nudger keeps the frame's lanes out of
+  Vector<uint64_t> pick;         // one bit per state, the gather's candidates
 };
 
 FrameScratch &frame_scratch() {
@@ -689,30 +688,30 @@ struct CallScratch {
   SCAV_NOINLINE CallScratch &operator=(CallScratch &&) noexcept;
   SCAV_NOINLINE ~CallScratch();
 
-  std::array<std::vector<uint32_t>, 2> faces;
-  std::vector<uint32_t> port_seg, seg_reversed;
-  std::vector<std::vector<uint32_t>> seg_bends;
-  std::vector<uint32_t> slot_port;  // parallel to `Routes::slots`: each slot's port
-  std::vector<Planned> planned;
-  std::vector<Span> trans_nets;
+  std::array<Vector<uint32_t>, 2> faces;
+  Vector<uint32_t> port_seg, seg_reversed;
+  std::vector<Vector<uint32_t>> seg_bends;
+  Vector<uint32_t> slot_port;  // parallel to `Routes::slots`: each slot's port
+  Vector<Planned> planned;
+  Vector<Span> trans_nets;
   Vector<scav_extent> loop_label;
   Vector<scav_rect> loop_row;
-  std::vector<scav_point> loop_points;
-  std::vector<scav_span> loop_span;    // per transition, its inner loop in `loop_points`
+  Vector<scav_point> loop_points;
+  Vector<scav_span> loop_span;         // per transition, its inner loop in `loop_points`
   std::vector<OccupiedSpan> occupied;  // keyed by state
-  std::vector<std::vector<uint32_t>> by_frame;
+  std::vector<Vector<uint32_t>> by_frame;
   std::vector<FrameRoutes> frames;
-  std::vector<scav_point> routed;
-  std::vector<scav_span> net_span;
-  std::vector<scav_rect> walls, held;
-  std::vector<uint32_t> enclosing;  // parallel to states: `enclosing_state` of each
+  Vector<scav_point> routed;
+  Vector<scav_span> net_span;
+  Vector<scav_rect> walls, held;
+  Vector<uint32_t> enclosing;  // parallel to states: `enclosing_state` of each
   // The live states each state encloses, as lists threaded through `kid_next`
   // from `kid_head`, and the live states a gather must always visit.
-  std::vector<uint32_t> kid_head, kid_next, loose;
-  std::vector<Gap> gaps;
-  std::vector<OnDivider> on_dividers;  // the divider ends planned so far
-  std::vector<std::array<int32_t, 2>> blocks;
-  std::vector<int32_t> turned;  // per transition, its routed nets' turns
+  Vector<uint32_t> kid_head, kid_next, loose;
+  Vector<Gap> gaps;
+  Vector<OnDivider> on_dividers;  // the divider ends planned so far
+  Vector<std::array<int32_t, 2>> blocks;
+  Vector<int32_t> turned;  // per transition, its routed nets' turns
 };
 
 CallScratch::CallScratch(CallScratch &&) noexcept = default;
@@ -729,27 +728,27 @@ std::vector<CallScratch> &call_stack() {
 }
 
 // Resizes `v` to `n` empty lists, each keeping its capacity.
-void reset_lists(std::vector<std::vector<uint32_t>> &v, size_t n) {
+void reset_lists(std::vector<Vector<uint32_t>> &v, size_t n) {
   vec_resize(v, n);
-  for (std::vector<uint32_t> &list : v) { list.clear(); }
+  for (Vector<uint32_t> &list : v) { list.clear(); }
 }
 
 }  // namespace
 
 void segment_bends(SubmachineOrders const &o,
                    uint32_t segments,
-                   std::vector<uint32_t> &reversed,
-                   std::vector<std::vector<uint32_t>> &bends) {
-  vec_assign(reversed, segments, 0);
+                   Vector<uint32_t> &reversed,
+                   std::vector<Vector<uint32_t>> &bends) {
+  reversed.assign(segments, 0);
   for (OrderEdge const &e : o.edges) { reversed[e.segment] = e.reversed; }
   reset_lists(bends, segments);
   for (uint32_t node = 0; node < o.nodes.size(); ++node) {
     if (o.nodes[node].kind == OrderKind::Bend) {
-      vec_push_back(bends[o.nodes[node].subject], node);
+      bends[o.nodes[node].subject].push_back(node);
     }
   }
   for (uint32_t seg = 0; seg < bends.size(); ++seg) {
-    std::vector<uint32_t> &chain{ bends[seg] };
+    Vector<uint32_t> &chain{ bends[seg] };
     scav_stable_sort(chain, [&](uint32_t a, uint32_t b) {
       return o.nodes[a].rank < o.nodes[b].rank;
     });
@@ -808,12 +807,10 @@ void route_transitions(Routes &out,
   if (!stack.empty()) { stack.pop_back(); }
   // End pins at portless ends as `faces[end][seg]`; INVALID where unpinned, both empty
   // with no end pins.
-  std::array<std::vector<uint32_t>, 2> &faces{ cs.faces };
-  for (std::vector<uint32_t> &side : faces) { side.clear(); }
+  std::array<Vector<uint32_t>, 2> &faces{ cs.faces };
+  for (Vector<uint32_t> &side : faces) { side.clear(); }
   if ((pins != nullptr) && !pins->ends.empty()) {
-    for (std::vector<uint32_t> &side : faces) {
-      vec_assign(side, g.segments.size(), INVALID);
-    }
+    for (Vector<uint32_t> &side : faces) { side.assign(g.segments.size(), INVALID); }
     for (EndPin const &fp : pins->ends) {
       if ((fp.trans.v == INVALID) || (fp.trans.v >= g.trans_segments.size()) ||
           (fp.end > 1) || (fp.face > 3)) {
@@ -831,30 +828,30 @@ void route_transitions(Routes &out,
   }
   if (fill != nullptr) {
     vec_assign(fill->frame, c.submachines.size(), {});
-    vec_assign(fill->faceable, size_t{ 2 } * g.segments.size(), 0);
+    fill->faceable.assign(size_t{ 2 } * g.segments.size(), 0);
   }
   uint32_t const n{ static_cast<uint32_t>(c.transitions.size()) };
-  vec_assign(out.route, n, {});
-  vec_assign(out.port, n, {});
-  vec_assign(out.failed, n, 0);
+  out.route.assign(n, {});
+  out.port.assign(n, {});
+  out.failed.assign(n, 0);
 
   // Each port's segment, and each segment's bend nodes from source to destination.
-  std::vector<uint32_t> &port_seg{ cs.port_seg };
-  vec_assign(port_seg, g.ports.size(), INVALID);
+  Vector<uint32_t> &port_seg{ cs.port_seg };
+  port_seg.assign(g.ports.size(), INVALID);
   for (uint32_t seg = 0; seg < g.segments.size(); ++seg) {
     if (o.seg_port[seg] != INVALID) { port_seg[o.seg_port[seg]] = seg; }
   }
-  std::vector<std::vector<uint32_t>> &seg_bends{ cs.seg_bends };
+  std::vector<Vector<uint32_t>> &seg_bends{ cs.seg_bends };
   segment_bends(o, static_cast<uint32_t>(g.segments.size()), cs.seg_reversed, seg_bends);
 
   // Each inner loop's four points out of its state's border and back, in its row of the
   // state's loop room; `occupied` gets its ends' run on each face they touch, padded.
   Vector<scav_rect> &loop_row{ cs.loop_row };
   loop_rows(c, z, s, p, cs.loop_label, loop_row);
-  std::vector<scav_point> &loop_points{ cs.loop_points };
+  Vector<scav_point> &loop_points{ cs.loop_points };
   loop_points.clear();
-  std::vector<scav_span> &loop_span{ cs.loop_span };
-  vec_assign(loop_span, n, scav_span{});
+  Vector<scav_span> &loop_span{ cs.loop_span };
+  loop_span.assign(n, scav_span{});
   std::vector<OccupiedSpan> &occupied{ cs.occupied };
   occupied.clear();
   int32_t const clear{ route_clearance(p) };
@@ -882,10 +879,10 @@ void route_transitions(Routes &out,
     };
     uint32_t const off{ static_cast<uint32_t>(loop_points.size()) };
     loop_span[t] = { .off = off, .len = 4 };
-    vec_push_back(loop_points, at(edge, first));
-    vec_push_back(loop_points, at(leg, first));
-    vec_push_back(loop_points, at(leg, first + lane));
-    vec_push_back(loop_points, at(edge, first + lane));
+    loop_points.push_back(at(edge, first));
+    loop_points.push_back(at(leg, first));
+    loop_points.push_back(at(leg, first + lane));
+    loop_points.push_back(at(edge, first + lane));
     loop_occupied({ loop_points[off], loop_points[off + 3] }, r, st, clear, occupied);
   }
 
@@ -931,7 +928,7 @@ void route_transitions(Routes &out,
     return scav_port_slot{ .x = at.x, .y = at.y, .side = side, .boundary_depth = depth };
   };
 
-  std::vector<Gap> &gaps{ cs.gaps };
+  Vector<Gap> &gaps{ cs.gaps };
   region_gaps(c, z, gaps);
   cs.on_dividers.clear();
   DividerRoom const room{ .clear = clear,
@@ -978,7 +975,7 @@ void route_transitions(Routes &out,
       uint32_t const facing{ (gap.vertical ? 0U : 2U) + ((gap.low == m) ? 1U : 0U) };
       if (o.seg_side[at] == facing) { want[wanted++] = level(z.node[node]); }
     }
-    std::vector<uint32_t> const &bends{ seg_bends[seg] };
+    Vector<uint32_t> const &bends{ seg_bends[seg] };
     want[wanted++] = level(bends.empty() ? from : z.node[bends.back()]);
     int32_t const along{
       on_divider(c, z, gap, want, wanted, sides, room, cs.on_dividers, cs.blocks)
@@ -1018,10 +1015,10 @@ void route_transitions(Routes &out,
   };
 
   // Plans every net before routing any; port slots are in transition order.
-  std::vector<Planned> &planned{ cs.planned };
+  Vector<Planned> &planned{ cs.planned };
   planned.clear();
-  std::vector<Span> &trans_nets{ cs.trans_nets };
-  vec_assign(trans_nets, n, Span{});
+  Vector<Span> &trans_nets{ cs.trans_nets };
+  trans_nets.assign(n, Span{});
   cs.slot_port.clear();
   for (uint32_t t = 0; t < n; ++t) {
     Span const segs{ g.trans_segments[t] };
@@ -1035,19 +1032,18 @@ void route_transitions(Routes &out,
       // Self-loop: both ends name the state; the router seats them on its least-used face.
       uint32_t const frame{ g.segments[segs.off].frame.v };
       scav_point const mid{ centre(z.state[tr.src.v]) };
-      vec_push_back(planned,
-                    { .frame = frame,
-                      .src = mid,
-                      .dst = mid,
-                      .src_state = tr.src.v,
-                      .dst_state = tr.src.v,
-                      .seg = segs.off,
-                      .loop = 2 * p.pad,
-                      .loop_state = tr.src.v,
-                      .src_stubbed = 0,
-                      .dst_stubbed = 0,
-                      .src_stub = {},
-                      .dst_stub = {} });
+      planned.push_back({ .frame = frame,
+                          .src = mid,
+                          .dst = mid,
+                          .src_state = tr.src.v,
+                          .dst_state = tr.src.v,
+                          .seg = segs.off,
+                          .loop = 2 * p.pad,
+                          .loop_state = tr.src.v,
+                          .src_stubbed = 0,
+                          .dst_stubbed = 0,
+                          .src_stub = {},
+                          .dst_stub = {} });
     } else if (!looped) {
       // An end inside its own endpoint state sits at the segment's boundary node on that
       // state's inner face; it names no obstacle and no slot.
@@ -1069,8 +1065,8 @@ void route_transitions(Routes &out,
           scav_port_slot const slot{ (g.ports[port].into.v != INVALID)
                                          ? divider_slot(port, seg, at)
                                          : slot_of(port, port_seg[port]) };
-          vec_push_back(out.slots, slot);
-          vec_push_back(cs.slot_port, port);
+          out.slots.push_back(slot);
+          cs.slot_port.push_back(port);
           end = { .x = slot.x, .y = slot.y };
         } else if (tail_inner) {
           end = inner_end(g.segments[seg].frame.v, z.node[tail], met(seg, 0));
@@ -1099,19 +1095,18 @@ void route_transitions(Routes &out,
             loop_state = g.ports[port].state.v;
           }
         }
-        vec_push_back(planned,
-                      { .frame = frame,
-                        .src = at,
-                        .dst = end,
-                        .src_state = at_state,
-                        .dst_state = end_state,
-                        .seg = seg,
-                        .loop = (loop_state != INVALID) ? (2 * p.pad) : 0,
-                        .loop_state = loop_state,
-                        .src_stubbed = 0,
-                        .dst_stubbed = 0,
-                        .src_stub = {},
-                        .dst_stub = {} });
+        planned.push_back({ .frame = frame,
+                            .src = at,
+                            .dst = end,
+                            .src_state = at_state,
+                            .dst_state = end_state,
+                            .seg = seg,
+                            .loop = (loop_state != INVALID) ? (2 * p.pad) : 0,
+                            .loop_state = loop_state,
+                            .src_stubbed = 0,
+                            .dst_stubbed = 0,
+                            .src_stub = {},
+                            .dst_stub = {} });
         at = end;
         at_state = end_state;
       }
@@ -1208,12 +1203,10 @@ void route_transitions(Routes &out,
   }
 
   // One batch per frame, in submachine order, of nets in `(transition, ordinal)` order.
-  std::vector<std::vector<uint32_t>> &by_frame{ cs.by_frame };
+  std::vector<Vector<uint32_t>> &by_frame{ cs.by_frame };
   reset_lists(by_frame, c.submachines.size());
   for (uint32_t i = 0; i < planned.size(); ++i) {
-    if (planned[i].frame < by_frame.size()) {
-      vec_push_back(by_frame[planned[i].frame], i);
-    }
+    if (planned[i].frame < by_frame.size()) { by_frame[planned[i].frame].push_back(i); }
   }
 
   int32_t const margin{ router.margin(p) };
@@ -1223,7 +1216,7 @@ void route_transitions(Routes &out,
                           .w = 2 * COORD_MAX,
                           .h = 2 * COORD_MAX };
   std::vector<FrameRoutes> &frames{ cs.frames };
-  vec_resize(frames, by_frame.size());
+  frames.resize(by_frame.size());
   for (FrameRoutes &fr : frames) {
     fr.points.clear();
     fr.net_points.clear();
@@ -1233,27 +1226,27 @@ void route_transitions(Routes &out,
   // Every obstacle of a frame is loose or enclosed by a state on the owner's chain. A
   // loose state has no enclosing state, or lies outside its enclosing state's box.
   uint32_t const state_count{ static_cast<uint32_t>(c.states.size()) };
-  std::vector<uint32_t> &enclosing{ cs.enclosing };
-  vec_resize(enclosing, state_count);
+  Vector<uint32_t> &enclosing{ cs.enclosing };
+  enclosing.resize(state_count);
   for (uint32_t st = 0; st < state_count; ++st) {
     enclosing[st] = enclosing_state(c, { st }).v;
   }
-  std::vector<uint32_t> &kid_head{ cs.kid_head };
-  std::vector<uint32_t> &kid_next{ cs.kid_next };
-  std::vector<uint32_t> &loose{ cs.loose };
-  vec_assign(kid_head, state_count, INVALID);
-  vec_resize(kid_next, state_count);
+  Vector<uint32_t> &kid_head{ cs.kid_head };
+  Vector<uint32_t> &kid_next{ cs.kid_next };
+  Vector<uint32_t> &loose{ cs.loose };
+  kid_head.assign(state_count, INVALID);
+  kid_next.resize(state_count);
   loose.clear();
   for (uint32_t st = 0; st < state_count; ++st) {
     if (c.states[st].live == 0) { continue; }
     uint32_t const up{ enclosing[st] };
     if (up >= state_count) {
-      vec_push_back(loose, st);
+      loose.push_back(st);
       continue;
     }
     kid_next[st] = kid_head[up];
     kid_head[up] = st;
-    if (!contains(z.state[up], z.state[st])) { vec_push_back(loose, st); }
+    if (!contains(z.state[up], z.state[st])) { loose.push_back(st); }
   }
 
   // Writes only `frames[m]`, `fill`'s entries for frame `m`, and `sc`.
@@ -1302,7 +1295,7 @@ void route_transitions(Routes &out,
     sc.chain.clear();
     uint32_t link{ owner.v };
     for (uint32_t step = 0; (step < state_count) && (link != INVALID); ++step) {
-      vec_push_back(sc.chain, link);
+      sc.chain.push_back(link);
       sc.in_chain[link] = 1;
       link = enclosing[link];
     }
@@ -1327,13 +1320,12 @@ void route_transitions(Routes &out,
         if ((c.states[st].live == 0) || !overlaps(region, z.state[st])) { continue; }
         if ((sc.in_chain[st] != 0) || shields(st)) { continue; }
         sc.obstacle_index[st] = static_cast<uint32_t>(in.obstacles.size());
-        vec_push_back(sc.obstacle_states, st);
-        vec_push_back(in.obstacles, z.state[st]);
-        vec_push_back(in.inscribed, kind_inscribed(c.states[st].kind) ? 1U : 0U);
-        vec_push_back(in.corner,
-                      state_corner_radius(c.states[st].kind,
-                                          z.state[st],
-                                          z.before[st].x - z.state[st].x));
+        sc.obstacle_states.push_back(st);
+        in.obstacles.push_back(z.state[st]);
+        in.inscribed.push_back(kind_inscribed(c.states[st].kind) ? 1U : 0U);
+        in.corner.push_back(state_corner_radius(c.states[st].kind,
+                                                z.state[st],
+                                                z.before[st].x - z.state[st].x));
       }
     }
     // The walls (bands and loop rooms) of the owner's chain that overlap the region.
@@ -1342,9 +1334,9 @@ void route_transitions(Routes &out,
       sc.in_chain[a] = 0;
       for (scav_rect const &band : state_walls(z, a)) {
         if ((band.w > 0) && (band.h > 0) && overlaps(region, band)) {
-          vec_push_back(in.obstacles, band);
-          vec_push_back(in.inscribed, 0U);
-          vec_push_back(in.corner, 0);
+          in.obstacles.push_back(band);
+          in.inscribed.push_back(0U);
+          in.corner.push_back(0);
         }
       }
     }
@@ -1362,7 +1354,7 @@ void route_transitions(Routes &out,
           beyond = beyond || (low ? (across > far) : (across < far));
         }
       }
-      if (!beyond) { vec_push_back(in.gaps, gap.rect); }
+      if (!beyond) { in.gaps.push_back(gap.rect); }
     }
     in.occupied.clear();
     for (OccupiedSpan const &span : occupied) {
@@ -1378,7 +1370,7 @@ void route_transitions(Routes &out,
       if (pn.dst_state != INVALID) { net.dst_obstacle = sc.obstacle_index[pn.dst_state]; }
       net.waypoint_off = static_cast<uint32_t>(in.waypoints.size());
       for (uint32_t const bend : seg_bends[pn.seg]) {
-        vec_push_back(in.waypoints, z.node[bend]);
+        in.waypoints.push_back(z.node[bend]);
       }
       net.waypoint_len = static_cast<uint32_t>(in.waypoints.size()) - net.waypoint_off;
       if (!faces[0].empty()) {
@@ -1422,7 +1414,7 @@ void route_transitions(Routes &out,
         scav_point const &at{ in.waypoints[net.waypoint_off + w] };
         trace_emit({ .kind = TraceKind::NetWaypoint, .point = { .x = at.x, .y = at.y } });
       }
-      vec_push_back(in.nets, net);
+      in.nets.push_back(net);
     }
     // After every net is in: a loop's `effective_faces` reads the frame's other ends.
     for (uint32_t k = 0; (fill != nullptr) && (k < by_frame[m].size()); ++k) {
@@ -1440,13 +1432,13 @@ void route_transitions(Routes &out,
     if ((reuse != nullptr) && (m < reuse->frame.size()) && (reuse->frame[m].valid != 0) &&
         same_but_shifted(reuse->frame[m], in, frame, dx, dy)) {
       RouteFrameCache const &had{ reuse->frame[m] };
-      std::vector<scav_point> &moved{ frames[m].points };
-      vec_resize(moved, had.points.size());
+      Vector<scav_point> &moved{ frames[m].points };
+      moved.resize(had.points.size());
       for (size_t k = 0; k < moved.size(); ++k) {
         moved[k] = { .x = had.points[k].x + dx, .y = had.points[k].y + dy };
       }
-      vec_assign(frames[m].net_points, had.net_points.begin(), had.net_points.end());
-      vec_assign(frames[m].metrics, had.metrics.begin(), had.metrics.end());
+      frames[m].net_points.assign(had.net_points.begin(), had.net_points.end());
+      frames[m].metrics.assign(had.metrics.begin(), had.metrics.end());
       if (fill != nullptr) {
         RouteFrameCache &to{ fill->frame[m] };
         to.valid = had.valid;
@@ -1464,13 +1456,13 @@ void route_transitions(Routes &out,
 
     // Nudges the frame's lanes against its own obstacles and the gaps between regions.
     if (margin > 0) {
-      vec_assign(sc.own, ro.net_points.size(), (owner.v == INVALID) ? domain : frame);
-      vec_resize(sc.keep, in.nets.size());
+      sc.own.assign(ro.net_points.size(), (owner.v == INVALID) ? domain : frame);
+      sc.keep.resize(in.nets.size());
       for (size_t k = 0; k < in.nets.size(); ++k) {
         sc.keep[k] = { .src = in.nets[k].src_clear, .dst = in.nets[k].dst_clear };
       }
-      vec_assign(sc.walls, in.obstacles.begin(), in.obstacles.end());
-      vec_insert(sc.walls, sc.walls.end(), in.gaps.begin(), in.gaps.end());
+      sc.walls.assign(in.obstacles.begin(), in.obstacles.end());
+      sc.walls.insert(sc.walls.end(), in.gaps.begin(), in.gaps.end());
       nudge_lanes(region,
                   sc.own,
                   sc.walls,
@@ -1501,9 +1493,9 @@ void route_transitions(Routes &out,
   auto const route_frames = [&](uint32_t first, uint32_t count) {
     FrameScratch &sc{ frame_scratch() };
     sc.in.profile = p;
-    vec_assign(sc.obstacle_index, c.states.size(), INVALID);
-    vec_assign(sc.in_chain, c.states.size(), 0);
-    vec_assign(sc.pick, (size_t{ state_count } + 63) / 64, 0);
+    sc.obstacle_index.assign(c.states.size(), INVALID);
+    sc.in_chain.assign(c.states.size(), 0);
+    sc.pick.assign((size_t{ state_count } + 63) / 64, 0);
     for (uint32_t m = first; (m < (first + count)) && (m < by_frame.size()); ++m) {
       if (by_frame[m].empty()) { continue; }
       route_frame(m, sc);
@@ -1517,12 +1509,12 @@ void route_transitions(Routes &out,
     }
   };
   if (stop != nullptr) {
-    vec_assign(cs.turned, n, 0);
+    cs.turned.assign(n, 0);
     stop->sum = 0;
     for (int32_t const b : *stop->bends) { stop->sum += b; }
     route_frames(0, static_cast<uint32_t>(by_frame.size()));
     if (stop->stopped) {
-      vec_push_back(stack, std::move(cs));
+      stack.push_back(std::move(cs));
       return;
     }
   } else {
@@ -1536,10 +1528,10 @@ void route_transitions(Routes &out,
   }
 
   // Merges in frame order; totals and points are the same at every worker count.
-  std::vector<scav_point> &routed{ cs.routed };
+  Vector<scav_point> &routed{ cs.routed };
   routed.clear();
-  std::vector<scav_span> &net_span{ cs.net_span };
-  vec_assign(net_span, planned.size(), scav_span{});
+  Vector<scav_span> &net_span{ cs.net_span };
+  net_span.assign(planned.size(), scav_span{});
   for (uint32_t m = 0; m < by_frame.size(); ++m) {
     FrameRoutes const &fr{ frames[m] };
     for (uint32_t j = 0; j < by_frame[m].size(); ++j) {
@@ -1561,23 +1553,21 @@ void route_transitions(Routes &out,
         }
       }
       uint32_t const off{ static_cast<uint32_t>(routed.size()) };
-      for (uint32_t k = 0; k < at.len; ++k) {
-        vec_push_back(routed, fr.points[at.off + k]);
-      }
+      for (uint32_t k = 0; k < at.len; ++k) { routed.push_back(fr.points[at.off + k]); }
       net_span[by_frame[m][j]] = { .off = off, .len = at.len };
     }
   }
 
   // Lays each transition's loop points and nets end to end; a net starting on the last
   // point laid drops that point, and any other start leaves a break in the polyline.
-  vec_reserve(out.points, routed.size());
+  out.points.reserve(routed.size());
   for (uint32_t t = 0; t < n; ++t) {
     Span const nets{ trans_nets[t] };
     scav_span const loop{ loop_span[t] };
     if ((nets.len == 0) && (loop.len == 0)) { continue; }
     uint32_t const first_point{ static_cast<uint32_t>(out.points.size()) };
     for (uint32_t k = 0; k < loop.len; ++k) {
-      vec_push_back(out.points, loop_points[loop.off + k]);
+      out.points.push_back(loop_points[loop.off + k]);
     }
     for (uint32_t j = 0; j < nets.len; ++j) {
       scav_span const at{ net_span[nets.off + j] };
@@ -1585,7 +1575,7 @@ void route_transitions(Routes &out,
       bool const joined{ (out.points.size() > first_point) &&
                          same(out.points.back(), routed[at.off]) };
       for (uint32_t k = (joined ? 1U : 0U); k < at.len; ++k) {
-        vec_push_back(out.points, routed[at.off + k]);
+        out.points.push_back(routed[at.off + k]);
       }
     }
     uint32_t const count{ static_cast<uint32_t>(out.points.size()) - first_point };
@@ -1594,22 +1584,22 @@ void route_transitions(Routes &out,
 
   // Nudges the composed polylines chart-wide, for lanes shared across frames or segments.
   if (margin > 0) {
-    std::vector<scav_rect> &walls{ cs.walls };
+    Vector<scav_rect> &walls{ cs.walls };
     walls.clear();
     for (uint32_t st = 0; st < c.states.size(); ++st) {
       if ((c.states[st].live == 0) || (z.state[st].w == 0) || (z.state[st].h == 0)) {
         continue;
       }
-      vec_push_back(walls, z.state[st]);
+      walls.push_back(z.state[st]);
       for (scav_rect const &band : state_walls(z, st)) {
-        if ((band.w > 0) && (band.h > 0)) { vec_push_back(walls, band); }
+        if ((band.w > 0) && (band.h > 0)) { walls.push_back(band); }
       }
     }
-    for (Gap const &gap : gaps) { vec_push_back(walls, gap.rect); }
+    for (Gap const &gap : gaps) { walls.push_back(gap.rect); }
     // Bounds each transition by the innermost state strictly enclosing both its ends, or
     // the coordinate domain where none does; an inner loop by its own state.
-    std::vector<scav_rect> &held{ cs.held };
-    vec_assign(held, out.route.size(), domain);
+    Vector<scav_rect> &held{ cs.held };
+    held.assign(out.route.size(), domain);
     for (uint32_t t = 0; t < out.route.size(); ++t) {
       if (t >= c.transitions.size()) { continue; }
       Transition const &tr{ c.transitions[t] };
@@ -1634,7 +1624,7 @@ void route_transitions(Routes &out,
   }
 
   if (labels) { label_routes(out, c, g, z, s, p); }
-  vec_push_back(stack, std::move(cs));
+  stack.push_back(std::move(cs));
 }
 
 void reseat_slots(SplitGraph const &g, SizedLayout const &z, Routes &out) {

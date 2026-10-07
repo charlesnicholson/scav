@@ -12,9 +12,9 @@
 #include "scav/scav_layout.h"
 #include "scav/scav_layout_c.h"
 #include "scav/scav_types.h"
+#include "scav_vector.h"
 
 #include "doctest.h"
-#include "scav_vector.h"
 
 #include <array>
 #include <chrono>
@@ -133,10 +133,10 @@ Run const &laid_pipeline(char const *name) {
 
 // The column's rows, memcpy'd out so nothing reads padding in place.
 template <typename T>
-std::vector<T> rows(Chart const &c, char const *name) {
+Vector<T> rows(Chart const &c, char const *name) {
   ColumnId const id{ column_find(c, name) };
   if (id.v == INVALID) { return {}; }
-  std::vector<T> out(column_count(c, id));
+  Vector<T> out(column_count(c, id));
   if (!out.empty()) {
     std::memcpy(out.data(), column_data(c, id), out.size() * sizeof(T));
   }
@@ -473,19 +473,15 @@ TEST_CASE("drawlist corpus: the strips the labels landed on, and what fell back"
     CAPTURE(name);
     Run const &r{ laid_pipeline(name) };
     SizedLayout z;
-    auto const take = [&r](Vector<scav_rect> &to, char const *column) {
-      std::vector<scav_rect> const from{ rows<scav_rect>(r.chart, column) };
-      to.assign(from.data(), from.data() + from.size());
-    };
-    take(z.state, "scav.geom.state");
-    take(z.before, "scav.geom.state_before");
-    take(z.after, "scav.geom.state_after");
-    take(z.sub, "scav.geom.sub");
-    std::vector<scav_rect> const chart{ rows<scav_rect>(r.chart, "scav.geom.chart") };
+    z.state = rows<scav_rect>(r.chart, "scav.geom.state");
+    z.before = rows<scav_rect>(r.chart, "scav.geom.state_before");
+    z.after = rows<scav_rect>(r.chart, "scav.geom.state_after");
+    z.sub = rows<scav_rect>(r.chart, "scav.geom.sub");
+    Vector<scav_rect> const chart{ rows<scav_rect>(r.chart, "scav.geom.chart") };
     REQUIRE(chart.size() == 1);
     z.chart = chart[0];
 
-    std::vector<scav_rect> again;
+    Vector<scav_rect> again;
     fell += place_labels(r.chart,
                          decompose(r.chart),
                          z,
@@ -506,8 +502,8 @@ TEST_CASE("drawlist corpus: the strips the labels landed on, and what fell back"
 
     // Each box's Chebyshev gap to its own route is at most `label_leader`.
     scav_spaces const sp{ as_spaces(r.spaces) };
-    std::vector<scav_span> const routes{ rows<scav_span>(r.chart, "scav.geom.route") };
-    std::vector<scav_point> const pts{ rows<scav_point>(r.chart, "scav.geom.point") };
+    Vector<scav_span> const routes{ rows<scav_span>(r.chart, "scav.geom.route") };
+    Vector<scav_point> const pts{ rows<scav_point>(r.chart, "scav.geom.point") };
     for (uint32_t i = 0; i < again.size(); ++i) {
       if (i >= sp.n_path_box) { continue; }
       uint32_t const subject{ sp.path_box[i].subject };

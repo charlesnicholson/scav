@@ -12,6 +12,7 @@
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
 #include "scav/scav_layout_c.h"
+#include "scav_vector.h"
 
 #include <cstdint>
 #include <vector>
@@ -26,14 +27,14 @@ struct Routes {
   Routes &operator=(Routes &&) noexcept;
   ~Routes();
 
-  std::vector<scav_point> points;
-  std::vector<scav_port_slot> slots;
-  std::vector<scav_span> route, port;  // parallel to transitions
-  std::vector<scav_rect> placed;       // parallel to the path boxes
+  Vector<scav_point> points;
+  Vector<scav_port_slot> slots;
+  Vector<scav_span> route, port;  // parallel to transitions
+  Vector<scav_rect> placed;       // parallel to the path boxes
 
   // Nets that fell back to a straight line, by cause.
   uint32_t outside_region{ 0 }, unreachable{ 0 }, too_large{ 0 };
-  std::vector<uint8_t> failed;  // parallel to transitions; 1 = a net of it fell back
+  Vector<uint8_t> failed;  // parallel to transitions; 1 = a net of it fell back
   [[nodiscard]] uint32_t degraded() const {
     return outside_region + unreachable + too_large;
   }
@@ -49,15 +50,15 @@ struct RouteFrameCache {
   uint8_t valid{ 0 };
   scav_rect frame{};  // what the nudger bounds this frame's lanes by
   RouteInput in;
-  std::vector<scav_point> points;
-  std::vector<scav_span> net_points;
-  std::vector<RouteMetrics> metrics;
+  Vector<scav_point> points;
+  Vector<scav_span> net_points;
+  Vector<RouteMetrics> metrics;
 };
 
 // Where routing may stop: once `floor` plus `per_bend` per bend, each transition taking
 // the larger of its `bends` and its routed nets' turns, reaches `at`; `reached` is that.
 struct RouteStop {
-  std::vector<int32_t> const *bends{ nullptr };
+  Vector<int32_t> const *bends{ nullptr };
   int64_t floor{ 0 };
   int64_t per_bend{ 0 };
   int64_t at{ 0 };
@@ -72,7 +73,7 @@ struct RouteCache {
   std::vector<RouteFrameCache> frame;  // parallel to submachines
   // Two per segment, source end then destination: the router's `effective_faces` there.
   // An end pin outside those bits changes nothing drawn.
-  std::vector<uint8_t> faceable;
+  Vector<uint8_t> faceable;
 };
 
 // Moves each slot off its route to where the route next meets the slot's face inside its
@@ -83,8 +84,8 @@ void reseat_slots(SplitGraph const &g, SizedLayout const &z, Routes &out);
 // gets each segment's `OrderEdge::reversed`.
 void segment_bends(SubmachineOrders const &o,
                    uint32_t segments,
-                   std::vector<uint32_t> &reversed,
-                   std::vector<std::vector<uint32_t>> &bends);
+                   Vector<uint32_t> &reversed,
+                   std::vector<Vector<uint32_t>> &bends);
 
 // One net per segment, routed in its frame, laid end to end; the result is the same at
 // every `threads`. With `labels` false, `placed` is empty.

@@ -7,10 +7,9 @@
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"
 #include "scav_int.h"
-#include "scav_vec.h"
+#include "scav_vector.h"
 
 #include <cstdint>
-#include <vector>
 
 namespace scav {
 
@@ -120,10 +119,10 @@ struct RectGrid {
   int32_t x0{ 0 }, y0{ 0 };
   Wide cw{ 1 }, ch{ 1 };
   uint32_t nx{ 1 }, ny{ 1 };
-  std::vector<uint32_t> off;    // nx * ny + 1, into `item`
-  std::vector<uint32_t> item;   // indices of the rects the grid was built over
-  std::vector<uint32_t> stamp;  // per rect, the last query that visited it
-  uint32_t epoch{ 0 };          // the current query
+  Vector<uint32_t> off;    // nx * ny + 1, into `item`
+  Vector<uint32_t> item;   // indices of the rects the grid was built over
+  Vector<uint32_t> stamp;  // per rect, the last query that visited it
+  uint32_t epoch{ 0 };     // the current query
 };
 
 // Maximum cells per grid side; cells grow past `cell_w` and `cell_h` to stay within it.
@@ -139,17 +138,17 @@ inline uint32_t grid_cell(Wide v, int32_t lo, Wide size, uint32_t n) {
 // caller-owned scratch.
 inline void grid_build(RectGrid &g,
                        scav_rect const &region,
-                       std::vector<scav_rect> const &rects,
+                       Vector<scav_rect> const &rects,
                        int32_t cell_w,
                        int32_t cell_h,
-                       std::vector<uint32_t> &cursor) {
+                       Vector<uint32_t> &cursor) {
   g.x0 = region.x;
   g.y0 = region.y;
   g.cw = imax(Wide{ imax(cell_w, 1) }, ceil_div(Wide{ region.w } + 1, Wide{ GRID_SIDE }));
   g.ch = imax(Wide{ imax(cell_h, 1) }, ceil_div(Wide{ region.h } + 1, Wide{ GRID_SIDE }));
   g.nx = static_cast<uint32_t>(imax(ceil_div(Wide{ region.w } + 1, g.cw), Wide{ 1 }));
   g.ny = static_cast<uint32_t>(imax(ceil_div(Wide{ region.h } + 1, g.ch), Wide{ 1 }));
-  vec_assign(g.off, (static_cast<size_t>(g.nx) * g.ny) + 1, 0);
+  g.off.assign((static_cast<size_t>(g.nx) * g.ny) + 1, 0);
   auto const spread = [&g, &rects](auto step) {
     for (uint32_t k = 0; k < rects.size(); ++k) {
       scav_rect const &r{ rects[k] };
@@ -166,10 +165,10 @@ inline void grid_build(RectGrid &g,
   };
   spread([&g](size_t cell, uint32_t) { ++g.off[cell + 1]; });
   for (size_t i = 1; i < g.off.size(); ++i) { g.off[i] += g.off[i - 1]; }
-  vec_resize(g.item, g.off.back());
-  vec_assign(cursor, g.off.begin(), g.off.end() - 1);
+  g.item.resize(g.off.back());
+  cursor.assign(g.off.begin(), g.off.end() - 1);
   spread([&g, &cursor](size_t cell, uint32_t k) { g.item[cursor[cell]++] = k; });
-  vec_assign(g.stamp, rects.size(), 0);
+  g.stamp.assign(rects.size(), 0);
   g.epoch = 0;
 }
 

@@ -8,10 +8,10 @@
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
 #include "scav/scav_layout_c.h"
+#include "scav_vector.h"
 
 #include "core/tests/corpus.h"
 #include "doctest.h"
-#include "scav_vector.h"
 
 #include <array>
 #include <atomic>
@@ -30,7 +30,7 @@ void search_key(scav_profile const &objective,
                 uint32_t budget,
                 bool refold,
                 SearchPins const &seed,
-                std::vector<uint8_t> const *scope,
+                Vector<uint8_t> const *scope,
                 Vector<uint32_t> &key);
 void layout_test_prefix_shortcut(bool on);
 void layout_test_prefix_verify(bool on);
@@ -63,9 +63,9 @@ uint64_t layout_test_route_bound_pruned();
 uint64_t layout_test_route_bound_checked();
 uint64_t layout_test_route_bound_mismatches();
 void layout_test_row_alias(bool on);
-std::vector<Cost> const &layout_test_schedule_first();
-std::vector<Cost> const &layout_test_schedule_second();
-std::vector<Cost> const &layout_test_schedule_kept();
+Vector<Cost> const &layout_test_schedule_first();
+Vector<Cost> const &layout_test_schedule_second();
+Vector<Cost> const &layout_test_schedule_kept();
 void layout_test_degrade(bool on);
 uint64_t layout_test_degraded();
 uint64_t layout_test_taken_degraded();
@@ -88,7 +88,7 @@ struct Inputs {
   uint32_t budget{ 64 };
   bool refold{ false };
   SearchPins seed;
-  std::vector<uint8_t> scope;
+  Vector<uint8_t> scope;
   bool scoped{ false };
 };
 
@@ -135,7 +135,7 @@ Laid lay_out(char const *name,
   std::vector<Diagnostic> diags;
   std::string failed;
   REQUIRE(load_file(path.c_str(), loader, c, diags, failed));
-  std::vector<scav_path_box> boxes;
+  Vector<scav_path_box> boxes;
   for (uint32_t t = 0; labelled && (t < c.transitions.size()); ++t) {
     Transition const &tr{ c.transitions[t] };
     if ((tr.live == 0) || ((tr.src == tr.dst) && (tr.kind != TransKind::Default))) {
@@ -507,9 +507,9 @@ TEST_CASE("search schedules: each row keeps the cheaper of its two searches" *
     if (scav::test::corpus_skipped(name)) { continue; }
     CAPTURE(name);
     REQUIRE(lay_out(name).ok);
-    std::vector<Cost> const &first{ layout_test_schedule_first() };
-    std::vector<Cost> const &second{ layout_test_schedule_second() };
-    std::vector<Cost> const &kept{ layout_test_schedule_kept() };
+    Vector<Cost> const &first{ layout_test_schedule_first() };
+    Vector<Cost> const &second{ layout_test_schedule_second() };
+    Vector<Cost> const &kept{ layout_test_schedule_kept() };
     REQUIRE(first.size() == kept.size());
     REQUIRE(second.size() == kept.size());
     uint32_t wins{ 0 };
@@ -949,7 +949,7 @@ TEST_CASE("search: on the corpus, every route bound lies at or below its move's 
 
 namespace {
 
-bool same_costs(std::vector<Cost> const &a, std::vector<Cost> const &b) {
+bool same_costs(Vector<Cost> const &a, Vector<Cost> const &b) {
   if (a.size() != b.size()) { return false; }
   for (size_t i = 0; i < a.size(); ++i) {
     if ((a[i].t0_violations != b[i].t0_violations) || (a[i].t2 != b[i].t2)) {
@@ -961,7 +961,7 @@ bool same_costs(std::vector<Cost> const &a, std::vector<Cost> const &b) {
 
 // Each row's cost after its first search, its refold, and the one kept.
 struct Schedules {
-  std::vector<Cost> first, second, kept;
+  Vector<Cost> first, second, kept;
 };
 
 Schedules schedules() {

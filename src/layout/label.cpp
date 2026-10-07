@@ -28,11 +28,11 @@ uint32_t place_labels_by(Chart const &c,
                          SplitGraph const &g,
                          SizedLayout const &z,
                          scav_spaces const &s,
-                         std::vector<scav_span> const &route,
-                         std::vector<scav_point> const &points,
+                         Vector<scav_span> const &route,
+                         Vector<scav_point> const &points,
                          scav_profile const &p,
                          LabelSearch search,
-                         std::vector<scav_rect> &out);
+                         Vector<scav_rect> &out);
 SCAV_INTERNAL_END
 
 namespace {
@@ -57,7 +57,7 @@ struct Legs {
 // `lca.child[0]` and trailing ones inside `lca.child[1]`; all legs if none remain.
 Legs legs_in(SizedLayout const &z,
              CommonAncestor const &lca,
-             std::vector<scav_point> const &points,
+             Vector<scav_point> const &points,
              scav_span r) {
   uint32_t const legs{ (r.len >= 2) ? (r.len - 1) : 0U };
   auto const inside = [&](uint32_t k, StateId st) {
@@ -138,7 +138,7 @@ constexpr Wide NO_LIMIT{ std::numeric_limits<Wide>::max() };
 // none is within `reach`); past `stop` the scan ends, returning a lower bound.
 Wide shortfall_of(scav_rect const &cand,
                   Wide reach,
-                  std::vector<scav_rect> const &foreign,
+                  Vector<scav_rect> const &foreign,
                   Wide stop,
                   uint32_t &at) {
   Wide nearest{ reach };
@@ -155,7 +155,7 @@ Wide shortfall_of(scav_rect const &cand,
 }
 
 // The midpoint of the longest horizontal leg, else of the longest leg.
-scav_point anchor_of(std::vector<scav_point> const &points, scav_span route) {
+scav_point anchor_of(Vector<scav_point> const &points, scav_span route) {
   scav_point mid{};
   Wide longest{ -1 };
   for (uint32_t pass = 0; (pass < 2) && (longest < 0); ++pass) {
@@ -192,10 +192,10 @@ struct Local {
   int32_t prior_mid{ 0 };
   uint32_t first{ 0 }, last{ 0 };  // the legs candidates sit on, from `legs_in`
   scav_rect holder{};
-  std::vector<scav_point> route;
-  std::vector<scav_rect> walls;    // states, bands and settled boxes
-  std::vector<scav_rect> foreign;  // other transitions' legs
-  std::vector<scav_rect> below;    // the states the route leaves and enters by
+  Vector<scav_point> route;
+  Vector<scav_rect> walls;    // states, bands and settled boxes
+  Vector<scav_rect> foreign;  // other transitions' legs
+  Vector<scav_rect> below;    // the states the route leaves and enters by
 };
 
 // The placed box and its leg and slide; a later box of its transition lies past them.
@@ -217,7 +217,7 @@ struct Group {
 // within reach of any of their candidates.
 struct Band {
   bool built{ false };
-  std::vector<scav_rect> near;
+  Vector<scav_rect> near;
 };
 
 // A leg's bands: across it a lead is back, none or forward, and an attachment
@@ -245,14 +245,14 @@ struct Leg {
 // Working vectors kept across one call's boxes; `bands` holds `BANDS` per leg. `gridded`
 // is set once `grid` is built over `blocked`.
 struct Scratch {
-  std::vector<scav_rect> own;
-  std::vector<scav_rect> blocked;
-  std::vector<std::vector<scav_rect>> nearby;
-  std::vector<Group> groups;
-  std::vector<Leg> legs;
+  Vector<scav_rect> own;
+  Vector<scav_rect> blocked;
+  std::vector<Vector<scav_rect>> nearby;
+  Vector<Group> groups;
+  Vector<Leg> legs;
   std::vector<Band> bands;
   RectGrid grid;
-  std::vector<uint32_t> fill;
+  Vector<uint32_t> fill;
   scav_rect region{};
   bool gridded{ false };
 };
@@ -268,10 +268,7 @@ RectGrid &grid_of(Scratch &s, int32_t cell_w, int32_t cell_h) {
 
 // The coordinate a slide along leg `k` is measured in: x on a horizontal leg,
 // y on any other.
-int32_t along(std::vector<scav_point> const &points,
-              scav_span r,
-              uint32_t k,
-              scav_point at) {
+int32_t along(Vector<scav_point> const &points, scav_span r, uint32_t k, scav_point at) {
   bool const flat{ ((k + 1) < r.len) && (points[r.off + k].y == points[r.off + k + 1].y) };
   return flat ? at.x : at.y;
 }
@@ -282,7 +279,7 @@ scav_rect relative_to(scav_rect const &r, scav_point origin) {
 
 // The route's bounds grown by the leader, the box and one more box height: the reach of
 // every candidate and its distance query.
-scav_rect region_of(std::vector<scav_point> const &route,
+scav_rect region_of(Vector<scav_point> const &route,
                     int32_t w,
                     int32_t h,
                     int32_t leader) {
@@ -307,25 +304,23 @@ scav_rect region_of(std::vector<scav_point> const &route,
 // Fills `s.own` with the route's legs and `s.blocked` with walls then foreign legs.
 void prepare(Local const &l, Scratch &s) {
   uint32_t const n{ static_cast<uint32_t>(l.route.size()) };
-  vec_assign(s.own, n - 1, {});
+  s.own.assign(n - 1, {});
   for (uint32_t k = 0; (k + 1) < n; ++k) {
     s.own[k] = span_rect(l.route[k], l.route[k + 1]);
   }
   if (s.nearby.size() < s.own.size()) { vec_resize(s.nearby, s.own.size()); }
-  vec_assign(s.blocked, l.walls.begin(), l.walls.end());
-  vec_insert(s.blocked, s.blocked.end(), l.foreign.begin(), l.foreign.end());
+  s.blocked.assign(l.walls.begin(), l.walls.end());
+  s.blocked.insert(s.blocked.end(), l.foreign.begin(), l.foreign.end());
   s.region = region_of(l.route, l.w, l.h, l.leader);
   s.gridded = false;
 }
 
 // The foreign legs within `leader + w + h` of leg `k`, into `s.nearby[k]`.
-std::vector<scav_rect> const &nearby_of(Local const &l, Scratch &s, uint32_t k) {
-  std::vector<scav_rect> &out{ s.nearby[k] };
+Vector<scav_rect> const &nearby_of(Local const &l, Scratch &s, uint32_t k) {
+  Vector<scav_rect> &out{ s.nearby[k] };
   out.clear();
   for (scav_rect const &seg : l.foreign) {
-    if (chebyshev_gap(s.own[k], seg) <= (l.leader + l.w + l.h)) {
-      vec_push_back(out, seg);
-    }
+    if (chebyshev_gap(s.own[k], seg) <= (l.leader + l.w + l.h)) { out.push_back(seg); }
   }
   return out;
 }
@@ -360,7 +355,7 @@ Outcome exhaustive(Local const &l, Scratch &s) {
     bool const ascending{ flat ? (a.x < b.x) : (a.y < b.y) };
     int32_t const dir{ ascending ? 1 : -1 };
     bool const bounded{ chained && (k == l.prior_seg) };
-    std::vector<scav_rect> const &nearby{ nearby_of(l, s, k) };
+    Vector<scav_rect> const &nearby{ nearby_of(l, s, k) };
     // Slides step from `lo`; the last is clamped to `hi`, so both ends are anchors.
     int32_t const runs{ (hi - lo) / step };
     for (int32_t n = 0; n <= (runs + 1); ++n) {
@@ -488,7 +483,7 @@ Band const &Walk::band_of(Group const &g) {
     Wide const gap{ imax(imax(imax(ac_lo - across_hi, across_lo - ac_hi),
                               imax(al_lo - along_hi, along_lo - al_hi)),
                          Wide{ 0 }) };
-    if (gap < reach) { vec_push_back(b.near, seg); }
+    if (gap < reach) { b.near.push_back(seg); }
   }
   return b;
 }
@@ -588,7 +583,7 @@ void Walk::group(Group const &g) {
         return past(s.blocked[hit], n, sign);
       }
     }
-    std::vector<scav_rect> const &nearby{ band_of(g).near };
+    Vector<scav_rect> const &nearby{ band_of(g).near };
     if (!nearby.empty()) {
       uint32_t nearest{ INVALID };
       here.shortfall = shortfall_of(cand,
@@ -682,15 +677,14 @@ Outcome pruned(Local const &l, Scratch &s) {
                               : ((Wide{ at.y } - d.y) - half_h) };
       Wide const gap{ imin(imax(centre, lo), hi) - centre };
       Wide const near{ imax(across, -across) + imax(gap, -gap) };
-      vec_push_back(s.groups,
-                    { .k = k,
-                      .offset = o,
-                      .band = bands + band_of_offset(o, flat),
-                      .centre = centre,
-                      .near = near });
+      s.groups.push_back({ .k = k,
+                           .offset = o,
+                           .band = bands + band_of_offset(o, flat),
+                           .centre = centre,
+                           .near = near });
       leg.near = imin(leg.near, near);
     }
-    vec_push_back(s.legs, leg);
+    s.legs.push_back(leg);
   }
   scav_insertion_sort(s.legs.data(),
                       s.legs.data() + s.legs.size(),
@@ -794,10 +788,10 @@ Outcome remembered(Local const &l, Scratch &s) {
 
 // Per-thread buffers for one `place_labels_by` call; the call never waits on the pool.
 struct CallBuffers {
-  std::vector<uint8_t> encloses;
-  std::vector<scav_rect> pieces;
-  std::vector<Pieces> by_route;
-  std::vector<uint32_t> live, queue, merge, settled;
+  Vector<uint8_t> encloses;
+  Vector<scav_rect> pieces;
+  Vector<Pieces> by_route;
+  Vector<uint32_t> live, queue, merge, settled;
   Vector<scav_extent> loop_label;
   Local local;
 };
@@ -815,26 +809,26 @@ uint32_t place_labels_by(Chart const &c,
                          SplitGraph const &g,
                          SizedLayout const &z,
                          scav_spaces const &s,
-                         std::vector<scav_span> const &route,
-                         std::vector<scav_point> const &points,
+                         Vector<scav_span> const &route,
+                         Vector<scav_point> const &points,
                          scav_profile const &p,
                          LabelSearch search,
-                         std::vector<scav_rect> &out) {
-  vec_assign(out, s.n_path_box, {});
+                         Vector<scav_rect> &out) {
+  out.assign(s.n_path_box, {});
   if ((s.path_box == nullptr) || (s.n_path_box == 0)) { return 0; }
 
   CallBuffers &cb{ call_buffers() };
-  std::vector<scav_rect> &pieces{ cb.pieces };
+  Vector<scav_rect> &pieces{ cb.pieces };
   pieces.clear();
-  std::vector<Pieces> &by_route{ cb.by_route };
-  vec_assign(by_route, route.size(), Pieces{});
+  Vector<Pieces> &by_route{ cb.by_route };
+  by_route.assign(route.size(), Pieces{});
   for (uint32_t t = 0; t < route.size(); ++t) {
     Pieces &of{ by_route[t] };
     of.first = static_cast<uint32_t>(pieces.size());
     for (uint32_t k = 0; (k + 1) < route[t].len; ++k) {
       scav_rect const at{ span_rect(points[route[t].off + k],
                                     points[route[t].off + k + 1]) };
-      vec_push_back(pieces, at);
+      pieces.push_back(at);
       if (k == 0) {
         of.bounds = at;
         continue;
@@ -847,15 +841,15 @@ uint32_t place_labels_by(Chart const &c,
     }
     of.count = static_cast<uint32_t>(pieces.size()) - of.first;
   }
-  std::vector<uint32_t> &live{ cb.live };
+  Vector<uint32_t> &live{ cb.live };
   live.clear();
   for (uint32_t st = 0; st < c.states.size(); ++st) {
-    if (c.states[st].live != 0) { vec_push_back(live, st); }
+    if (c.states[st].live != 0) { live.push_back(st); }
   }
 
   // By transition, then `order`; a box sees its transition's earlier boxes as settled.
-  std::vector<uint32_t> &queue{ cb.queue };
-  vec_resize(queue, s.n_path_box);
+  Vector<uint32_t> &queue{ cb.queue };
+  queue.resize(s.n_path_box);
   for (uint32_t i = 0; i < s.n_path_box; ++i) { queue[i] = i; }
   scav_stable_sort(queue, cb.merge, [&s](uint32_t a, uint32_t b) {
     if (s.path_box[a].subject != s.path_box[b].subject) {
@@ -866,8 +860,8 @@ uint32_t place_labels_by(Chart const &c,
 
   // The states a label may lie inside: the owner of the lowest submachine holding both
   // ends, and every state enclosing it.
-  std::vector<uint8_t> &encloses{ cb.encloses };
-  vec_assign(encloses, c.states.size(), 0);
+  Vector<uint8_t> &encloses{ cb.encloses };
+  encloses.assign(c.states.size(), 0);
   auto const mark = [&](StateId from, uint8_t v) {
     StateId at{ from };
     for (size_t step = 0; (step < c.states.size()) && (at.v != INVALID); ++step) {
@@ -878,7 +872,7 @@ uint32_t place_labels_by(Chart const &c,
 
   Local &l{ cb.local };          // every field set per box before it is read
   thread_local Scratch scratch;  // every search resets what it reads first
-  std::vector<uint32_t> &settled{ cb.settled };
+  Vector<uint32_t> &settled{ cb.settled };
   settled.clear();
   uint32_t fallbacks{ 0 };
   uint32_t prior_subject{ INVALID };
@@ -917,7 +911,7 @@ uint32_t place_labels_by(Chart const &c,
       if (face >= 2) { x = static_cast<int32_t>(mid - (box.w / 2)); }
       out[i] = { .x = x, .y = loop_y, .w = box.w, .h = box.h };
       loop_y += box.h;
-      vec_push_back(settled, i);
+      settled.push_back(i);
       continue;
     }
     Outcome got{};
@@ -942,8 +936,7 @@ uint32_t place_labels_by(Chart const &c,
       l.last = legs.last;
       l.route.clear();
       for (uint32_t k = 0; k < r.len; ++k) {
-        vec_push_back(
-            l.route,
+        l.route.push_back(
             { .x = points[r.off + k].x - origin.x, .y = points[r.off + k].y - origin.y });
       }
       scav_rect const local_region{ region_of(l.route, box.w, box.h, leader) };
@@ -988,15 +981,15 @@ uint32_t place_labels_by(Chart const &c,
         if (encloses[st] != 0) {
           for (scav_rect const &band : state_walls(z, st)) {
             if ((band.w > 0) && (band.h > 0) && overlaps(region, band)) {
-              vec_push_back(l.walls, local_rect(band));
+              l.walls.push_back(local_rect(band));
             }
           }
         } else if (overlaps(region, z.state[st])) {
-          vec_push_back(l.walls, local_rect(z.state[st]));
+          l.walls.push_back(local_rect(z.state[st]));
         }
       }
       for (uint32_t const j : settled) {
-        if (overlaps(region, out[j])) { vec_push_back(l.walls, local_rect(out[j])); }
+        if (overlaps(region, out[j])) { l.walls.push_back(local_rect(out[j])); }
       }
       l.foreign.clear();
       for (uint32_t t = 0; t < by_route.size(); ++t) {
@@ -1005,9 +998,7 @@ uint32_t place_labels_by(Chart const &c,
           continue;
         }
         for (uint32_t k = of.first; k < (of.first + of.count); ++k) {
-          if (overlaps(region, pieces[k])) {
-            vec_push_back(l.foreign, local_rect(pieces[k]));
-          }
+          if (overlaps(region, pieces[k])) { l.foreign.push_back(local_rect(pieces[k])); }
         }
       }
       mark(within, 0);
@@ -1017,7 +1008,7 @@ uint32_t place_labels_by(Chart const &c,
           StateId const st{ lca.child[k] };
           if ((st.v == INVALID) || ((k == 1) && (st == lca.child[0]))) { continue; }
           if (overlaps(region, z.state[st.v])) {
-            vec_push_back(l.below, local_rect(z.state[st.v]));
+            l.below.push_back(local_rect(z.state[st.v]));
           }
         }
       }
@@ -1049,7 +1040,7 @@ uint32_t place_labels_by(Chart const &c,
                      .seg = { .seg = g.trans_segments[box.subject].off } });
       }
     }
-    vec_push_back(settled, i);
+    settled.push_back(i);
   }
   return fallbacks;
 }
@@ -1060,10 +1051,10 @@ uint32_t place_labels(Chart const &c,
                       SplitGraph const &g,
                       SizedLayout const &z,
                       scav_spaces const &s,
-                      std::vector<scav_span> const &route,
-                      std::vector<scav_point> const &points,
+                      Vector<scav_span> const &route,
+                      Vector<scav_point> const &points,
                       scav_profile const &p,
-                      std::vector<scav_rect> &out) {
+                      Vector<scav_rect> &out) {
   return place_labels_by(c, g, z, s, route, points, p, LabelSearch::Memoized, out);
 }
 

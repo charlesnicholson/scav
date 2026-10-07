@@ -5,6 +5,7 @@
 #include "scav/scav_layout.h"
 #include "scav/scav_types.h"
 #include "scav_vec.h"
+#include "scav_vector.h"
 
 #include <array>
 #include <cstdint>

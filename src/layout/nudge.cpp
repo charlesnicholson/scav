@@ -8,11 +8,10 @@
 #include "layout/trace.h"
 #include "scav_int.h"
 #include "scav_stable_sort.h"
-#include "scav_vec.h"
+#include "scav_vector.h"
 
 #include <array>
 #include <cstdint>
-#include <vector>
 
 namespace scav {
 
@@ -62,8 +61,8 @@ bool kept(Wide before, Wide after) {
 
 // True when the nets of `x` and `y` match point for point from the segment's second point
 // to the end, or from the start to its first point.
-bool bundled(std::vector<scav_point> const &points,
-             std::vector<scav_span> const &nets,
+bool bundled(Vector<scav_point> const &points,
+             Vector<scav_span> const &nets,
              Member const &x,
              Member const &y) {
   scav_span const a{ nets[x.net] };
@@ -98,7 +97,7 @@ uint64_t line_key(scav_point a, scav_point b) {
 bool axial(scav_point a, scav_point b) { return (a.x == b.x) != (a.y == b.y); }
 
 // First index with `v[i].key >= key` in `v`, sorted by key.
-uint32_t line_start(std::vector<OnLine> const &v, uint64_t key) {
+uint32_t line_start(Vector<OnLine> const &v, uint64_t key) {
   uint32_t lo{ 0 };
   uint32_t hi{ static_cast<uint32_t>(v.size()) };
   while (lo < hi) {
@@ -114,24 +113,24 @@ uint32_t line_start(std::vector<OnLine> const &v, uint64_t key) {
 
 // Per-thread buffers for one call, reassigned in place; a call never waits on the pool.
 struct NudgeScratch {
-  std::vector<Member> members;
-  std::vector<uint32_t> lane;
-  Partition link;              // -> members, the lanes of one axis
-  Partition parent;            // -> lane, the bundles of one lane
-  std::vector<uint32_t> slot;  // -> lane, each entry's bundle, then that bundle's position
-  std::vector<uint32_t> sizes;
-  std::vector<uint32_t> group;
-  std::vector<uint32_t> kin;
-  std::vector<int32_t> votes;  // groups x groups, antisymmetric
-  std::vector<uint32_t> degree;
-  std::vector<uint32_t> order;
-  std::vector<uint32_t> rank;  // -> order, inverted
+  Vector<Member> members;
+  Vector<uint32_t> lane;
+  Partition link;         // -> members, the lanes of one axis
+  Partition parent;       // -> lane, the bundles of one lane
+  Vector<uint32_t> slot;  // -> lane, each entry's bundle, then that bundle's position
+  Vector<uint32_t> sizes;
+  Vector<uint32_t> group;
+  Vector<uint32_t> kin;
+  Vector<int32_t> votes;  // groups x groups, antisymmetric
+  Vector<uint32_t> degree;
+  Vector<uint32_t> order;
+  Vector<uint32_t> rank;  // -> order, inverted
   // -> members: the next of each one's lane, and the last so far of each root's.
-  std::vector<uint32_t> next_member, last_member;
-  std::vector<Member> member_merge;  // the sorts' merge buffers
-  std::vector<uint32_t> lane_merge;
+  Vector<uint32_t> next_member, last_member;
+  Vector<Member> member_merge;  // the sorts' merge buffers
+  Vector<uint32_t> lane_merge;
   // Every net's segments by line as the axis pass began, and those it has since moved.
-  std::vector<OnLine> lines, moved, line_merge;
+  Vector<OnLine> lines, moved, line_merge;
 };
 
 NudgeScratch &nudge_scratch() {
@@ -142,13 +141,13 @@ NudgeScratch &nudge_scratch() {
 }  // namespace
 
 void nudge_lanes(scav_rect const &region,
-                 std::vector<scav_rect> const &bounds,
-                 std::vector<scav_rect> const &obstacles,
+                 Vector<scav_rect> const &bounds,
+                 Vector<scav_rect> const &obstacles,
                  int32_t gap,
                  int32_t clear,
                  int32_t band,
-                 std::vector<scav_span> const &nets,
-                 std::vector<scav_point> &points,
+                 Vector<scav_span> const &nets,
+                 Vector<scav_point> &points,
                  scav_path_clear const *keep,
                  uint32_t n_keep) {
   if (gap <= 0) { return; }
@@ -157,20 +156,20 @@ void nudge_lanes(scav_rect const &region,
   uint32_t const net_count{ static_cast<uint32_t>(nets.size()) };
 
   NudgeScratch &sc{ nudge_scratch() };
-  std::vector<Member> &members{ sc.members };
-  std::vector<uint32_t> &lane{ sc.lane };
+  Vector<Member> &members{ sc.members };
+  Vector<uint32_t> &lane{ sc.lane };
   Partition &link{ sc.link };
   Partition &parent{ sc.parent };
-  std::vector<uint32_t> &slot{ sc.slot };
-  std::vector<uint32_t> &sizes{ sc.sizes };
-  std::vector<uint32_t> &group{ sc.group };
-  std::vector<uint32_t> &kin{ sc.kin };
-  std::vector<int32_t> &votes{ sc.votes };
-  std::vector<uint32_t> &degree{ sc.degree };
-  std::vector<uint32_t> &order{ sc.order };
-  std::vector<uint32_t> &rank{ sc.rank };
-  std::vector<uint32_t> &next_member{ sc.next_member };
-  std::vector<uint32_t> &last_member{ sc.last_member };
+  Vector<uint32_t> &slot{ sc.slot };
+  Vector<uint32_t> &sizes{ sc.sizes };
+  Vector<uint32_t> &group{ sc.group };
+  Vector<uint32_t> &kin{ sc.kin };
+  Vector<int32_t> &votes{ sc.votes };
+  Vector<uint32_t> &degree{ sc.degree };
+  Vector<uint32_t> &order{ sc.order };
+  Vector<uint32_t> &rank{ sc.rank };
+  Vector<uint32_t> &next_member{ sc.next_member };
+  Vector<uint32_t> &last_member{ sc.last_member };
   kin.clear();
   for (uint32_t axis = 0; axis < 2; ++axis) {
     bool const horizontal{ axis == 0 };
@@ -216,14 +215,14 @@ void nudge_lanes(scav_rect const &region,
         if (v <= 0) { m.up = imin(m.up, -v - keep_v); }
         m.up = imax(m.up, Wide{ 0 });
         m.down = imax(m.down, Wide{ 0 });
-        vec_push_back(members, m);
+        members.push_back(m);
       }
     }
     if (members.size() < 2) { continue; }
 
     // Built on the pass's first `known_good`.
-    std::vector<OnLine> &lines{ sc.lines };
-    std::vector<OnLine> &moved{ sc.moved };
+    Vector<OnLine> &lines{ sc.lines };
+    Vector<OnLine> &moved{ sc.moved };
     bool indexed{ false };
     lines.clear();
     moved.clear();
@@ -234,8 +233,7 @@ void nudge_lanes(scav_rect const &region,
         for (uint32_t k = 0; (k + 1) < span.len; ++k) {
           uint32_t const i{ span.off + k };
           if (!axial(points[i], points[i + 1])) { continue; }
-          vec_push_back(
-              lines,
+          lines.push_back(
               { .key = line_key(points[i], points[i + 1]), .point = i, .net = net });
         }
       }
@@ -316,7 +314,7 @@ void nudge_lanes(scav_rect const &region,
       for (uint32_t r = 0; ok && (r < now.size()); ++r) {
         if (!axial(way[r], way[r + 1])) { continue; }
         uint64_t const key{ line_key(way[r], way[r + 1]) };
-        for (std::vector<OnLine> const *v : { &lines, &moved }) {
+        for (Vector<OnLine> const *v : { &lines, &moved }) {
           for (uint32_t j = line_start(*v, key);
                ok && (j < v->size()) && ((*v)[j].key == key);
                ++j) {
@@ -339,8 +337,8 @@ void nudge_lanes(scav_rect const &region,
       }
     }
     // Threads each lane's members in ascending order from its root, its least member.
-    vec_assign(next_member, members.size(), INVALID);
-    vec_resize(last_member, members.size());
+    next_member.assign(members.size(), INVALID);
+    last_member.resize(members.size());
     for (uint32_t i = 0; i < members.size(); ++i) {
       uint32_t const root{ link.root(i) };
       if (root != i) { next_member[last_member[root]] = i; }
@@ -352,7 +350,7 @@ void nudge_lanes(scav_rect const &region,
       int32_t reach{ members[first].hi };
       int32_t least{ members[first].lo };
       for (uint32_t i = first; i != INVALID; i = next_member[i]) {
-        vec_push_back(lane, i);
+        lane.push_back(i);
         reach = imax(reach, members[i].hi);
         least = imin(least, members[i].lo);
       }
@@ -376,7 +374,7 @@ void nudge_lanes(scav_rect const &region,
           }
         }
       }
-      vec_resize(slot, count);
+      slot.resize(count);
       uint32_t groups{ 0 };
       for (uint32_t j = 0; j < count; ++j) {
         if (!parent.leads(j)) { continue; }
@@ -384,7 +382,7 @@ void nudge_lanes(scav_rect const &region,
         ++groups;
       }
       for (uint32_t j = 0; j < count; ++j) { slot[j] = slot[parent.root(j)]; }
-      vec_assign(sizes, groups, 0);
+      sizes.assign(groups, 0);
       for (uint32_t j = 0; j < count; ++j) { ++sizes[slot[j]]; }
       uint32_t merged{ 0 };
       for (uint32_t const n : sizes) { merged += (n > 1) ? 1U : 0U; }
@@ -403,7 +401,7 @@ void nudge_lanes(scav_rect const &region,
       // Each leg leaving the lane strictly inside another member's extent votes for the
       // order that keeps it off that member's segment; `votes` is antisymmetric.
       uint32_t const cells{ groups * groups };
-      vec_assign(votes, cells, 0);
+      votes.assign(cells, 0);
       for (uint32_t j = 0; j < count; ++j) {
         for (uint32_t q = 0; q < count; ++q) {
           if (slot[j] == slot[q]) { continue; }
@@ -420,7 +418,7 @@ void nudge_lanes(scav_rect const &region,
 
       // Kahn's algorithm over edges `u` -> `v` where `votes[u][v] > 0`, taking the
       // lowest-key ready bundle first; key order when there are no votes.
-      vec_assign(degree, groups, 0);
+      degree.assign(groups, 0);
       for (uint32_t u = 0; u < groups; ++u) {
         for (uint32_t v = 0; v < groups; ++v) {
           if (votes[(u * groups) + v] > 0) { ++degree[v]; }
@@ -433,7 +431,7 @@ void nudge_lanes(scav_rect const &region,
           if (degree[b] == 0) { next = b; }
         }
         if (next == groups) { break; }  // every bundle left is preceded by another
-        vec_push_back(order, next);
+        order.push_back(next);
         degree[next] = PLACED;
         for (uint32_t v = 0; v < groups; ++v) {
           if (votes[(next * groups) + v] > 0) { --degree[v]; }
@@ -459,14 +457,14 @@ void nudge_lanes(scav_rect const &region,
               best = at;
             }
           }
-          vec_push_back(order, b);
+          order.push_back(b);
           for (uint32_t k = static_cast<uint32_t>(order.size()) - 1; k > best; --k) {
             order[k] = order[k - 1];
           }
           order[best] = b;
         }
       }
-      vec_assign(rank, groups, 0);
+      rank.assign(groups, 0);
       bool keyed{ true };
       for (uint32_t i = 0; i < groups; ++i) {
         rank[order[i]] = i;
@@ -562,12 +560,12 @@ void nudge_lanes(scav_rect const &region,
                (moved[at_key].point < on.point)) {
           ++at_key;
         }
-        vec_insert(moved, moved.begin() + at_key, { on });
+        moved.insert(moved.begin() + at_key, { on });
       };
       for (uint32_t b = 0; b < groups; ++b) {
         group.clear();
         for (uint32_t j = 0; j < count; ++j) {
-          if (slot[j] == b) { vec_push_back(group, lane[j]); }
+          if (slot[j] == b) { group.push_back(lane[j]); }
         }
         if (members[group[0]].offset == 0) { continue; }
         // Checks every member of the bundle before moving any; one failure leaves the
@@ -576,7 +574,7 @@ void nudge_lanes(scav_rect const &region,
         for (uint32_t const i : group) {
           kin.clear();
           for (uint32_t const other : group) {
-            if (other != i) { vec_push_back(kin, members[other].point); }
+            if (other != i) { kin.push_back(members[other].point); }
           }
           ok = ok && known_good(members[i]);
         }

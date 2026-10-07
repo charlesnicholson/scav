@@ -4,12 +4,12 @@
 #include "scav_cold.h"
 #include "scav_int.h"
 #include "scav_stable_sort.h"
-#include "scav_vec.h"
 #include "scav_vector.h"
 
 #include <algorithm>
 #include <cstring>
 #include <limits>
+#include <vector>
 
 namespace scav {
 
@@ -40,14 +40,14 @@ template <typename BlockOf>
 void group(uint32_t count,
            uint32_t blocks,
            BlockOf const &block_of,
-           std::vector<uint32_t> &off,
-           std::vector<uint32_t> &list) {
+           Vector<uint32_t> &off,
+           Vector<uint32_t> &list) {
   auto const at = [&](uint32_t i) { return imin(block_of(i), blocks - 1); };
-  vec_assign(off, size_t{ blocks } + 1, 0);
+  off.assign(size_t{ blocks } + 1, 0);
   for (uint32_t i = 0; i < count; ++i) { ++off[at(i) + 1]; }
   for (uint32_t b = 0; b < blocks; ++b) { off[b + 1] += off[b]; }
-  std::vector<uint32_t> fill(off.begin(), off.end() - 1);
-  vec_assign(list, count, 0);
+  Vector<uint32_t> fill(off.begin(), off.end() - 1);
+  list.assign(count, 0);
   for (uint32_t i = 0; i < count; ++i) { list[fill[at(i)]++] = i; }
 }
 
@@ -73,9 +73,9 @@ bool number_blocks(uint32_t serial,
                    Blocks &last,
                    Blocks const *like,
                    Intern const &intern) {
-  thread_local std::vector<uint32_t> fresh;
+  thread_local Vector<uint32_t> fresh;
   auto const blocks{ static_cast<uint32_t>(now.ends.size()) };
-  vec_resize(now.ids, blocks);
+  now.ids.resize(blocks);
   fresh.clear();
   for (uint32_t m = 0; m < blocks; ++m) {
     if ((like != nullptr) && same_block(*like, now, m, serial)) {
@@ -83,7 +83,7 @@ bool number_blocks(uint32_t serial,
     } else if (same_block(last, now, m, serial)) {
       now.ids[m] = last.ids[m];
     } else {
-      vec_push_back(fresh, m);
+      fresh.push_back(m);
     }
   }
   for (uint32_t const m : fresh) {
@@ -137,7 +137,7 @@ SCAV_COLD uint32_t CandidateMemo::row_word(Row const &row) {
       return i;
     }
   }
-  vec_push_back(rows, row);
+  rows.push_back(row);
   return static_cast<uint32_t>(rows.size() - 1);
 }
 
@@ -148,13 +148,13 @@ SCAV_COLD uint32_t CandidateMemo::profile_word(scav_profile const &knobs) {
   for (uint32_t i = 0; i < profiles.size(); ++i) {
     if (std::memcmp(&profiles[i], &routed, sizeof(scav_profile)) == 0) { return i; }
   }
-  vec_push_back(profiles, routed);
+  profiles.push_back(routed);
   return static_cast<uint32_t>(profiles.size() - 1);
 }
 
 bool CandidateMemo::put_frame(SubmachineOrders const &o,
                               uint32_t m,
-                              std::vector<uint32_t> &w) const {
+                              Vector<uint32_t> &w) const {
   uint32_t node_off{ 0 };
   uint32_t node_len{ 0 };
   if (m < chart.submachines.size()) {
@@ -165,17 +165,16 @@ bool CandidateMemo::put_frame(SubmachineOrders const &o,
     if ((ns.len >= LOCAL_LIMIT) || (es.len >= LOCAL_LIMIT)) { return false; }
     node_off = ns.off;
     node_len = ns.len;
-    vec_insert(w,
-               w.end(),
-               { ranks,
-                 uint32_t{ o.sub_down[m] } | (uint32_t{ o.sub_fold[m] } << 8U),
-                 o.sub_fold_cut[m],
-                 ns.len | (es.len << 16U),
-                 gs.len });
+    w.insert(w.end(),
+             { ranks,
+               uint32_t{ o.sub_down[m] } | (uint32_t{ o.sub_fold[m] } << 8U),
+               o.sub_fold_cut[m],
+               ns.len | (es.len << 16U),
+               gs.len });
     // Nodes run in rank order with `pos` counting up from 0 in each rank; the counts per
     // rank and the nodes in order give back every rank and pos.
     size_t const counts_at{ w.size() };
-    vec_resize(w, w.size() + ((size_t{ ranks } + 1) / 2), 0U);
+    w.resize(w.size() + ((size_t{ ranks } + 1) / 2), 0U);
     uint32_t last{ 0 };
     uint32_t pos{ 0 };
     for (uint32_t k = 0; k < ns.len; ++k) {
@@ -189,7 +188,7 @@ bool CandidateMemo::put_frame(SubmachineOrders const &o,
       if (nd.pos != pos) { return false; }
       ++pos;
       w[counts_at + (rank / 2)] += ((rank % 2) == 0) ? 1U : (1U << 16U);
-      vec_push_back(w, (nd.subject << 2U) | static_cast<uint32_t>(nd.kind));
+      w.push_back((nd.subject << 2U) | static_cast<uint32_t>(nd.kind));
     }
     for (uint32_t k = 0; k < es.len; ++k) {
       OrderEdge const &e{ o.edges[es.off + k] };
@@ -199,12 +198,12 @@ bool CandidateMemo::put_frame(SubmachineOrders const &o,
           (e.reversed > 1) || (e.segment >= ID_LIMIT)) {
         return false;
       }
-      vec_push_back(w, src | (dst << 16U));
-      vec_push_back(w, (e.segment << 1U) | e.reversed);
+      w.push_back(src | (dst << 16U));
+      w.push_back((e.segment << 1U) | e.reversed);
     }
     for (uint32_t k = 0; k < gs.len; ++k) {
-      vec_push_back(w, static_cast<uint32_t>(o.gaps[gs.off + k]));
-      vec_push_back(w, static_cast<uint32_t>(o.labels[gs.off + k]));
+      w.push_back(static_cast<uint32_t>(o.gaps[gs.off + k]));
+      w.push_back(static_cast<uint32_t>(o.labels[gs.off + k]));
     }
   }
   for (uint32_t k = seg_off[m]; k < seg_off[m + 1]; ++k) {
@@ -215,10 +214,9 @@ bool CandidateMemo::put_frame(SubmachineOrders const &o,
       local = node - node_off;
       if ((node < node_off) || (local >= node_len)) { return false; }
     }
-    vec_push_back(w, o.seg_port[seg]);
-    vec_push_back(w,
-                  (local << 16U) | (uint32_t{ o.seg_cross[seg] } << 8U) |
-                      uint32_t{ o.seg_side[seg] });
+    w.push_back(o.seg_port[seg]);
+    w.push_back((local << 16U) | (uint32_t{ o.seg_cross[seg] } << 8U) |
+                uint32_t{ o.seg_side[seg] });
   }
   uint32_t packed{ 0 };
   uint32_t shift{ 0 };
@@ -226,18 +224,18 @@ bool CandidateMemo::put_frame(SubmachineOrders const &o,
     packed |= uint32_t{ o.state_loop[state_list[k]] } << shift;
     shift += 8;
     if (shift == 32) {
-      vec_push_back(w, packed);
+      w.push_back(packed);
       packed = 0;
       shift = 0;
     }
   }
-  if (shift != 0) { vec_push_back(w, packed); }
+  if (shift != 0) { w.push_back(packed); }
   return true;
 }
 
 uint32_t CandidateMemo::shape(SizedLayout const &z, uint32_t st) {
   // Per state, the thread's last shape in memo `cached`: its length, number and words.
-  thread_local std::vector<uint32_t> cache;
+  thread_local Vector<uint32_t> cache;
   thread_local uint32_t cached{ 0 };
   scav_rect const &r{ z.state[st] };
   std::array<scav_rect, 5> const rects{ z.before[st],
@@ -264,7 +262,7 @@ uint32_t CandidateMemo::shape(SizedLayout const &z, uint32_t st) {
   if (!fits) { return INVALID; }
   size_t const stride{ size_t{ SHAPE_WORDS } + 2 };
   if (cached != serial) {
-    vec_assign(cache, chart.states.size() * stride, 0U);
+    cache.assign(chart.states.size() * stride, 0U);
     cached = serial;
   }
   uint32_t *const had{ cache.data() + (size_t{ st } * stride) };
@@ -283,26 +281,26 @@ uint32_t CandidateMemo::shape(SizedLayout const &z, uint32_t st) {
 
 bool CandidateMemo::put_geometry(SubmachineOrders const &o,
                                  SizedLayout const &z,
-                                 std::vector<std::vector<uint32_t>> const &bends,
+                                 std::vector<Vector<uint32_t>> const &bends,
                                  uint32_t m,
-                                 std::vector<uint32_t> &w) {
+                                 Vector<uint32_t> &w) {
   int32_t ox{ 0 };
   int32_t oy{ 0 };
   if (m < chart.submachines.size()) {
     scav_rect const &f{ z.sub[m] };
     ox = f.x;
     oy = f.y;
-    vec_insert(w, w.end(), { static_cast<uint32_t>(f.w), static_cast<uint32_t>(f.h) });
+    w.insert(w.end(), { static_cast<uint32_t>(f.w), static_cast<uint32_t>(f.h) });
   }
   bool fits{ true };
   auto const put_point = [&](scav_point p) {
-    vec_insert(w, w.end(), { offset(p.x, ox, fits), offset(p.y, oy, fits) });
+    w.insert(w.end(), { offset(p.x, ox, fits), offset(p.y, oy, fits) });
   };
   for (uint32_t k = state_off[m]; k < state_off[m + 1]; ++k) {
     uint32_t const st{ state_list[k] };
     uint32_t const id{ shape(z, st) };
     if (id == INVALID) { return false; }
-    vec_push_back(w, id);
+    w.push_back(id);
     put_point({ .x = z.state[st].x, .y = z.state[st].y });
   }
   for (uint32_t k = owned_off[m]; k < owned_off[m + 1]; ++k) {
@@ -313,13 +311,12 @@ bool CandidateMemo::put_geometry(SubmachineOrders const &o,
   for (uint32_t k = seg_off[m]; k < seg_off[m + 1]; ++k) {
     uint32_t const seg{ seg_list[k] };
     uint32_t const node{ o.seg_node[seg] };
-    std::vector<uint32_t> const &chain{ bends[seg] };
+    Vector<uint32_t> const &chain{ bends[seg] };
     bool const noded{ node != INVALID };
     if ((noded && (node >= z.node.size())) || (chain.size() >= CHAIN_LIMIT)) {
       return false;
     }
-    vec_insert(
-        w,
+    w.insert(
         w.end(),
         { o.seg_port[seg],
           uint32_t{ o.seg_side[seg] } | (uint32_t{ z.lean[seg] } << 8U) |
@@ -334,7 +331,7 @@ bool CandidateMemo::put_geometry(SubmachineOrders const &o,
 }
 
 bool CandidateMemo::frame_ids(SubmachineOrders const &o,
-                              std::vector<uint32_t> &ids,
+                              Vector<uint32_t> &ids,
                               Blocks const *like,
                               Blocks *keep) {
   if (!usable) { return false; }
@@ -346,14 +343,14 @@ bool CandidateMemo::frame_ids(SubmachineOrders const &o,
   auto const blocks{ static_cast<uint32_t>(chart.submachines.size()) + 1 };
   for (uint32_t m = 0; m < blocks; ++m) {
     if (!put_frame(o, m, now.words)) { return false; }
-    vec_push_back(now.ends, static_cast<uint32_t>(now.words.size()));
+    now.ends.push_back(static_cast<uint32_t>(now.words.size()));
   }
   if (!number_blocks(serial, now, last, like, [this](uint32_t const *key, uint32_t len) {
         return intern(frames, key, len);
       })) {
     return false;
   }
-  vec_assign(ids, last.ids.begin(), last.ids.end());
+  ids.assign(last.ids.begin(), last.ids.end());
   if (keep != nullptr) { *keep = last; }
   return true;
 }
@@ -403,20 +400,20 @@ SCAV_COLD void CandidateMemo::empty() {
     ScopedLock const held{ f.lock };
     f.base += f.keys.size();
     f.keys = KeyIndex{};
-    std::vector<FacingRecord>{}.swap(f.records);
-    std::vector<uint32_t>{}.swap(f.turns);
+    Vector<FacingRecord>{}.swap(f.records);
+    Vector<uint32_t>{}.swap(f.turns);
   }
   for (ScoreShard &sh : scores) {
     ScopedLock const held{ sh.lock };
     sh.base += sh.keys.size();
     sh.keys = KeyIndex{};
-    std::vector<ScoreRecord>{}.swap(sh.records);
+    Vector<ScoreRecord>{}.swap(sh.records);
   }
   for (LinkShard &sh : orderings) {
     ScopedLock const held{ sh.lock };
     sh.base += sh.keys.size();
     sh.keys = KeyIndex{};
-    std::vector<uint32_t>{}.swap(sh.links);
+    Vector<uint32_t>{}.swap(sh.links);
   }
   emptying.store(false);
 }
@@ -425,8 +422,8 @@ SCAV_COLD uint32_t CandidateMemo::arrangement(SubmachineOrders const &o,
                                               Blocks const *like,
                                               Blocks *keep) {
   // The thread's last frame numbers and their arrangement, in memo `last_serial`.
-  thread_local std::vector<uint32_t> ids;
-  thread_local std::vector<uint32_t> last_ids;
+  thread_local Vector<uint32_t> ids;
+  thread_local Vector<uint32_t> last_ids;
   thread_local uint32_t last_serial{ 0 };
   thread_local uint32_t last{ INVALID };
   if (!frame_ids(o, ids, like, keep)) { return INVALID; }
@@ -442,15 +439,15 @@ uint32_t CandidateMemo::drawing(SubmachineOrders const &o,
                                 uint32_t profile,
                                 Blocks const *like,
                                 Blocks *keep) {
-  thread_local std::vector<uint32_t> reversed;
-  thread_local std::vector<std::vector<uint32_t>> bends;
+  thread_local Vector<uint32_t> reversed;
+  thread_local std::vector<Vector<uint32_t>> bends;
   segment_bends(o, static_cast<uint32_t>(graph.segments.size()), reversed, bends);
   return drawing(o, z, bends, profile, like, keep);
 }
 
 SCAV_COLD uint32_t CandidateMemo::drawing(SubmachineOrders const &o,
                                           SizedLayout const &z,
-                                          std::vector<std::vector<uint32_t>> const &bends,
+                                          std::vector<Vector<uint32_t>> const &bends,
                                           uint32_t profile,
                                           Blocks const *like,
                                           Blocks *keep) {
@@ -469,8 +466,8 @@ SCAV_COLD uint32_t CandidateMemo::drawing(SubmachineOrders const &o,
   // drawing's key, and `last_tuple` and `last` the thread's previous key and number.
   thread_local Blocks now;
   thread_local Blocks blocks;
-  thread_local std::vector<uint32_t> tuple;
-  thread_local std::vector<uint32_t> last_tuple;
+  thread_local Vector<uint32_t> tuple;
+  thread_local Vector<uint32_t> last_tuple;
   thread_local uint32_t last_serial{ 0 };
   thread_local uint32_t last{ INVALID };
   now.words.clear();
@@ -478,7 +475,7 @@ SCAV_COLD uint32_t CandidateMemo::drawing(SubmachineOrders const &o,
   auto const count{ static_cast<uint32_t>(chart.submachines.size()) + 1 };
   for (uint32_t m = 0; m < count; ++m) {
     if (!put_geometry(o, z, bends, m, now.words)) { return INVALID; }
-    vec_push_back(now.ends, static_cast<uint32_t>(now.words.size()));
+    now.ends.push_back(static_cast<uint32_t>(now.words.size()));
   }
   if (!number_blocks(serial, now, blocks, like, [this](uint32_t const *key, uint32_t len) {
         return intern(geometries, key, len);
@@ -488,14 +485,13 @@ SCAV_COLD uint32_t CandidateMemo::drawing(SubmachineOrders const &o,
   if (keep != nullptr) { *keep = blocks; }
   scav_rect const &c{ z.chart };
   tuple.clear();
-  vec_insert(tuple,
-             tuple.end(),
-             { profile,
-               static_cast<uint32_t>(c.x),
-               static_cast<uint32_t>(c.y),
-               static_cast<uint32_t>(c.w),
-               static_cast<uint32_t>(c.h) });
-  vec_insert(tuple, tuple.end(), blocks.ids.begin(), blocks.ids.end());
+  tuple.insert(tuple.end(),
+               { profile,
+                 static_cast<uint32_t>(c.x),
+                 static_cast<uint32_t>(c.y),
+                 static_cast<uint32_t>(c.w),
+                 static_cast<uint32_t>(c.h) });
+  tuple.insert(tuple.end(), blocks.ids.begin(), blocks.ids.end());
   if ((last_serial == serial) && (tuple == last_tuple)) { return last; }
   last = intern(drawings, tuple.data(), static_cast<uint32_t>(tuple.size()));
   last_serial = serial;
@@ -560,8 +556,8 @@ FacingFound CandidateMemo::find_facing(uint32_t row,
   if (at == INVALID) { return FacingFound::Absent; }
   FacingRecord const &r{ f.records[at] };
   if (r.off == INVALID) { return FacingFound::Failed; }
-  vec_resize(out.reverses, r.reverses);
-  vec_resize(out.sides, r.sides);
+  out.reverses.resize(r.reverses);
+  out.sides.resize(r.sides);
   uint32_t w{ r.off };
   for (ReversePin &p : out.reverses) {
     p = { .trans = TransId{ f.turns[w] }, .leg = f.turns[w + 1] };
@@ -602,17 +598,16 @@ SCAV_COLD void CandidateMemo::store_facing(uint32_t row,
     }
     size_t const words{ f.turns.size() };
     if (turned == nullptr) {
-      vec_push_back(f.records, { .off = INVALID, .reverses = 0, .sides = 0 });
+      f.records.push_back({ .off = INVALID, .reverses = 0, .sides = 0 });
     } else {
-      vec_push_back(f.records,
-                    { .off = static_cast<uint32_t>(words),
-                      .reverses = static_cast<uint32_t>(turned->reverses.size()),
-                      .sides = static_cast<uint32_t>(turned->sides.size()) });
+      f.records.push_back({ .off = static_cast<uint32_t>(words),
+                            .reverses = static_cast<uint32_t>(turned->reverses.size()),
+                            .sides = static_cast<uint32_t>(turned->sides.size()) });
       for (ReversePin const &p : turned->reverses) {
-        vec_insert(f.turns, f.turns.end(), { p.trans.v, p.leg });
+        f.turns.insert(f.turns.end(), { p.trans.v, p.leg });
       }
       for (EndPin const &p : turned->sides) {
-        vec_insert(f.turns, f.turns.end(), { p.trans.v, p.leg, (p.end * 4) + p.face });
+        f.turns.insert(f.turns.end(), { p.trans.v, p.leg, (p.end * 4) + p.face });
       }
     }
     added = held(f) - had;
@@ -655,8 +650,8 @@ SCAV_COLD CandidateMemo::Recalled CandidateMemo::find_score(uint32_t drawn,
     index = sh.keys.insert(key.data(), len, hash);
     if (index == INVALID) { return out; }
     out.entry = number(sh.base, index, shard);
-    vec_push_back(sh.records,
-                  { .t0 = { TAG_UNSET, TAG_UNSET }, .t2 = { 0, 0 }, .bound = { -1, -1 } });
+    sh.records.push_back(
+        { .t0 = { TAG_UNSET, TAG_UNSET }, .t2 = { 0, 0 }, .bound = { -1, -1 } });
     added = held(sh) - had;
   }
   charge(added);
@@ -701,7 +696,7 @@ SCAV_COLD CandidateMemo::Linked CandidateMemo::find_ordering(
     index = sh.keys.insert(key.data(), len, hash);
     if (index == INVALID) { return out; }
     out.key = number(sh.base, index, shard);
-    vec_push_back(sh.links, INVALID);
+    sh.links.push_back(INVALID);
     added = held(sh) - had;
   }
   charge(added);

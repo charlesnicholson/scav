@@ -8,9 +8,9 @@
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
 #include "scav/scav_layout_c.h"
+#include "scav_vector.h"
 
 #include "doctest.h"
-#include "scav_vector.h"
 
 #include <cstdint>
 #include <string>
@@ -77,8 +77,8 @@ struct Fixture {
   // A rank pin under which segment `seg` chains through two bends or more.
   [[nodiscard]] SearchPins chained_rank(uint32_t &seg) const {
     SubmachineOrders const plain{ order() };
-    std::vector<uint32_t> reversed;
-    std::vector<std::vector<uint32_t>> bends;
+    Vector<uint32_t> reversed;
+    std::vector<Vector<uint32_t>> bends;
     for (uint32_t st = 0; st < c.states.size(); ++st) {
       if ((c.states[st].live == 0) || (plain.state_node[st] == INVALID)) { continue; }
       for (uint32_t r = 0; r < plain.sub_ranks[c.states[st].parent.v]; ++r) {
@@ -129,9 +129,9 @@ TEST_CASE(
   CandidateMemo memo{ f.c, f.g };
   SubmachineOrders const plain{ f.order() };
   SubmachineOrders const moved{ f.order(f.moved_rank()) };
-  std::vector<uint32_t> a;
-  std::vector<uint32_t> again;
-  std::vector<uint32_t> b;
+  Vector<uint32_t> a;
+  Vector<uint32_t> again;
+  Vector<uint32_t> b;
   REQUIRE(memo.frame_ids(plain, a));
   REQUIRE(memo.frame_ids(moved, b));
   REQUIRE(memo.frame_ids(plain, again));
@@ -145,7 +145,7 @@ TEST_CASE(
   CHECK(kept < a.size());
   // A second memo numbers the same frames from scratch, consistently.
   CandidateMemo other{ f.c, f.g };
-  std::vector<uint32_t> fresh;
+  Vector<uint32_t> fresh;
   REQUIRE(other.frame_ids(plain, fresh));
   CHECK(fresh == a);
 
@@ -161,10 +161,10 @@ TEST_CASE(
   CHECK(fresh == a);
   CHECK(encoded.ids == a);
   REQUIRE(other.frame_ids(plain, fresh));
-  std::vector<uint32_t> alone;
+  Vector<uint32_t> alone;
   REQUIRE(memo.frame_ids(moved, alone));
   REQUIRE(other.frame_ids(plain, fresh));
-  std::vector<uint32_t> like;
+  Vector<uint32_t> like;
   REQUIRE(memo.frame_ids(moved, like, &encoded));
   CHECK(like == alone);
   CHECK(like == b);
@@ -324,8 +324,8 @@ TEST_CASE(
   REQUIRE(chained < f.g.segments.size());
   SizedLayout const lz{ f.size(longer) };
   uint32_t const long_drawn{ memo.drawing(longer, lz, profile) };
-  std::vector<uint32_t> reversed;
-  std::vector<std::vector<uint32_t>> bends;
+  Vector<uint32_t> reversed;
+  std::vector<Vector<uint32_t>> bends;
   segment_bends(longer, static_cast<uint32_t>(f.g.segments.size()), reversed, bends);
   REQUIRE(bends[chained].size() >= 2);
   auto const bent = [&](auto const &edit) {

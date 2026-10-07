@@ -6,9 +6,9 @@
 
 #include "scav/scav_layout_c.h"
 #include "scav/scav_types.h"
+#include "scav_vector.h"
 
 #include <cstdint>
-#include <vector>
 
 namespace scav {
 
@@ -17,13 +17,13 @@ namespace scav {
 // A moved leg keeps `clear` off every obstacle and `band` inside `bounds[n]` and inside
 // every obstacle it passes through, and runs within `band` of no border it was not near.
 void nudge_lanes(scav_rect const &region,
-                 std::vector<scav_rect> const &bounds,
-                 std::vector<scav_rect> const &obstacles,
+                 Vector<scav_rect> const &bounds,
+                 Vector<scav_rect> const &obstacles,
                  int32_t gap,
                  int32_t clear,
                  int32_t band,
-                 std::vector<scav_span> const &nets,
-                 std::vector<scav_point> &points,
+                 Vector<scav_span> const &nets,
+                 Vector<scav_point> &points,
                  scav_path_clear const *keep = nullptr,
                  uint32_t n_keep = 0);
 
