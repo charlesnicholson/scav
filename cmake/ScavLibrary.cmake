@@ -31,7 +31,7 @@ function(scav_settings target)
   endif()
 endfunction()
 
-# scav_optimize_for_size(<target> [SOURCES <file>...]) -- Release -Os for <target>
+# scav_optimize_for_size(<target> [SOURCES <file>...]) -- Release -Oz for <target>
 # and <target>_testable, or for SOURCES in its directory; GNU-style drivers only.
 function(scav_optimize_for_size target)
   cmake_parse_arguments(PARSE_ARGV 1 arg "" "" "SOURCES")
@@ -40,12 +40,12 @@ function(scav_optimize_for_size target)
   endif()
   if(arg_SOURCES)
     set_source_files_properties(${arg_SOURCES} TARGET_DIRECTORY ${target} PROPERTIES
-      COMPILE_OPTIONS "$<$<CONFIG:Release>:-Os>")
+      COMPILE_OPTIONS "$<$<CONFIG:Release>:-Oz>")
     return()
   endif()
   foreach(variant ${target} ${target}_testable)
     if(TARGET ${variant})
-      target_compile_options(${variant} PRIVATE "$<$<CONFIG:Release>:-Os>")
+      target_compile_options(${variant} PRIVATE "$<$<CONFIG:Release>:-Oz>")
     endif()
   endforeach()
 endfunction()
