@@ -145,8 +145,8 @@ void ortho_align_attachments(std::vector<RouteNet> const &nets,
                              std::vector<Seat> const &table,
                              std::vector<scav_point> &at);
 
-// Spreads seats sharing a point on one face by `max(clear, pitch)` where the seatable run
-// fits it, else `min(clear, len / 3)`; a port leg level with its `toward` stays.
+// Spreads seats sharing a point on one face `max(clear, pitch)` apart where the run fits;
+// each arrival takes its own seat, and a port leg level with `toward` stays.
 void ortho_spread_attachments(std::vector<scav_rect> const &boxes,
                               std::vector<Seat> const &table,
                               std::vector<scav_point> const &toward,
@@ -184,6 +184,16 @@ void ortho_clear_occupied(std::vector<RouteNet> const &nets,
                           int32_t clear,
                           std::vector<scav_point> &at,
                           std::vector<int32_t> &stuck);
+
+// Reorders each INVALID-ended run of `groups` so no leg into a last bend crosses another's
+// run in; moves only last bends and ends, and leaves a run a move brings within `clear`.
+void ortho_order_arrivals(std::vector<RouteNet> const &nets,
+                          std::vector<scav_rect> const &boxes,
+                          int32_t clear,
+                          std::vector<uint32_t> const &groups,
+                          std::vector<scav_point> &points,
+                          std::vector<scav_span> const &spans,
+                          std::vector<scav_point> &at);
 
 // `ortho_escape_box` off the smallest-area box strictly containing `at`, ties to the
 // lower index; `at` unchanged when inside none.
@@ -227,6 +237,37 @@ bool ortho_search(OrthoGrid const &g,
                   std::vector<uint32_t> &out,
                   uint32_t from_plane = INVALID,
                   uint32_t to_plane = INVALID);
+
+// The cheapest path to a goal in one plane: its cost, negative when unreached, the plane
+// it left its start in, its last move along that plane (-1 or +1, 0 after a turn at the
+// goal), and its vertices in the caller's buffer.
+struct OrthoFinish {
+  Wide cost{ -1 };
+  uint32_t start{ INVALID };
+  int32_t heading{ 0 };
+  scav_span hops{};
+};
+
+// `ortho_search` from each plane of `from` with a nonnegative `seed`, starting at that
+// cost, to `to` in every plane `to_plane` allows, or only the first reached unless `both`;
+// a first move against that plane's nonzero `heading` is two turns, and a turn at an end
+// `waypoints` marks (bit 0 `from`, bit 1 `to`) is a shade cheaper. Appends each finish's
+// vertices to `hops`. `starts`, when set, replaces `from` as the vertices the search
+// leaves from.
+bool ortho_search_planes(OrthoGrid const &g,
+                         uint32_t from,
+                         uint32_t to,
+                         Wide bend,
+                         OrthoScratch &s,
+                         std::array<Wide, 2> const &seed,
+                         std::array<int32_t, 2> const &heading,
+                         uint32_t from_plane,
+                         uint32_t to_plane,
+                         uint32_t waypoints,
+                         std::vector<uint32_t> &hops,
+                         std::array<OrthoFinish, 2> &out,
+                         std::vector<uint32_t> const *starts = nullptr,
+                         bool both = true);
 
 // A bend costs one rank separation of length; the clearance a route keeps from a box is
 // `box_clearance`.

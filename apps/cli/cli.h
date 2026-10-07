@@ -22,7 +22,8 @@ constexpr int EXIT_CLEAN{ 0 };
 constexpr int EXIT_DIAGNOSED{ 1 };
 constexpr int EXIT_UNUSABLE{ 2 };
 
-void write_stream(std::string const &text, std::FILE *to);
+// Writes and flushes `text`; false when either fails.
+bool write_stream(std::string const &text, std::FILE *to);
 
 // `scav: ...` on stderr, which is how every verb reports a path it cannot use.
 void write_error(std::string_view what, std::string_view path);

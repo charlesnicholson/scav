@@ -428,6 +428,21 @@ TEST_CASE("nudge: a vertical lane is measured after the horizontal one has moved
   CHECK(points[8].x == 319);
 }
 
+TEST_CASE("nudge: a segment an earlier lane moved blocks a later lane from its line") {
+  // Lane y=100 sends net 1 to y=124; lane y=148 would send net 2 onto that run.
+  Frame f{ frame_of({ { pt(0, 0), pt(0, 100), pt(200, 100), pt(200, 300) },
+                      { pt(0, 400), pt(0, 100), pt(200, 100), pt(200, 500) },
+                      { pt(50, 0), pt(50, 148), pt(150, 148), pt(150, 400) },
+                      { pt(60, 600), pt(60, 148), pt(160, 148), pt(160, 700) } }) };
+  Tally const s{ nudge(OPEN, bounds_of(OPEN, f.nets), {}, 48, 0, f.nets, f.points) };
+
+  CHECK(s.lanes == 2);
+  CHECK(net_pt(f, 0, 1).y == 76);
+  CHECK(net_pt(f, 1, 1).y == 124);
+  CHECK(net_pt(f, 2, 1).y == 148);  // refused: y=124 holds net 1's run
+  CHECK(net_pt(f, 3, 1).y == 172);
+}
+
 TEST_CASE("nudge: a displacement onto another net's segment is refused") {
   // Net 1's move down 24 would lay its segment on net 2 at y=124, so net 1 stays.
   std::vector<scav_point> points{ pt(0, 0),   pt(0, 100),  pt(200, 100), pt(200, 300),

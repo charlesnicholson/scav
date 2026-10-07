@@ -250,11 +250,11 @@ TEST_CASE("layout: interior bands and submachines stack from the top") {
 
   CHECK(before.y == outer.y + p.pad);
   CHECK(before.h == 40);
-  // The packed regions sit between the two bands and do not overlap.
-  CHECK(r1.y == before.y + before.h);
+  // The packed regions sit between the two bands, `sub_sep` off each, and do not overlap.
+  CHECK(r1.y == before.y + before.h + p.sub_sep);
   CHECK(r2.y >= r1.y);
   CHECK_FALSE(overlap(r1, r2));
-  CHECK(after.y == imax(r1.y + r1.h, r2.y + r2.h));
+  CHECK(after.y == imax(r1.y + r1.h, r2.y + r2.h) + p.sub_sep);
   CHECK(after.h == 24);
   CHECK(inside(before, outer));
   CHECK(inside(r1, outer));
@@ -1340,13 +1340,13 @@ constexpr std::array<char const *, 2> SCALE_ROUTERS{ "orthogonal", "straight" };
 // One row per cell, chart-major then profile then router: through_box, box_overlap,
 // bends, corridor, crossings, excess_len, adjacency, label, label_near, aspect, area.
 constexpr std::array<std::array<int64_t, 11>, 8> SCALE_PINNED{
-  { { 0, 0, 2528, 0, 0, 1990112, 0, 0, 0, 2764964, 36418952256 },
+  { { 0, 0, 2512, 0, 0, 1998176, 0, 0, 0, 2764964, 36418952256 },
     { 21608, 0, 3072, 46749232, 52856, 95492256, 0, 0, 0, 2764964, 36418952256 },
-    { 0, 0, 2528, 0, 0, 1224016, 0, 0, 0, 640768, 14447836160 },
+    { 0, 0, 2512, 0, 0, 1231216, 0, 0, 0, 640768, 14447836160 },
     { 22248, 0, 3072, 31627520, 52552, 57525032, 0, 0, 0, 640768, 14447836160 },
-    { 0, 0, 1220, 0, 80, 2581702, 0, 0, 0, 73344, 3667557376 },
+    { 0, 0, 1054, 0, 10, 2003890, 0, 0, 0, 73344, 3667557376 },
     { 2088, 0, 319, 0, 265, 7295646, 0, 0, 0, 73344, 3667557376 },
-    { 0, 0, 1176, 162652, 91, 2313439, 0, 0, 0, 13056, 1615626240 },
+    { 0, 0, 1046, 127360, 13, 1643681, 0, 0, 0, 13056, 1615626240 },
     { 1986, 0, 324, 0, 266, 5555577, 0, 0, 0, 13056, 1615626240 } }
 };
 

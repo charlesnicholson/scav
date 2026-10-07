@@ -1351,6 +1351,17 @@ CostTerms cost_terms(CostContext const &ctx,
                                            ? ctx.transit_top[tr]
                                            : std::array<uint32_t, 2>{ INVALID, INVALID } };
     bool const crosses_through{ (top[0] != INVALID) || (top[1] != INVALID) };
+    // A start arrow against the reading direction, in quarter bends: its last leg up is 1,
+    // left is 4.
+    if ((route.len >= 2) &&
+        (c.states[c.transitions[tr].src.v].kind == StateKind::Initial)) {
+      scav_point const a{ r.points[route.off + route.len - 2] };
+      scav_point const b{ r.points[route.off + route.len - 1] };
+      int32_t quarters{ (b.y < a.y) ? 1 : 0 };
+      if (b.x < a.x) { quarters = 4; }
+      t.backward_starts += quarters;
+      if (quarters > 0) { blame(by(p.w_backward_starts * quarters), tr, INVALID, em); }
+    }
     for (uint32_t k = 0; (k + 1) < route.len; ++k) {
       vec_push_back(pieces,
                     { .a = r.points[route.off + k],
@@ -1788,7 +1799,8 @@ std::array<Wide, TIER2_TERMS> weighted_terms(CostTerms const &t, scav_profile co
            Wide{ p.w_crowding } * ceil_div(t.crowding, em),
            Wide{ p.w_length } * ceil_div(t.length, em),
            Wide{ p.w_transit_bends } * t.transit_bends,
-           Wide{ p.w_whitespace } * ceil_div(t.whitespace, em2) };
+           Wide{ p.w_whitespace } * ceil_div(t.whitespace, em2),
+           Wide{ p.w_backward_starts } * t.backward_starts };
 }
 
 }  // namespace

@@ -64,11 +64,26 @@ class TestGauntlet(unittest.TestCase):
                     self.assertEqual(0, result.returncode)
 
     @scavtest.full_only
+    def test_a_start_dot_alone_in_its_rank_moves_below_its_state(self) -> None:
+        # Under real text, `fanwide`'s dot takes the empty column under `S0`, `rank_sep`
+        # below it and level with it.
+        out = self.run_scav("dump", "--layout", CHARTS / "fanwide.scav")
+        self.assertEqual(out.returncode, 0, out.stderr)
+        boxes = {m[1]: tuple(map(int, m.group(2, 3, 4, 5))) for m in re.finditer(
+            r"^  state (\S+) (-?\d+),(-?\d+) (\d+)x(\d+)", out.stdout, re.M)}
+        rank_sep = int(re.search(r" rank_sep (\d+)", out.stdout)[1])
+        sx, sy, sw, sh = boxes["S0"]
+        dx, dy, dw, _ = boxes["$initial"]
+        self.assertEqual(dy, sy + sh + rank_sep)
+        self.assertEqual(dx + dw // 2, sx + sw // 2)
+
     def test_every_chart_renders_at_both_profiles(self) -> None:
+        # Unsearched: the unit gauntlet suite searches every chart at both profiles.
         for chart in self.charts:
             for profile in PROFILES:
                 with self.subTest(chart=chart.name, profile=profile):
-                    result = self.run_scav("render", "--profile", profile, chart)
+                    result = self.run_scav("render", "--no-search", "--profile", profile,
+                                           chart)
                     self.assertEqual("", result.stderr)
                     self.assertEqual(0, result.returncode)
                     root = ElementTree.fromstring(result.stdout)

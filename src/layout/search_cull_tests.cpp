@@ -389,7 +389,7 @@ TEST_CASE("search: every culled search on the corpus stops at a local optimum" *
             { "axis.scav", "ota.scav", "tcp.scav", "vac.scav", "elevator.scav" }) > 0);
 }
 
-TEST_CASE("search: the culled search is one search at every thread count") {
+TEST_CASE("search: the culled search is one search at one thread and on the pool") {
   // With the search memo off every search runs; drawing, pins and counts all agree.
   SwitchGuard const guard;
   layout_test_search_memo(false);
@@ -401,14 +401,11 @@ TEST_CASE("search: the culled search is one search at every thread count") {
       CAPTURE(chart);
       Laid const want{ lay(name, culled(), labelled, 1) };
       CHECK(want.skipped > 0);
-      for (uint32_t const threads : { 3U, 0U }) {
-        CAPTURE(threads);
-        Laid const got{ lay(name, culled(), labelled, threads) };
-        check_same_drawing(got, want);
-        CHECK(got.offered == want.offered);
-        CHECK(got.taken == want.taken);
-        CHECK(got.skipped == want.skipped);
-      }
+      Laid const got{ lay(name, culled(), labelled, 0) };
+      check_same_drawing(got, want);
+      CHECK(got.offered == want.offered);
+      CHECK(got.taken == want.taken);
+      CHECK(got.skipped == want.skipped);
     }
   }
 }

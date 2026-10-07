@@ -142,7 +142,11 @@ add_subdirectory(apps)
 scav_check_layering()
 if(SCAV_BUILD_TESTS)
   scav_check_tests()
-  add_subdirectory(functional_tests)
+  # Under TSan the CLI suites time each process's start-up; the unit suites cover the
+  # library's threads, and every other build runs the CLI suites.
+  if(NOT SCAV_SANITIZER_ACTIVE STREQUAL "TSAN")
+    add_subdirectory(functional_tests)
+  endif()
   scav_timing_tests()
 endif()
 

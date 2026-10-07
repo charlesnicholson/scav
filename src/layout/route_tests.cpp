@@ -1434,7 +1434,7 @@ TEST_CASE("route: the turns a stop counts frame by frame never pass the routes'"
         turns += route_turns(whole, t);
       }
       CHECK(stop.reached <= turns);
-      CHECK(stop.reached > 0);
+      CHECK((stop.reached > 0) == (turns > 0));
     }
   }
 }
@@ -1445,7 +1445,7 @@ TEST_CASE("route: a stop ends routing once routed turns lift its bound to it") {
   Router const *const router{ router_at(0) };
   REQUIRE(router != nullptr);
   Chart c;
-  load_corpus_chart("estop.scav", c);  // one frame, every transition one net
+  load_corpus_chart("gauntlet/fanin.scav", c);  // one frame, every transition one net
   SplitGraph const g{ decompose(c) };
   SubmachineOrders const o{ order_submachines(c, g, {}, p, 1, {}) };
   SizedLayout z;

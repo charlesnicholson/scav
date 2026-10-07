@@ -1,0 +1,32 @@
+// Eight transitions into one state from a chain of nine. Each arrival takes its
+// own seat on the target, and no leg into a last bend crosses another's run in.
+chart fanwide "eight arrivals from one chain" {
+  state S0,
+  state S1,
+  state S2,
+  state S3,
+  state S4,
+  state S5,
+  state S6,
+  state S7,
+  state S8,
+  state Fault,
+
+  trans * -> S0,
+  trans S0 -> S1,
+  trans S1 -> S2,
+  trans S2 -> S3,
+  trans S3 -> S4,
+  trans S4 -> S5,
+  trans S5 -> S6,
+  trans S6 -> S7,
+  trans S7 -> S8,
+  trans S1 -> Fault,
+  trans S2 -> Fault,
+  trans S3 -> Fault,
+  trans S4 -> Fault,
+  trans S5 -> Fault,
+  trans S6 -> Fault,
+  trans S7 -> Fault,
+  trans S8 -> Fault,
+}

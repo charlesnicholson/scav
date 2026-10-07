@@ -276,7 +276,7 @@ uint32_t layout_inputs_digest(Chart const &c);
 
 // Cost ======================================================================
 
-inline constexpr uint32_t TIER2_TERMS{ 13 };
+inline constexpr uint32_t TIER2_TERMS{ 14 };
 
 // The thirteen Tier-2 quantities before weighting, and the Tier-0 counts.
 struct CostTerms {
@@ -306,6 +306,8 @@ struct CostTerms {
   // Per composite: the rect between its text bands inside its padding, less its
   // live children's rects.
   int64_t whitespace{ 0 };
+  // Start arrows against the reading direction, in quarter bends: up 1, left 4.
+  int64_t backward_starts{ 0 };
 
   // Tier 0 counts, summed into `Cost::t0_violations`.
   int32_t through_box{ 0 };

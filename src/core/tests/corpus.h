@@ -22,17 +22,18 @@ namespace scav::test {
 
 // Every chart in test_data/charts/gauntlet, by file name; test_gauntlet.py checks it
 // against the directory.
-inline constexpr std::array<char const *, 50> GAUNTLET{
-  "above.scav",     "between.scav",   "bypass.scav",  "carried.scav", "chain.scav",
-  "corner.scav",    "crossing.scav",  "crowd.scav",   "detour.scav",  "divider.scav",
-  "enclosing.scav", "entered.scav",   "fanin.scav",   "flank.scav",   "folded.scav",
-  "fork.scav",      "headed.scav",    "header.scav",  "inloop.scav",  "inside.scav",
-  "inward.scav",    "kicked.scav",    "lane.scav",    "level.scav",   "long.scav",
-  "loop.scav",      "marks.scav",     "mixed.scav",   "mutual.scav",  "outside.scav",
-  "ported.scav",    "pulled.scav",    "rebound.scav", "reentry.scav", "regions.scav",
-  "resumed.scav",   "ring.scav",      "room.scav",    "rooms.scav",   "roundtrip.scav",
-  "seated.scav",    "separator.scav", "side.scav",    "stacked.scav", "stretch.scav",
-  "through.scav",   "tight.scav",     "transit.scav", "under.scav",   "unfolded.scav"
+inline constexpr std::array<char const *, 51> GAUNTLET{
+  "above.scav",     "between.scav",  "bypass.scav",    "carried.scav", "chain.scav",
+  "corner.scav",    "crossing.scav", "crowd.scav",     "detour.scav",  "divider.scav",
+  "enclosing.scav", "entered.scav",  "fanin.scav",     "fanwide.scav", "flank.scav",
+  "folded.scav",    "fork.scav",     "headed.scav",    "header.scav",  "inloop.scav",
+  "inside.scav",    "inward.scav",   "kicked.scav",    "lane.scav",    "level.scav",
+  "long.scav",      "loop.scav",     "marks.scav",     "mixed.scav",   "mutual.scav",
+  "outside.scav",   "ported.scav",   "pulled.scav",    "rebound.scav", "reentry.scav",
+  "regions.scav",   "resumed.scav",  "ring.scav",      "room.scav",    "rooms.scav",
+  "roundtrip.scav", "seated.scav",   "separator.scav", "side.scav",    "stacked.scav",
+  "stretch.scav",   "through.scav",  "tight.scav",     "transit.scav", "under.scav",
+  "unfolded.scav"
 };
 
 // Whether the corpus is brew, dock, estop, kiln and led: the fast tier, not full or
@@ -116,9 +117,17 @@ inline std::string corpus_pins_of(std::string_view chart, bool text) {
   return {};
 }
 
-// Whether a search-reaches-pins case searches `chart`.
+// Whether the exhaustive tier runs.
+inline bool corpus_exhaustive() {
+  char const *const tier{ std::getenv("SCAV_TEST_TIER") };
+  return (tier != nullptr) && (std::string_view{ tier } == "exhaustive");
+}
+
+// Whether a search-reaches-pins case searches `chart`: never mill, bottler only in the
+// exhaustive tier.
 inline bool corpus_searched(std::string_view chart) {
-  return !corpus_skipped(chart) && (chart != "mill.scav");
+  return !corpus_skipped(chart) && (chart != "mill.scav") &&
+         (corpus_exhaustive() || (chart != "bottler.scav"));
 }
 
 // `chart`'s line as `scav dump --layout` would print what a run took.

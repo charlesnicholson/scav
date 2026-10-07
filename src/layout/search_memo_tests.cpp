@@ -649,7 +649,8 @@ TEST_CASE(
       Laid const without{ lay_out(name, labelled) };
       layout_test_candidate_memo_budget(4096);
       layout_test_candidate_memo(true, true);
-      Laid const with{ lay_out(name, labelled) };
+      // One thread: which entries a full memo has dropped by a repeat is then fixed.
+      Laid const with{ lay_out(name, labelled, false, 1) };
       deduped += layout_test_candidate_memo_deduped();
       CHECK(layout_test_candidate_memo_mismatches() == 0);
       REQUIRE(with.ok);
