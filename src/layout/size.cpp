@@ -25,7 +25,10 @@ namespace scav {
 // Test entry points: a hole's ratio and every state's hole.
 SCAV_INTERNAL_BEGIN
 FrameDar size_hole_ratio(int32_t w, int32_t h);
-void size_owner_holes(Chart const &c, SizedLayout const &z, std::vector<FrameDar> &hole);
+void size_owner_holes(Chart const &c,
+                      SizedLayout const &z,
+                      int32_t sep,
+                      std::vector<FrameDar> &hole);
 SCAV_INTERNAL_END
 
 namespace {
@@ -284,6 +287,22 @@ struct Sizer {
   [[nodiscard]] bool bare(scav_box_space const &b, uint32_t state) const {
     return bare_pseudostate(c, out.sub, b, room_of(state), state);
   }
+  // The gap each band keeps from the contents beside it, as interior pieces keep from one
+  // another: `sub_sep` where both are nonempty. Left, right, top, bottom.
+  [[nodiscard]] std::array<int32_t, 4> band_gaps(scav_box_space const &b,
+                                                 uint32_t state) const {
+    scav_extent const room{ room_of(state) };
+    bool full{ (room.w > 0) || (room.h > 0) };
+    Span const subs{ c.states[state].submachines };
+    for (uint32_t u = 0; !full && (u < subs.len); ++u) {
+      uint32_t const m{ c.submachine_ids[subs.off + u].v };
+      full = (c.submachines[m].live != 0) && ((out.sub[m].w > 0) || (out.sub[m].h > 0));
+    }
+    std::array<int32_t, 4> const band{ b.w_before, b.w_after, b.h_before, b.h_after };
+    std::array<int32_t, 4> gap{};
+    for (uint32_t k = 0; k < 4; ++k) { gap[k] = (full && (band[k] > 0)) ? p.sub_sep : 0; }
+    return gap;
+  }
   // How far a loop room above the packed submachines moves them down; 0 for one below.
   [[nodiscard]] int32_t room_shift(uint32_t state, int32_t packed_h) const {
     scav_extent const room{ room_of(state) };
@@ -370,13 +389,14 @@ bool Sizer::port_at(uint32_t seg, uint32_t state, bool down, int32_t &at) const 
     if (top_or_bottom != down) { continue; }
     scav_box_space const b{ box_of(s.box_state, s.n_box_state, state) };
     Wide const pad{ bare(b, state) ? 0 : p.pad };
+    std::array<int32_t, 4> const gap{ band_gaps(b, state) };
     if (down) {
-      Wide const x{ pad + b.w_before + sub_local[frame].x + out.node[node].x };
+      Wide const x{ pad + b.w_before + gap[0] + sub_local[frame].x + out.node[node].x };
       at = static_cast<int32_t>(x - (out.state[state].w / 2));
       return true;
     }
-    Wide const y{ Wide{ pad } + b.h_before + room_shift(state, 1) + sub_local[frame].y +
-                  out.node[node].y };
+    Wide const y{ Wide{ pad } + b.h_before + gap[2] + room_shift(state, 1) +
+                  sub_local[frame].y + out.node[node].y };
     at = static_cast<int32_t>(y - (out.state[state].h / 2));
     return true;
   }
@@ -2190,12 +2210,15 @@ void Sizer::size_state(uint32_t i) {
   int32_t const min_h{ lies ? p.kind_min_w[kind] : p.kind_min_h[kind] };
   Wide const ring{ bare(b, i) ? Wide{ 0 } : (2 * static_cast<Wide>(p.pad)) };
   scav_extent const room{ room_of(i) };
-  Wide const centre{ Wide{ b.w_before } + imax(Wide{ packed.w }, Wide{ room.w }) +
-                     b.w_after };
+  std::array<int32_t, 4> const gap{ band_gaps(b, i) };
+  Wide const centre{ Wide{ b.w_before } + gap[0] + imax(Wide{ packed.w }, Wide{ room.w }) +
+                     gap[1] + b.w_after };
   Wide const body{ Wide{ packed.h } + room.h +
                    (((packed.h > 0) && (room.h > 0)) ? p.sub_sep : 0) };
   Wide const w{ imax(imax(Wide{ b.min_w }, centre), Wide{ min_w }) + ring };
-  Wide const h{ imax(Wide{ b.h_before } + body + b.h_after, Wide{ min_h }) + ring };
+  Wide const h{
+    imax(Wide{ b.h_before } + gap[2] + body + gap[3] + b.h_after, Wide{ min_h }) + ring
+  };
   if ((w > COORD_MAX) || (h > COORD_MAX)) {
     overflow(diags, ElemKind::State, i);
     ok = false;
@@ -2334,7 +2357,8 @@ bool size_pass(Chart const &c,
       int32_t const ix{ r.x + pad };
       int32_t const iw{ r.w - (2 * pad) };
       out.before[i] = { .x = ix, .y = r.y + pad, .w = iw, .h = b.h_before };
-      int32_t const sy{ r.y + pad + b.h_before };
+      std::array<int32_t, 4> const gap{ x.band_gaps(b, i) };
+      int32_t const sy{ r.y + pad + b.h_before + gap[2] };
       int32_t packed_h{ 0 };
       Span const subs{ c.states[i].submachines };
       for (uint32_t u = 0; u < subs.len; ++u) {
@@ -2349,18 +2373,22 @@ bool size_pass(Chart const &c,
         if (c.submachines[m].live == 0) { continue; }
         vec_push_back(work,
                       { .sub = m,
-                        .x = ix + b.w_before + sub_local[m].x,
+                        .x = ix + b.w_before + gap[0] + sub_local[m].x,
                         .y = sub_y + sub_local[m].y });
       }
       int32_t const sep{ ((packed_h > 0) && (room.h > 0)) ? p.sub_sep : 0 };
       int32_t const body{ (room.h > 0) ? (packed_h + sep + room.h) : packed_h };
       int32_t const centre_end{ (ix + iw) - b.w_after };
-      out.lead[i] = { .x = ix, .y = sy, .w = b.w_before, .h = body };
-      out.trail[i] = { .x = centre_end, .y = sy, .w = b.w_after, .h = body };
-      out.after[i] = { .x = ix, .y = sy + body, .w = iw, .h = b.h_after };
+      // The side bands run between the other two, across the gaps.
+      int32_t const side_y{ sy - gap[2] };
+      int32_t const side_h{ gap[2] + body + gap[3] };
+      out.lead[i] = { .x = ix, .y = side_y, .w = b.w_before, .h = side_h };
+      out.trail[i] = { .x = centre_end, .y = side_y, .w = b.w_after, .h = side_h };
+      out.after[i] = { .x = ix, .y = sy + body + gap[3], .w = iw, .h = b.h_after };
       LoopPlace const place{ loop_place(out, i) };
       bool const leading{ (place.face == 0) || ((place.face >= 2) && (place.end == 0)) };
-      int32_t const room_x{ leading ? (ix + b.w_before) : (centre_end - room.w) };
+      int32_t const room_x{ leading ? (ix + b.w_before + gap[0])
+                                    : (centre_end - gap[1] - room.w) };
       int32_t const room_y{ (x.room_shift(i, packed_h) > 0) ? sy
                                                             : ((sy + body) - room.h) };
       out.loop[i] = { .x = room_x, .y = room_y, .w = room.w, .h = room.h };
@@ -2385,7 +2413,10 @@ FrameDar size_hole_ratio(int32_t w, int32_t h) {
 
 // Per state, the aspect of the hole its submachines pack into: inside its bands, above
 // any loop room. `num` 0 for a state with no live submachine.
-void size_owner_holes(Chart const &c, SizedLayout const &z, std::vector<FrameDar> &hole) {
+void size_owner_holes(Chart const &c,
+                      SizedLayout const &z,
+                      int32_t sep,
+                      std::vector<FrameDar> &hole) {
   vec_assign(hole, c.states.size(), FrameDar{});
   for (uint32_t i = 0; i < c.states.size(); ++i) {
     if (c.states[i].live == 0) { continue; }
@@ -2397,15 +2428,19 @@ void size_owner_holes(Chart const &c, SizedLayout const &z, std::vector<FrameDar
     if (!packed) { continue; }
     // The ring: `pad`, or 0 for a bare pseudostate.
     int32_t const pad{ z.before[i].y - z.state[i].y };
-    int32_t top{ z.before[i].y + z.before[i].h };
-    int32_t bottom{ (z.state[i].y + z.state[i].h) - pad - z.after[i].h };
+    // Each band keeps `sep` from the contents beside it.
+    auto const gap = [sep](int32_t band) { return (band > 0) ? sep : 0; };
+    int32_t top{ z.before[i].y + z.before[i].h + gap(z.before[i].h) };
+    int32_t bottom{ (z.state[i].y + z.state[i].h) - pad - z.after[i].h -
+                    gap(z.after[i].h) };
     if ((i < z.loop.size()) && (z.loop[i].h > 0)) {
       bool const above{ z.loop[i].y == top };
       top = above ? (z.loop[i].y + z.loop[i].h) : top;
       bottom = above ? bottom : z.loop[i].y;
     }
-    int32_t const sides{ ((i < z.lead.size()) ? z.lead[i].w : 0) +
-                         ((i < z.trail.size()) ? z.trail[i].w : 0) };
+    int32_t const lead{ (i < z.lead.size()) ? z.lead[i].w : 0 };
+    int32_t const trail{ (i < z.trail.size()) ? z.trail[i].w : 0 };
+    int32_t const sides{ lead + gap(lead) + trail + gap(trail) };
     hole[i] = size_hole_ratio(z.before[i].w - sides, bottom - top);
   }
 }
@@ -2691,7 +2726,7 @@ bool size_layout(Chart const &c,
   SizedLayout &first{ size_scratch().first };
   if (!size_pass(c, g, o, s, p, {}, compaction, fold, first, diags)) { return false; }
   std::vector<FrameDar> &hole{ size_scratch().hole };
-  size_owner_holes(c, first, hole);
+  size_owner_holes(c, first, p.sub_sep, hole);
   return size_pass(c, g, o, s, p, hole, compaction, fold, out, diags);
 }
 

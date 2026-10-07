@@ -1383,6 +1383,39 @@ TEST_CASE("size: a pseudostate with a band of its own is a container") {
   CHECK(z.after[trailing.v].h == 24);
 }
 
+TEST_CASE(
+    "size: a band keeps the sub_sep from the contents any other interior piece does") {
+  // `C` holds `A` under a header and beside a leading side band; `L` has a header and no
+  // contents, so nothing sits beside its band.
+  scav_profile const p{ profile() };
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const comp{ build_state(c, root, "C", StateKind::Normal, {}) };
+  SubmachineId const inner{ build_submachine(c, comp, {}, {}) };
+  StateId const a{ build_state(c, inner, "A", StateKind::Normal, {}) };
+  StateId const leaf{ build_state(c, root, "L", StateKind::Normal, {}) };
+  std::vector<scav_box_space> boxes(c.states.size(), scav_box_space{});
+  boxes[comp.v] = { .min_w = 0, .h_before = 300, .h_after = 0, .w_before = 200 };
+  boxes[leaf.v] = { .min_w = 0, .h_before = 300, .h_after = 0 };
+  scav_spaces const s{ .box_state = boxes.data(),
+                       .n_box_state = static_cast<uint32_t>(boxes.size()) };
+
+  SplitGraph const g{ decompose(c) };
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  REQUIRE(size_layout(c, g, order_submachines(c, g, s, p), s, p, z, diags));
+
+  scav_rect const &head{ z.before[comp.v] };
+  scav_rect const &side{ z.lead[comp.v] };
+  scav_rect const &kid{ z.state[a.v] };
+  CHECK(kid.y == (head.y + head.h + p.sub_sep));
+  CHECK(kid.x == (side.x + side.w + p.sub_sep));
+  // The side band runs from the header down, with no seam between them.
+  CHECK(side.y == (head.y + head.h));
+  uint32_t const normal{ static_cast<uint32_t>(StateKind::Normal) };
+  CHECK(z.state[leaf.v].h == imax(300, p.kind_min_h[normal]) + (2 * p.pad));
+}
+
 TEST_CASE("size: a tombstoned submachine is neither sized nor descended into") {
   scav_profile const p{ profile() };
   Chart c;
@@ -1988,7 +2021,10 @@ namespace scav {
 
 // Test-only declarations of `size.cpp`'s SCAV_INTERNAL owner-hole functions.
 FrameDar size_hole_ratio(int32_t w, int32_t h);
-void size_owner_holes(Chart const &c, SizedLayout const &z, std::vector<FrameDar> &hole);
+void size_owner_holes(Chart const &c,
+                      SizedLayout const &z,
+                      int32_t sep,
+                      std::vector<FrameDar> &hole);
 
 }  // namespace scav
 
@@ -1996,7 +2032,7 @@ namespace {
 
 std::vector<FrameDar> size_owner_holes(Chart const &c, SizedLayout const &z) {
   std::vector<FrameDar> hole;
-  scav::size_owner_holes(c, z, hole);
+  scav::size_owner_holes(c, z, 0, hole);
   return hole;
 }
 

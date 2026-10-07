@@ -1440,8 +1440,9 @@ scav_rect free_interior(SizedLayout const &z, uint32_t st) {
 
 // Inner loop `t`: both ends on its room's exit face of the free interior (the border where
 // no band lines that side, the band's inner edge where one does), its far leg inside the
-// free interior, its room in the placement's corner, and no band of its state entered.
-void loop_lands(Laid const &l, uint32_t t) {
+// free interior, its room in the placement's corner `sep` off each band, and no band of
+// its state entered.
+void loop_lands(Laid const &l, uint32_t t, int32_t sep) {
   uint32_t const st{ l.c.transitions[t].src.v };
   LoopPlace const at{ loop_place(l.z, st) };
   CAPTURE(at.face);
@@ -1470,8 +1471,11 @@ void loop_lands(Laid const &l, uint32_t t) {
   scav_rect const &room{ l.z.loop[st] };
   bool const low_x{ (at.face == 0) || (vertical && (at.end == 0)) };
   bool const low_y{ (at.face == 2) || (!vertical && (at.end == 0)) };
-  CHECK((low_x ? (room.x == hole.x) : ((room.x + room.w) == (hole.x + hole.w))));
-  CHECK((low_y ? (room.y == hole.y) : ((room.y + room.h) == (hole.y + hole.h))));
+  auto const gap = [sep](int32_t extent) { return (extent > 0) ? sep : 0; };
+  CHECK((low_x ? (room.x == (hole.x + gap(band[0].w)))
+               : ((room.x + room.w) == ((hole.x + hole.w) - gap(band[1].w)))));
+  CHECK((low_y ? (room.y == (hole.y + gap(band[2].h)))
+               : ((room.y + room.h) == ((hole.y + hole.h) - gap(band[3].h)))));
   std::array<scav_rect, 5> const walls{ state_walls(l.z, st) };
   for (uint32_t k = 0; k < 3; ++k) {
     for (uint32_t w = 0; w < 4; ++w) {
@@ -1703,7 +1707,7 @@ TEST_CASE("gauntlet: an internal loop stays inside its state, under its header")
       if ((tr.src != tr.dst) || (tr.kind == TransKind::Default)) { continue; }
       CAPTURE(t);
       ++loops;
-      loop_lands(l, t);
+      loop_lands(l, t, p.sub_sep);
       scav_rect const hole{ free_interior(l.z, tr.src.v) };
       scav_span const route{ l.r.route[t] };
       scav_point const *const pt{ l.r.points.data() + route.off };
@@ -1767,7 +1771,7 @@ TEST_CASE(
         std::array<int32_t, 4> const border{ box.x, box.x + box.w, box.y, box.y + box.h };
         CHECK((loop_boundary(l.z, idle, k / 2) != border[k / 2]) == banded);
         for (uint32_t t = 0; t < l.c.transitions.size(); ++t) {
-          if (inner_loop(l.c, t)) { loop_lands(l, t); }
+          if (inner_loop(l.c, t)) { loop_lands(l, t, p.sub_sep); }
         }
         CHECK_FALSE(any_band_entered(l));
         CostTerms const t{ cost_terms(l.c, l.g, l.z, l.r, s, one_row(p)) };
@@ -1809,7 +1813,7 @@ TEST_CASE("gauntlet: a loop pinned to a ruled top band's face leaves the rule") 
     CHECK(pt[0].y == (head.y + head.h));
     CHECK(pt[3].y == (head.y + head.h));
     CHECK(pt[1].y > (head.y + head.h));
-    loop_lands(l, poll);
+    loop_lands(l, poll, p.sub_sep);
     CHECK_FALSE(any_band_entered(l));
     CHECK(
         cost_of(cost_terms(l.c, l.g, l.z, l.r, s, one_row(p)), one_row(p)).t0_violations ==
@@ -1896,7 +1900,7 @@ TEST_CASE("gauntlet: a loop pinned to the face of a band with no rule counts in 
     CHECK(l.z.loop_place[idle] == 5);
     uint32_t const poll{ from_named(l.c, idle) };
     REQUIRE(poll != INVALID);
-    loop_lands(l, poll);
+    loop_lands(l, poll, p.sub_sep);
     CostTerms const t{ cost_terms(l.c, l.g, l.z, l.r, sp.s, one_row(p)) };
     CHECK(t.loop_unanchored == 1);
     CHECK(cost_of(t, one_row(p)).t0_violations == 1);
@@ -1921,7 +1925,7 @@ TEST_CASE(
       CHECK(loop_place(l.z, idle).face == 1);
       uint32_t const poll{ from_named(l.c, idle) };
       REQUIRE(poll != INVALID);
-      loop_lands(l, poll);
+      loop_lands(l, poll, p.sub_sep);
       CHECK(cost_terms(l.c, l.g, l.z, l.r, sp.s, run).loop_unanchored == 1);
     }
   }
@@ -1956,7 +1960,7 @@ TEST_CASE(
   lay("rooms.scav", one_row(p), unturned, s, &stacked);
   CHECK(searched.z.state[busy].h < unturned.z.state[busy].h);
   for (uint32_t t = 0; t < searched.c.transitions.size(); ++t) {
-    if (inner_loop(searched.c, t)) { loop_lands(searched, t); }
+    if (inner_loop(searched.c, t)) { loop_lands(searched, t, p.sub_sep); }
   }
   CHECK(cost_of(cost_terms(searched.c, searched.g, searched.z, searched.r, s, p), p)
             .t0_violations == 0);

@@ -250,11 +250,11 @@ TEST_CASE("layout: interior bands and submachines stack from the top") {
 
   CHECK(before.y == outer.y + p.pad);
   CHECK(before.h == 40);
-  // The packed regions sit between the two bands and do not overlap.
-  CHECK(r1.y == before.y + before.h);
+  // The packed regions sit between the two bands, `sub_sep` off each, and do not overlap.
+  CHECK(r1.y == before.y + before.h + p.sub_sep);
   CHECK(r2.y >= r1.y);
   CHECK_FALSE(overlap(r1, r2));
-  CHECK(after.y == imax(r1.y + r1.h, r2.y + r2.h));
+  CHECK(after.y == imax(r1.y + r1.h, r2.y + r2.h) + p.sub_sep);
   CHECK(after.h == 24);
   CHECK(inside(before, outer));
   CHECK(inside(r1, outer));
