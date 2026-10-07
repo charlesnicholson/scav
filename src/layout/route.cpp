@@ -680,6 +680,13 @@ FrameScratch &frame_scratch() {
 
 // Every buffer one call holds across its `parallel_for`, reassigned in place.
 struct CallScratch {
+  CallScratch() = default;
+  CallScratch(CallScratch const &) = default;
+  CallScratch &operator=(CallScratch const &) = default;
+  SCAV_NOINLINE CallScratch(CallScratch &&) noexcept;
+  SCAV_NOINLINE CallScratch &operator=(CallScratch &&) noexcept;
+  SCAV_NOINLINE ~CallScratch();
+
   std::array<std::vector<uint32_t>, 2> faces;
   std::vector<uint32_t> port_seg, seg_reversed;
   std::vector<std::vector<uint32_t>> seg_bends;
@@ -705,6 +712,12 @@ struct CallScratch {
   std::vector<std::array<int32_t, 2>> blocks;
   std::vector<int32_t> turned;  // per transition, its routed nets' turns
 };
+
+CallScratch::CallScratch(CallScratch &&) noexcept = default;
+CallScratch &CallScratch::operator=(CallScratch &&) noexcept = default;
+CallScratch::~CallScratch() = default;
+static_assert(std::is_nothrow_move_constructible_v<CallScratch> &&
+              std::is_nothrow_move_assignable_v<CallScratch>);
 
 // Per-thread `CallScratch` stack: each call pops one for its run and pushes it back; a
 // call nested in a `parallel_for` wait takes the next.
@@ -789,11 +802,8 @@ void route_transitions(Routes &out,
   out.reseated = 0;
   out.occupied = 0;
   std::vector<CallScratch> &stack{ call_stack() };
-  CallScratch cs;
-  if (!stack.empty()) {
-    cs = std::move(stack.back());
-    stack.pop_back();
-  }
+  CallScratch cs{ stack.empty() ? CallScratch{} : std::move(stack.back()) };
+  if (!stack.empty()) { stack.pop_back(); }
   // End pins at portless ends as `faces[end][seg]`; INVALID where unpinned, both empty
   // with no end pins.
   std::array<std::vector<uint32_t>, 2> &faces{ cs.faces };
