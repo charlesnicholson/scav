@@ -117,9 +117,17 @@ inline std::string corpus_pins_of(std::string_view chart, bool text) {
   return {};
 }
 
-// Whether a search-reaches-pins case searches `chart`.
+// Whether the exhaustive tier runs.
+inline bool corpus_exhaustive() {
+  char const *const tier{ std::getenv("SCAV_TEST_TIER") };
+  return (tier != nullptr) && (std::string_view{ tier } == "exhaustive");
+}
+
+// Whether a search-reaches-pins case searches `chart`: never mill, bottler only in the
+// exhaustive tier.
 inline bool corpus_searched(std::string_view chart) {
-  return !corpus_skipped(chart) && (chart != "mill.scav");
+  return !corpus_skipped(chart) && (chart != "mill.scav") &&
+         (corpus_exhaustive() || (chart != "bottler.scav"));
 }
 
 // `chart`'s line as `scav dump --layout` would print what a run took.

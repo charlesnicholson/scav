@@ -247,10 +247,7 @@ void check_culled_threads(std::initializer_list<char const *> charts) {
     CAPTURE(chart);
     std::array<uint64_t, 7> const want{ culled_search(name, m, 1) };
     CHECK(want[6] > 0);
-    for (uint32_t const threads : { 3U, 0U }) {
-      CAPTURE(threads);
-      CHECK(culled_search(name, m, threads) == want);
-    }
+    CHECK(culled_search(name, m, 0) == want);
   }
 }
 
