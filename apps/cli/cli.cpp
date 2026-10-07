@@ -12,13 +12,13 @@
 #include <cstdio>
 #include <string>
 #include <string_view>
-#include <tuple>
 #include <vector>
 
 namespace cli {
 
-void write_stream(std::string const &text, std::FILE *to) {
-  std::ignore = std::fwrite(text.data(), 1, text.size(), to);
+bool write_stream(std::string const &text, std::FILE *to) {
+  bool const wrote{ std::fwrite(text.data(), 1, text.size(), to) == text.size() };
+  return (std::fflush(to) == 0) && wrote;
 }
 
 void write_error(std::string_view what, std::string_view path) {

@@ -155,7 +155,10 @@ int run_render(char const *path,
   }
 
   if (out_path == nullptr) {
-    write_stream(doc, stdout);
+    if (!write_stream(doc, stdout)) {
+      write_error("cannot write", "stdout");
+      return EXIT_UNUSABLE;
+    }
     return net.code;
   }
   if (!write_file(out_path, reinterpret_cast<scav_byte const *>(doc.data()), doc.size())) {

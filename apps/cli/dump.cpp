@@ -1144,7 +1144,10 @@ int run_dump(char const *path,
                            taken);
     }
   }
-  write_stream(out, stdout);
+  if (!write_stream(out, stdout)) {
+    write_error("cannot write", "stdout");
+    return EXIT_UNUSABLE;
+  }
   return net.code;
 }
 
