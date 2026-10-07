@@ -82,6 +82,36 @@ bool bundled(std::vector<scav_point> const &points,
   return head;
 }
 
+// A net's axis-aligned segment starting at `point`, on the line `key` names.
+struct OnLine {
+  uint64_t key;
+  uint32_t point, net;
+};
+
+// The line through `a` and `b`: its axis in the high word, its coordinate in the low.
+uint64_t line_key(scav_point a, scav_point b) {
+  bool const flat{ a.y == b.y };
+  return (uint64_t{ flat ? 1U : 0U } << 32U) | static_cast<uint32_t>(flat ? a.y : a.x);
+}
+
+// True when `a` to `b` is axis-aligned with nonzero length.
+bool axial(scav_point a, scav_point b) { return (a.x == b.x) != (a.y == b.y); }
+
+// First index with `v[i].key >= key` in `v`, sorted by key.
+uint32_t line_start(std::vector<OnLine> const &v, uint64_t key) {
+  uint32_t lo{ 0 };
+  uint32_t hi{ static_cast<uint32_t>(v.size()) };
+  while (lo < hi) {
+    uint32_t const mid{ lo + ((hi - lo) / 2) };
+    if (v[mid].key < key) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+  return lo;
+}
+
 // Per-thread buffers for one call, reassigned in place; a call never waits on the pool.
 struct NudgeScratch {
   std::vector<Member> members;
@@ -100,6 +130,8 @@ struct NudgeScratch {
   std::vector<uint32_t> next_member, last_member;
   std::vector<Member> member_merge;  // the sorts' merge buffers
   std::vector<uint32_t> lane_merge;
+  // Every net's segments by line as the axis pass began, and those it has since moved.
+  std::vector<OnLine> lines, moved, line_merge;
 };
 
 NudgeScratch &nudge_scratch() {
@@ -189,6 +221,29 @@ void nudge_lanes(scav_rect const &region,
     }
     if (members.size() < 2) { continue; }
 
+    // Built on the pass's first `known_good`.
+    std::vector<OnLine> &lines{ sc.lines };
+    std::vector<OnLine> &moved{ sc.moved };
+    bool indexed{ false };
+    lines.clear();
+    moved.clear();
+    auto const index_lines = [&]() {
+      indexed = true;
+      for (uint32_t net = 0; net < net_count; ++net) {
+        scav_span const span{ nets[net] };
+        for (uint32_t k = 0; (k + 1) < span.len; ++k) {
+          uint32_t const i{ span.off + k };
+          if (!axial(points[i], points[i + 1])) { continue; }
+          vec_push_back(
+              lines,
+              { .key = line_key(points[i], points[i + 1]), .point = i, .net = net });
+        }
+      }
+      scav_stable_sort(lines, sc.line_merge, [](OnLine const &x, OnLine const &y) {
+        return (x.key != y.key) ? (x.key < y.key) : (x.point < y.point);
+      });
+    };
+
     scav_stable_sort(members, sc.member_merge, [](Member const &x, Member const &y) {
       if (x.at != y.at) { return x.at < y.at; }
       if (x.lo != y.lo) { return x.lo < y.lo; }
@@ -245,21 +300,27 @@ void nudge_lanes(scav_rect const &region,
       }
       // A leg may share a run with another net only if it already did; the three segments
       // around each `kin` point move with the bundle and are exempt.
-      for (uint32_t q = 0; ok && (q < net_count); ++q) {
-        if (q == m.net) { continue; }
-        scav_span const other{ nets[q] };
-        for (uint32_t k = 0; ok && ((k + 1) < other.len); ++k) {
-          uint32_t const at{ other.off + k };
-          bool sibling{ false };
-          for (uint32_t const p : kin) {
-            sibling = sibling || (((at + 1) >= p) && (at <= (p + 1)));
-          }
-          if (sibling) { continue; }
-          scav_point const s{ points[at] };
-          scav_point const e{ points[at + 1] };
-          for (uint32_t r = 0; r < now.size(); ++r) {
-            if (shared_run(then[r], then[r + 1], s, e) > 0) { continue; }
-            ok = ok && (shared_run(way[r], way[r + 1], s, e) == 0);
+      if (!indexed) { index_lines(); }
+      auto const shares = [&](uint32_t r, OnLine const &on) {
+        scav_point const s0{ points[on.point] };
+        scav_point const e0{ points[on.point + 1] };
+        if ((on.net == m.net) || !axial(s0, e0) || (line_key(s0, e0) != on.key)) {
+          return false;
+        }
+        for (uint32_t const p : kin) {
+          if (((on.point + 1) >= p) && (on.point <= (p + 1))) { return false; }
+        }
+        return (shared_run(then[r], then[r + 1], s0, e0) == 0) &&
+               (shared_run(way[r], way[r + 1], s0, e0) > 0);
+      };
+      for (uint32_t r = 0; ok && (r < now.size()); ++r) {
+        if (!axial(way[r], way[r + 1])) { continue; }
+        uint64_t const key{ line_key(way[r], way[r + 1]) };
+        for (std::vector<OnLine> const *v : { &lines, &moved }) {
+          for (uint32_t j = line_start(*v, key);
+               ok && (j < v->size()) && ((*v)[j].key == key);
+               ++j) {
+            ok = !shares(r, (*v)[j]);
           }
         }
       }
@@ -490,6 +551,19 @@ void nudge_lanes(scav_rect const &region,
       trace_emit({ .kind = TraceKind::LaneFound, .found = found });
       if (!any) { continue; }
 
+      // Files the segment starting at `point` under its current line, once indexed.
+      auto const record = [&](uint32_t point, uint32_t net) {
+        if (!indexed || !axial(points[point], points[point + 1])) { return; }
+        OnLine const on{ .key = line_key(points[point], points[point + 1]),
+                         .point = point,
+                         .net = net };
+        uint32_t at_key{ line_start(moved, on.key) };
+        while ((at_key < moved.size()) && (moved[at_key].key == on.key) &&
+               (moved[at_key].point < on.point)) {
+          ++at_key;
+        }
+        vec_insert(moved, moved.begin() + at_key, { on });
+      };
       for (uint32_t b = 0; b < groups; ++b) {
         group.clear();
         for (uint32_t j = 0; j < count; ++j) {
@@ -517,6 +591,8 @@ void nudge_lanes(scav_rect const &region,
         }
         for (uint32_t const i : group) {
           Member const &m{ members[i] };
+          bool const low_axial{ axial(points[m.point - 1], points[m.point]) };
+          bool const high_axial{ axial(points[m.point + 1], points[m.point + 2]) };
           if (horizontal) {
             points[m.point].y += m.offset;
             points[m.point + 1].y += m.offset;
@@ -524,6 +600,10 @@ void nudge_lanes(scav_rect const &region,
             points[m.point].x += m.offset;
             points[m.point + 1].x += m.offset;
           }
+          // The moved segment's new line, and a dragged leg's if the move made it axial.
+          record(m.point, m.net);
+          if (!low_axial) { record(m.point - 1, m.net); }
+          if (!high_axial) { record(m.point + 1, m.net); }
           trace_emit(
               { .kind = TraceKind::LaneAssigned,
                 .lane = { .net = m.net,

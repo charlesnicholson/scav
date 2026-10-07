@@ -39,7 +39,7 @@ readable orthogonal gauntlet/divider.scav 0 8 0 2 3270 0 0 0 9472 15077504 592 1
 readable orthogonal gauntlet/enclosing.scav 0 6 0 0 8325 0 0 0 47050 11040260 0 18000 0 4071196
 readable orthogonal gauntlet/entered.scav 0 0 0 0 0 0 0 0 35904 4501504 0 1984 0 450560
 readable orthogonal gauntlet/fanin.scav 0 12 0 0 1756 0 0 0 57416 15795840 2893 19597 0 0
-readable orthogonal gauntlet/fanwide.scav 0 46 0 0 29438 0 0 0 174556 173624768 140663 235658 0 0
+readable orthogonal gauntlet/fanwide.scav 0 26 0 0 8985 0 0 0 113104 61819136 27757 78032 0 0
 readable orthogonal gauntlet/flank.scav 0 0 0 0 0 0 0 0 13568 7569408 0 3232 0 1310336
 readable orthogonal gauntlet/folded.scav 0 0 0 0 0 0 0 0 13056 7704576 0 2272 0 1462272
 readable orthogonal gauntlet/fork.scav 0 13 128 6 10285 0 0 0 24444 13276224 1472 13998 0 0
@@ -90,7 +90,7 @@ readable straight gauntlet/divider.scav 4 2 0 2 187 0 0 0 9472 15077504 120 1432
 readable straight gauntlet/enclosing.scav 1 2 0 1 17236 0 0 0 47050 11040260 0 24789 0 4071196
 readable straight gauntlet/entered.scav 0 0 0 0 0 0 0 0 35904 4501504 0 4336 0 450560
 readable straight gauntlet/fanin.scav 0 4 0 0 317 0 0 0 57416 15795840 0 25197 0 0
-readable straight gauntlet/fanwide.scav 0 24 0 0 8943 0 0 0 174556 173624768 0 240874 0 0
+readable straight gauntlet/fanwide.scav 0 12 0 0 2102 0 0 0 113104 61819136 0 86262 0 0
 readable straight gauntlet/flank.scav 0 1 0 0 3 0 0 0 13568 7569408 0 5822 0 1310336
 readable straight gauntlet/folded.scav 0 0 0 0 0 0 0 0 13056 7704576 0 5464 0 1462272
 readable straight gauntlet/fork.scav 1 0 0 3 0 0 0 0 24444 13276224 0 16901 0 0
@@ -141,7 +141,7 @@ compact orthogonal gauntlet/divider.scav 0 10 0 2 2403 0 0 0 2432 5601024 84 560
 compact orthogonal gauntlet/enclosing.scav 0 6 0 0 5449 0 0 0 10720 4708352 62 11774 0 1796096
 compact orthogonal gauntlet/entered.scav 0 0 0 0 0 0 0 0 2560 2690048 0 1008 0 177152
 compact orthogonal gauntlet/fanin.scav 0 12 0 0 1066 0 0 0 13152 6819840 2904 12958 0 0
-compact orthogonal gauntlet/fanwide.scav 0 46 0 0 18439 0 0 0 40448 74107904 144402 158210 0 0
+compact orthogonal gauntlet/fanwide.scav 0 26 0 0 5738 0 0 0 25856 26464256 26659 52260 0 0
 compact orthogonal gauntlet/flank.scav 0 0 0 0 0 0 0 0 3808 3372032 0 2016 0 577792
 compact orthogonal gauntlet/folded.scav 0 0 0 0 0 0 0 0 4000 3235328 0 1360 0 624128
 compact orthogonal gauntlet/fork.scav 0 13 64 6 6284 0 0 0 2928 6146304 362 8802 0 0
@@ -192,7 +192,7 @@ compact straight gauntlet/divider.scav 3 3 0 1 310 0 0 0 2432 5601024 532 7957 0
 compact straight gauntlet/enclosing.scav 1 2 0 1 11761 0 0 0 10720 4708352 0 16747 0 1796096
 compact straight gauntlet/entered.scav 0 0 0 0 0 0 0 0 2560 2690048 0 2480 0 177152
 compact straight gauntlet/fanin.scav 0 4 0 0 187 0 0 0 13152 6819840 0 17098 0 0
-compact straight gauntlet/fanwide.scav 0 24 0 0 5228 0 0 0 40448 74107904 0 163339 0 0
+compact straight gauntlet/fanwide.scav 0 12 0 0 1227 0 0 0 25856 26464256 0 58527 0 0
 compact straight gauntlet/flank.scav 0 1 0 0 3 0 0 0 3808 3372032 0 3915 0 577792
 compact straight gauntlet/folded.scav 0 0 0 0 0 0 0 0 4000 3235328 0 3587 0 624128
 compact straight gauntlet/fork.scav 1 0 0 3 0 0 0 0 2928 6146304 0 11312 0 0

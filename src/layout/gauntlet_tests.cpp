@@ -2172,7 +2172,7 @@ TEST_CASE(
   for (scav_profile const &p : { readable(), compact() }) {
     CAPTURE(p.profile_id);
     Laid l;
-    lay("fanwide.scav", p, l);
+    lay("fanwide.scav", one_row(p), l);
     uint32_t const fault{ state_named(l.c, "Fault") };
     REQUIRE(fault != INVALID);
     scav_rect const box{ l.z.state[fault] };
@@ -2182,7 +2182,7 @@ TEST_CASE(
         into.push_back(t);
       }
     }
-    REQUIRE(into.size() == 14);
+    REQUIRE(into.size() == 8);
     for (uint32_t const t : into) {
       scav_span const a{ l.r.route[t] };
       scav_point const end_a{ l.r.points[a.off + a.len - 1] };

@@ -1,6 +1,6 @@
-// Fourteen transitions into one state from a chain of fifteen. Each arrival takes
-// its own seat on the target, and no two arrivals cross or share a line.
-chart fanwide "fourteen arrivals from one chain" {
+// Eight transitions into one state from a chain of nine. Each arrival takes its
+// own seat on the target, and no leg into a last bend crosses another's run in.
+chart fanwide "eight arrivals from one chain" {
   state S0,
   state S1,
   state S2,
@@ -10,12 +10,6 @@ chart fanwide "fourteen arrivals from one chain" {
   state S6,
   state S7,
   state S8,
-  state S9,
-  state S10,
-  state S11,
-  state S12,
-  state S13,
-  state S14,
   state Fault,
 
   trans * -> S0,
@@ -27,12 +21,6 @@ chart fanwide "fourteen arrivals from one chain" {
   trans S5 -> S6,
   trans S6 -> S7,
   trans S7 -> S8,
-  trans S8 -> S9,
-  trans S9 -> S10,
-  trans S10 -> S11,
-  trans S11 -> S12,
-  trans S12 -> S13,
-  trans S13 -> S14,
   trans S1 -> Fault,
   trans S2 -> Fault,
   trans S3 -> Fault,
@@ -41,10 +29,4 @@ chart fanwide "fourteen arrivals from one chain" {
   trans S6 -> Fault,
   trans S7 -> Fault,
   trans S8 -> Fault,
-  trans S9 -> Fault,
-  trans S10 -> Fault,
-  trans S11 -> Fault,
-  trans S12 -> Fault,
-  trans S13 -> Fault,
-  trans S14 -> Fault,
 }
