@@ -1046,7 +1046,8 @@ TEST_CASE("ortho: arrivals from both sides part to their own sides, nearest oute
   check_points(route_of(l, 2), { pt(800, 900), pt(800, 220), pt(1000, 220) });
 }
 
-TEST_CASE("ortho: of two legs down one line, the one led in from the face side seats first") {
+TEST_CASE(
+    "ortho: of two legs down one line, the one led in from the face side seats first") {
   // Both come down x=900 to the left face; net 1's leg in starts nearer the face, so
   // nudging puts its leg nearer, and it takes the upper seat or crosses net 0's run in.
   std::vector<scav_rect> const boxes{ rect(1000, 0, 400, 400) };
