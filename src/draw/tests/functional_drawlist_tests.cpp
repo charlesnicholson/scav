@@ -14,6 +14,7 @@
 #include "scav/scav_types.h"
 
 #include "doctest.h"
+#include "scav_vector.h"
 
 #include <array>
 #include <chrono>
@@ -472,10 +473,14 @@ TEST_CASE("drawlist corpus: the strips the labels landed on, and what fell back"
     CAPTURE(name);
     Run const &r{ laid_pipeline(name) };
     SizedLayout z;
-    z.state = rows<scav_rect>(r.chart, "scav.geom.state");
-    z.before = rows<scav_rect>(r.chart, "scav.geom.state_before");
-    z.after = rows<scav_rect>(r.chart, "scav.geom.state_after");
-    z.sub = rows<scav_rect>(r.chart, "scav.geom.sub");
+    auto const take = [&r](Vector<scav_rect> &to, char const *column) {
+      std::vector<scav_rect> const from{ rows<scav_rect>(r.chart, column) };
+      to.assign(from.data(), from.data() + from.size());
+    };
+    take(z.state, "scav.geom.state");
+    take(z.before, "scav.geom.state_before");
+    take(z.after, "scav.geom.state_after");
+    take(z.sub, "scav.geom.sub");
     std::vector<scav_rect> const chart{ rows<scav_rect>(r.chart, "scav.geom.chart") };
     REQUIRE(chart.size() == 1);
     z.chart = chart[0];

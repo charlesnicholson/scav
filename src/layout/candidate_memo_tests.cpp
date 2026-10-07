@@ -10,6 +10,7 @@
 #include "scav/scav_layout_c.h"
 
 #include "doctest.h"
+#include "scav_vector.h"
 
 #include <cstdint>
 #include <string>
@@ -195,7 +196,7 @@ TEST_CASE(
   auto const key = [&](uint32_t r, uint32_t arranged, std::vector<EndPin> const &ends) {
     SearchPins pins;
     pins.ends = ends;
-    std::vector<uint32_t> faces;
+    Vector<uint32_t> faces;
     memo.box_faces(&pins, faces);
     return memo.find_ordering(r, arranged, faces).key;
   };
@@ -349,7 +350,7 @@ TEST_CASE("candidate memo: a score comes back as stored, each of its two kinds a
   SubmachineOrders const plain{ f.order() };
   uint32_t const drawn{ memo.drawing(plain, f.size(plain), memo.profile_word(f.p)) };
   REQUIRE(drawn != INVALID);
-  std::vector<uint32_t> const none;
+  Vector<uint32_t> const none;
   CandidateMemo::Recalled const first{ memo.find_score(drawn, none, false) };
   REQUIRE(first.entry != INVALID);
   CHECK_FALSE(first.found);
@@ -388,7 +389,7 @@ TEST_CASE("candidate memo: a score comes back as stored, each of its two kinds a
   CHECK(by_entry.score.cost.t2 == labelled.cost.t2);
 
   // A bound request with only the labelled score set takes the labelled one.
-  std::vector<uint32_t> const faced{ 1U };
+  Vector<uint32_t> const faced{ 1U };
   uint32_t const e2{ memo.find_score(drawn, faced, true).entry };
   CHECK(e2 != e);
   memo.set_score(e2, true, { .viable = true, .inflated = true });
@@ -412,7 +413,7 @@ TEST_CASE("candidate memo: an ordering key reads the score entry linked to it") 
   uint32_t const drawn{ memo.drawing(plain, f.size(plain), memo.profile_word(f.p)) };
   REQUIRE(arranged != INVALID);
   REQUIRE(drawn != INVALID);
-  std::vector<uint32_t> const none;
+  Vector<uint32_t> const none;
   CandidateMemo::Linked const fresh{ memo.find_ordering(row, arranged, none) };
   REQUIRE(fresh.key != INVALID);
   CHECK(fresh.entry == INVALID);
@@ -437,7 +438,7 @@ TEST_CASE("candidate memo: one claim per score kind, until that score is set") {
   SubmachineOrders const plain{ f.order() };
   uint32_t const drawn{ memo.drawing(plain, f.size(plain), memo.profile_word(f.p)) };
   REQUIRE(drawn != INVALID);
-  std::vector<uint32_t> const none;
+  Vector<uint32_t> const none;
   uint32_t const e{ memo.find_score(drawn, none, false).entry };
   REQUIRE(e != INVALID);
   MemoScore got;
@@ -466,7 +467,7 @@ TEST_CASE("candidate memo: a released claim leaves the score unset and the bound
   SubmachineOrders const plain{ f.order() };
   uint32_t const drawn{ memo.drawing(plain, f.size(plain), memo.profile_word(f.p)) };
   REQUIRE(drawn != INVALID);
-  std::vector<uint32_t> const none;
+  Vector<uint32_t> const none;
   uint32_t const e{ memo.find_score(drawn, none, false).entry };
   REQUIRE(e != INVALID);
   memo.set_route_bound(e, 40);
@@ -486,7 +487,7 @@ TEST_CASE("candidate memo: a labelled release bounds only labelled requests") {
   SubmachineOrders const plain{ f.order() };
   uint32_t const drawn{ memo.drawing(plain, f.size(plain), memo.profile_word(f.p)) };
   REQUIRE(drawn != INVALID);
-  std::vector<uint32_t> const none;
+  Vector<uint32_t> const none;
   uint32_t const e{ memo.find_score(drawn, none, false).entry };
   REQUIRE(e != INVALID);
   MemoScore got;
@@ -516,7 +517,7 @@ TEST_CASE("candidate memo: a route bound comes back beside a score it does not a
   SubmachineOrders const plain{ f.order() };
   uint32_t const drawn{ memo.drawing(plain, f.size(plain), memo.profile_word(f.p)) };
   REQUIRE(drawn != INVALID);
-  std::vector<uint32_t> const none;
+  Vector<uint32_t> const none;
   CandidateMemo::Recalled const fresh{ memo.find_score(drawn, none, true) };
   REQUIRE(fresh.entry != INVALID);
   CHECK(fresh.route_bound == -1);
@@ -534,7 +535,7 @@ TEST_CASE("candidate memo: a retried entry never answers and takes no score") {
   SubmachineOrders const plain{ f.order() };
   uint32_t const drawn{ memo.drawing(plain, f.size(plain), memo.profile_word(f.p)) };
   REQUIRE(drawn != INVALID);
-  std::vector<uint32_t> const none;
+  Vector<uint32_t> const none;
   uint32_t const e{ memo.find_score(drawn, none, true).entry };
   REQUIRE(e != INVALID);
   MemoScore const s{ .cost = { .t0_violations = 0, .t1_hints = 0, .t2 = 4 },
@@ -601,7 +602,7 @@ TEST_CASE("candidate memo: past its budget it empties, and issues no number twic
   SubmachineOrders const plain{ f.order() };
   uint32_t const drawn{ memo.drawing(plain, f.size(plain), memo.profile_word(f.p)) };
   REQUIRE(drawn != INVALID);
-  std::vector<uint32_t> const none;
+  Vector<uint32_t> const none;
   uint32_t const e{ memo.find_score(drawn, none, true).entry };
   REQUIRE(e != INVALID);
   memo.set_score(
@@ -630,7 +631,7 @@ TEST_CASE("candidate memo: the tables never hold more than the budget") {
   constexpr uint64_t BUDGET{ uint64_t{ 64 } << 10U };
   CandidateMemo memo{ f.c, f.g, BUDGET };
   uint32_t const row{ memo.row_word(f.row) };
-  std::vector<uint32_t> faces;
+  Vector<uint32_t> faces;
   uint64_t most{ 0 };
   for (uint32_t i = 0; i < 20000; ++i) {
     faces.assign(1 + (i % 7), i);
@@ -653,7 +654,7 @@ TEST_CASE("candidate memo: a link to an entry since emptied away reads nothing")
   uint32_t const plain_at{ memo.arrangement(plain) };
   REQUIRE(drawn != INVALID);
   REQUIRE(plain_at != INVALID);
-  std::vector<uint32_t> const none;
+  Vector<uint32_t> const none;
   uint32_t const old{ memo.find_score(drawn, none, true).entry };
   REQUIRE(old != INVALID);
   memo.empty();

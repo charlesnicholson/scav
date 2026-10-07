@@ -10,6 +10,7 @@
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
 #include "scav/scav_layout_c.h"
+#include "scav_vector.h"
 
 #include <array>
 #include <cstdint>
@@ -103,7 +104,7 @@ CostTerms cost_bound(Chart const &c,
                      SplitGraph const &g,
                      std::vector<std::vector<uint32_t>> const &bends,  // `segment_bends`
                      SizedLayout const &z,
-                     std::vector<uint32_t> const &faces,
+                     Vector<uint32_t> const &faces,
                      scav_profile const &p,
                      int32_t clear,
                      Router const &router,

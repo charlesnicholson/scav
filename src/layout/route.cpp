@@ -21,6 +21,7 @@
 #include "scav_stable_sort.h"
 #include "scav_thread.h"
 #include "scav_vec.h"
+#include "scav_vector.h"
 
 #include <array>
 #include <bit>
@@ -694,8 +695,8 @@ struct CallScratch {
   std::vector<uint32_t> slot_port;  // parallel to `Routes::slots`: each slot's port
   std::vector<Planned> planned;
   std::vector<Span> trans_nets;
-  std::vector<scav_extent> loop_label;
-  std::vector<scav_rect> loop_row;
+  Vector<scav_extent> loop_label;
+  Vector<scav_rect> loop_row;
   std::vector<scav_point> loop_points;
   std::vector<scav_span> loop_span;    // per transition, its inner loop in `loop_points`
   std::vector<OccupiedSpan> occupied;  // keyed by state
@@ -848,7 +849,7 @@ void route_transitions(Routes &out,
 
   // Each inner loop's four points out of its state's border and back, in its row of the
   // state's loop room; `occupied` gets its ends' run on each face they touch, padded.
-  std::vector<scav_rect> &loop_row{ cs.loop_row };
+  Vector<scav_rect> &loop_row{ cs.loop_row };
   loop_rows(c, z, s, p, cs.loop_label, loop_row);
   std::vector<scav_point> &loop_points{ cs.loop_points };
   loop_points.clear();

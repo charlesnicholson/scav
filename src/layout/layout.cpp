@@ -24,6 +24,7 @@
 #include "scav_stable_sort.h"
 #include "scav_thread.h"
 #include "scav_vec.h"
+#include "scav_vector.h"
 #include "scav_xxhash.h"
 
 #include <algorithm>
@@ -113,7 +114,7 @@ void search_key(scav_profile const &objective,
                 bool refold,
                 SearchPins const &seed,
                 std::vector<uint8_t> const *scope,
-                std::vector<uint32_t> &key);
+                Vector<uint32_t> &key);
 SCAV_INTERNAL_END
 
 namespace {
@@ -233,10 +234,10 @@ uint32_t geom_column_clash(Chart const &c) {
   return GeomCount;
 }
 
-template <typename T>
-void write_rows(Chart &c, ColumnId id, std::vector<T> const &rows) {
+template <typename V>
+void write_rows(Chart &c, ColumnId id, V const &rows) {
   if (!rows.empty()) {
-    std::memcpy(column_data(c, id), rows.data(), rows.size() * sizeof(T));
+    std::memcpy(column_data(c, id), rows.data(), rows.size() * sizeof(rows[0]));
   }
 }
 
@@ -962,32 +963,28 @@ struct Scored {
   bool stopped{ false };   // `cost` is the Tier 2 its count stopped at, a bound
 };
 
-void put_pins(SearchPins const &p, std::vector<uint32_t> &w) {
-  vec_push_back(w, static_cast<uint32_t>(p.ranks.size()));
-  for (RankPin const &r : p.ranks) { vec_insert(w, w.end(), { r.state.v, r.rank }); }
-  vec_push_back(w, static_cast<uint32_t>(p.cuts.size()));
-  for (ChainCut const &k : p.cuts) { vec_insert(w, w.end(), { k.trans.v, k.leg }); }
-  vec_push_back(w, static_cast<uint32_t>(p.reverses.size()));
-  for (ReversePin const &r : p.reverses) { vec_insert(w, w.end(), { r.trans.v, r.leg }); }
-  vec_push_back(w, static_cast<uint32_t>(p.ends.size()));
+void put_pins(SearchPins const &p, Vector<uint32_t> &w) {
+  w.push_back(static_cast<uint32_t>(p.ranks.size()));
+  for (RankPin const &r : p.ranks) { w.insert(w.end(), { r.state.v, r.rank }); }
+  w.push_back(static_cast<uint32_t>(p.cuts.size()));
+  for (ChainCut const &k : p.cuts) { w.insert(w.end(), { k.trans.v, k.leg }); }
+  w.push_back(static_cast<uint32_t>(p.reverses.size()));
+  for (ReversePin const &r : p.reverses) { w.insert(w.end(), { r.trans.v, r.leg }); }
+  w.push_back(static_cast<uint32_t>(p.ends.size()));
   for (EndPin const &e : p.ends) {
-    vec_insert(w, w.end(), { e.trans.v, e.leg, e.end, e.face });
+    w.insert(w.end(), { e.trans.v, e.leg, e.end, e.face });
   }
-  vec_push_back(w, static_cast<uint32_t>(p.orients.size()));
-  for (OrientPin const &o : p.orients) { vec_push_back(w, o.frame.v); }
-  vec_push_back(w, static_cast<uint32_t>(p.folds.size()));
-  for (FoldPin const &f : p.folds) {
-    vec_insert(w, w.end(), { f.frame.v, f.mode, f.layer });
-  }
-  vec_push_back(w, static_cast<uint32_t>(p.loops.size()));
-  for (LoopPin const &l : p.loops) {
-    vec_insert(w, w.end(), { l.state.v, l.face, l.end });
-  }
+  w.push_back(static_cast<uint32_t>(p.orients.size()));
+  for (OrientPin const &o : p.orients) { w.push_back(o.frame.v); }
+  w.push_back(static_cast<uint32_t>(p.folds.size()));
+  for (FoldPin const &f : p.folds) { w.insert(w.end(), { f.frame.v, f.mode, f.layer }); }
+  w.push_back(static_cast<uint32_t>(p.loops.size()));
+  for (LoopPin const &l : p.loops) { w.insert(w.end(), { l.state.v, l.face, l.end }); }
 }
 
 bool same_pins(SearchPins const &a, SearchPins const &b) {
-  std::vector<uint32_t> wa;
-  std::vector<uint32_t> wb;
+  Vector<uint32_t> wa;
+  Vector<uint32_t> wb;
   put_pins(a, wa);
   put_pins(b, wb);
   return wa == wb;
@@ -1137,7 +1134,7 @@ struct MoveScratch {
   SubmachineOrders moved;
   Candidate whole, face;
   CandidateScratch keep;
-  std::vector<uint32_t> faces;  // the move's box-end faces
+  Vector<uint32_t> faces;  // the move's box-end faces
   std::vector<uint32_t> reversed;
   std::vector<std::vector<uint32_t>> bends;  // the laid ordering's, per segment
 };
@@ -1197,7 +1194,7 @@ CostTerms route_bound(Chart const &c,
                       SplitGraph const &g,
                       std::vector<std::vector<uint32_t>> const &bends,
                       SizedLayout const &z,
-                      std::vector<uint32_t> const &faces,
+                      Vector<uint32_t> const &faces,
                       scav_profile const &objective,
                       Row const &row,
                       Router const &router,
@@ -2079,7 +2076,7 @@ Improved run_search(Chart const &c,
     access.laid = &laid_blocks;
     access.drawing = &drawn_blocks;
   }
-  std::vector<uint32_t> held_faces;
+  Vector<uint32_t> held_faces;
   auto const remember_incumbent = [&]() {
     access.drawn = INVALID;
     if ((access.table == nullptr) || !incumbent.ok) { return; }
@@ -2272,7 +2269,7 @@ Improved run_search(Chart const &c,
       }
     }
     // Fold moves under `refold`: a folded frame moves its cut before each other rank.
-    std::vector<uint8_t> const &drawn_folded{ out.best.sized.folded };
+    Vector<uint8_t> const &drawn_folded{ out.best.sized.folded };
     for (uint32_t m = 0; refold && (m < here.sub_ranks.size()); ++m) {
       if ((c.submachines[m].live == 0) || (here.sub_down[m] != 0) ||
           (m >= drawn_folded.size()) || (drawn_folded[m] == 0) || !in_scope(m)) {
@@ -2290,8 +2287,8 @@ Improved run_search(Chart const &c,
     }
     // Loop moves: each state with a loop room to each other placement on an anchored face;
     // on an uninflated incumbent, a placement that leaves the room where it is is culled.
-    std::vector<uint8_t> const &drawn_place{ out.best.sized.loop_place };
-    std::vector<scav_rect> const &drawn_loop{ out.best.sized.loop };
+    Vector<uint8_t> const &drawn_place{ out.best.sized.loop_place };
+    Vector<scav_rect> const &drawn_loop{ out.best.sized.loop };
     for (uint32_t st = 0; (st < drawn_loop.size()) && (loop_scored < budget); ++st) {
       if ((drawn_loop[st].w == 0) || (st >= drawn_place.size()) ||
           !in_scope(c.states[st].parent.v)) {
@@ -2846,16 +2843,16 @@ Improved search_moves(Chart const &c,
                       stats);
   };
   if ((memo == nullptr) || (trace_sink() != nullptr)) { return search(); }
-  std::vector<uint32_t> key;
+  Vector<uint32_t> key;
   search_key(objective, row, budget, refold, seed, scope, key);
-  std::vector<int32_t> value;
+  Vector<int32_t> value;
   bool hit{ false };
   {
     ScopedLock const held{ memo->lock };
     int32_t const *at{ nullptr };
     uint32_t len{ 0 };
     hit = memo->table.find(key, at, len);
-    if (hit) { vec_assign(value, at, at + len); }
+    if (hit) { value.assign(at, at + len); }
 #ifdef SCAV_TESTING
     test_search_memo_hits += hit ? 1U : 0U;
 #endif
@@ -2889,16 +2886,16 @@ Improved search_moves(Chart const &c,
     return out;
   }
   Improved out{ search() };
-  std::vector<uint32_t> words{
-    out.viable ? 1U : 0U,
-    static_cast<uint32_t>(out.cost.t0_violations),
-    static_cast<uint32_t>(static_cast<uint64_t>(out.cost.t1_hints) >> 32U),
-    static_cast<uint32_t>(static_cast<uint64_t>(out.cost.t1_hints)),
-    static_cast<uint32_t>(static_cast<uint64_t>(out.cost.t2) >> 32U),
-    static_cast<uint32_t>(static_cast<uint64_t>(out.cost.t2))
-  };
+  Vector<uint32_t> words{ out.viable ? 1U : 0U,
+                          static_cast<uint32_t>(out.cost.t0_violations),
+                          static_cast<uint32_t>(static_cast<uint64_t>(out.cost.t1_hints) >>
+                                                32U),
+                          static_cast<uint32_t>(static_cast<uint64_t>(out.cost.t1_hints)),
+                          static_cast<uint32_t>(static_cast<uint64_t>(out.cost.t2) >> 32U),
+                          static_cast<uint32_t>(static_cast<uint64_t>(out.cost.t2)) };
   put_pins(out.held, words);
-  vec_assign(value, words.begin(), words.end());
+  value.resize(words.size());
+  for (size_t i = 0; i < words.size(); ++i) { value[i] = static_cast<int32_t>(words[i]); }
   {
     ScopedLock const held{ memo->lock };
     int32_t const *at{ nullptr };
@@ -3000,26 +2997,25 @@ void search_key(scav_profile const &objective,
                 bool refold,
                 SearchPins const &seed,
                 std::vector<uint8_t> const *scope,
-                std::vector<uint32_t> &key) {
+                Vector<uint32_t> &key) {
   static_assert((sizeof(scav_profile) % sizeof(uint32_t)) == 0);
   std::array<uint32_t, sizeof(scav_profile) / sizeof(uint32_t)> words{};
   key.clear();
   for (scav_profile const *const at : { &objective, &row.knobs }) {
     std::memcpy(words.data(), at, sizeof(scav_profile));
-    vec_insert(key, key.end(), words.begin(), words.end());
+    key.insert(key.end(), words.begin(), words.end());
   }
-  vec_insert(key,
-             key.end(),
+  key.insert(key.end(),
              { static_cast<uint32_t>(row.dar),
                static_cast<uint32_t>(row.pack),
                static_cast<uint32_t>(row.fold),
                budget,
                refold ? 1U : 0U });
   put_pins(seed, key);
-  vec_push_back(key, (scope == nullptr) ? 0U : 1U);
+  key.push_back((scope == nullptr) ? 0U : 1U);
   if (scope != nullptr) {
-    vec_push_back(key, static_cast<uint32_t>(scope->size()));
-    for (uint8_t const f : *scope) { vec_push_back(key, f); }
+    key.push_back(static_cast<uint32_t>(scope->size()));
+    for (uint8_t const f : *scope) { key.push_back(f); }
   }
 }
 
@@ -3033,7 +3029,7 @@ void search_changes(Chart const &c,
                     std::vector<uint8_t> &frame,
                     std::vector<uint8_t> &route,
                     std::vector<uint8_t> &resized) {
-  auto const at = [](std::vector<scav_rect> const &v, uint32_t i) {
+  auto const at = [](Vector<scav_rect> const &v, uint32_t i) {
     return (i < v.size()) ? v[i] : scav_rect{};
   };
   vec_assign(frame, c.submachines.size(), uint8_t{ 0 });
@@ -3389,7 +3385,7 @@ bool layout_run(Chart &c,
         vec_push_back(kick_frame, m);
       }
       // Fold kicks: each across-page frame without a fold pin flips its drawn fold.
-      std::vector<uint8_t> const &folded{ candidates[best].sized.folded };
+      Vector<uint8_t> const &folded{ candidates[best].sized.folded };
       for (uint32_t m = 0; m < here.sub_ranks.size(); ++m) {
         bool const fold_pinned{ std::ranges::any_of(
             held[best].folds,

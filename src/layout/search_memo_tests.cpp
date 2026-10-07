@@ -11,6 +11,7 @@
 
 #include "core/tests/corpus.h"
 #include "doctest.h"
+#include "scav_vector.h"
 
 #include <array>
 #include <atomic>
@@ -30,7 +31,7 @@ void search_key(scav_profile const &objective,
                 bool refold,
                 SearchPins const &seed,
                 std::vector<uint8_t> const *scope,
-                std::vector<uint32_t> &key);
+                Vector<uint32_t> &key);
 void layout_test_prefix_shortcut(bool on);
 void layout_test_prefix_verify(bool on);
 uint64_t layout_test_prefix_used();
@@ -91,8 +92,8 @@ struct Inputs {
   bool scoped{ false };
 };
 
-std::vector<uint32_t> key_of(Inputs const &in) {
-  std::vector<uint32_t> key;
+Vector<uint32_t> key_of(Inputs const &in) {
+  Vector<uint32_t> key;
   search_key(in.objective,
              in.row,
              in.budget,
@@ -209,7 +210,7 @@ TEST_CASE("search memo: the key tells apart every input a search is a function o
       { .frame = SubmachineId{ 2 }, .mode = FOLD_ALWAYS, .layer = 2 });
   variants[21].refold = true;
 
-  std::vector<std::vector<uint32_t>> keys{ key_of(base) };
+  std::vector<Vector<uint32_t>> keys{ key_of(base) };
   for (Inputs const &v : variants) { keys.push_back(key_of(v)); }
   CHECK(key_of(base) == keys[0]);
   for (uint32_t a = 0; a < keys.size(); ++a) {

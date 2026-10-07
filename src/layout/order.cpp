@@ -16,6 +16,7 @@
 #include "scav_stable_sort.h"
 #include "scav_thread.h"
 #include "scav_vec.h"
+#include "scav_vector.h"
 
 #include <array>
 #include <cstdint>
@@ -1031,39 +1032,37 @@ void order_submachines(SubmachineOrders &o,
     // Memo key: serial, profile, the frame as built, per edge its pins and label charge,
     // and its rank pins. A traced run skips the memo.
     bool const tracing{ trace_sink() != nullptr };
-    thread_local std::vector<uint32_t> key;
-    thread_local std::vector<int32_t> value;
+    thread_local Vector<uint32_t> key;
+    thread_local Vector<int32_t> value;
     key.clear();
     if (!tracing) {
-      vec_push_back(key, g.serial);
-      vec_push_back(key, profile_word);
+      key.push_back(g.serial);
+      key.push_back(profile_word);
       if (g.serial != 0) {
-        vec_push_back(key, m);  // the frame as built is a function of the graph and `m`
+        key.push_back(m);  // the frame as built is a function of the graph and `m`
       } else {
-        vec_push_back(key, static_cast<uint32_t>(f.nodes.size()));
+        key.push_back(static_cast<uint32_t>(f.nodes.size()));
         for (OrderNode const &nd : f.nodes) {
-          vec_push_back(key, static_cast<uint32_t>(nd.kind));
-          vec_push_back(key, nd.subject);
-          vec_push_back(key,
-                        (nd.kind == OrderKind::State)
+          key.push_back(static_cast<uint32_t>(nd.kind));
+          key.push_back(nd.subject);
+          key.push_back((nd.kind == OrderKind::State)
                             ? static_cast<uint32_t>(c.states[nd.subject].kind)
                             : 0U);
         }
-        vec_push_back(key, static_cast<uint32_t>(f.edges.size()));
+        key.push_back(static_cast<uint32_t>(f.edges.size()));
       }
       for (OrderEdge const &e : f.edges) {
         if (g.serial == 0) {
-          vec_push_back(key, e.src);
-          vec_push_back(key, e.dst);
-          vec_push_back(key, e.segment);
+          key.push_back(e.src);
+          key.push_back(e.dst);
+          key.push_back(e.segment);
         }
         uint32_t const reversed{ pre_reversed.empty() ? 0U : pre_reversed[e.segment] };
         uint32_t const cuts{ cut.empty() ? 0U : cut[e.segment] };
         // Each field fits in a byte.
-        vec_push_back(key,
-                      reversed | (cuts << 8U) | (uint32_t{ cross_of(e) } << 16U) |
-                          (uint32_t{ lead_of(e) } << 24U));
-        vec_push_back(key, static_cast<uint32_t>(seg_label[e.segment]));
+        key.push_back(reversed | (cuts << 8U) | (uint32_t{ cross_of(e) } << 16U) |
+                      (uint32_t{ lead_of(e) } << 24U));
+        key.push_back(static_cast<uint32_t>(seg_label[e.segment]));
       }
       for (RankPin const &pin : pins.ranks) {
         if ((pin.state.v == INVALID) || (pin.state.v >= sc.state_local.size())) {
@@ -1071,8 +1070,8 @@ void order_submachines(SubmachineOrders &o,
         }
         uint32_t const at{ sc.state_local[pin.state.v] };
         if (at >= f.nodes.size()) { continue; }
-        vec_push_back(key, at);
-        vec_push_back(key, pin.rank);
+        key.push_back(at);
+        key.push_back(pin.rank);
       }
     }
     Memo &memo{ frame_memo() };
@@ -1205,7 +1204,7 @@ void order_submachines(SubmachineOrders &o,
       vec_insert(f.edges, f.edges.end(), flat.begin(), flat.end());
       if (!tracing) {
         value.clear();
-        auto const put = [](uint32_t w) { vec_push_back(value, static_cast<int32_t>(w)); };
+        auto const put = [](uint32_t w) { value.push_back(static_cast<int32_t>(w)); };
         put(static_cast<uint32_t>(f.nodes.size()));
         for (OrderNode const &nd : f.nodes) {
           put(static_cast<uint32_t>(nd.kind));
@@ -1226,8 +1225,8 @@ void order_submachines(SubmachineOrders &o,
           for (uint32_t const v : bucket) { put(v); }
         }
         put(static_cast<uint32_t>(frames[m].gaps.size()));
-        for (int32_t const gap : frames[m].gaps) { vec_push_back(value, gap); }
-        for (int32_t const label : frames[m].labels) { vec_push_back(value, label); }
+        for (int32_t const gap : frames[m].gaps) { value.push_back(gap); }
+        for (int32_t const label : frames[m].labels) { value.push_back(label); }
         put(static_cast<uint32_t>(frames[m].cyclic.size()));
         for (uint32_t const seg : frames[m].cyclic) { put(seg); }
         memo.insert(key, value);

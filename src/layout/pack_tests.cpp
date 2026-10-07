@@ -8,6 +8,7 @@
 #include "scav_rnd.h"
 
 #include "doctest.h"
+#include "scav_vector.h"
 
 #include <cstdint>
 #include <utility>
@@ -17,7 +18,7 @@ namespace scav {
 
 // `pack_lr` with compaction and whitespace elimination each selectable; defined in
 // `pack.cpp` under SCAV_INTERNAL.
-Packing pack_rows(std::vector<scav_rect> const &rects,
+Packing pack_rows(Vector<scav_rect> const &rects,
                   int32_t sep,
                   int32_t dar_num,
                   int32_t dar_den,
@@ -30,7 +31,7 @@ namespace {
 
 using namespace scav;
 
-Packing pack_lr(std::vector<scav_rect> const &rects,
+Packing pack_lr(Vector<scav_rect> const &rects,
                 int32_t sep,
                 int32_t dar_num,
                 int32_t dar_den,
@@ -40,14 +41,14 @@ Packing pack_lr(std::vector<scav_rect> const &rects,
   return out;
 }
 
-Packing pack_box(std::vector<scav_rect> const &rects, int32_t sep) {
+Packing pack_box(Vector<scav_rect> const &rects, int32_t sep) {
   Packing out;
   scav::pack_box(out, rects, sep);
   return out;
 }
 
-std::vector<scav_rect> boxes(std::vector<std::pair<int32_t, int32_t>> const &wh) {
-  std::vector<scav_rect> out;
+Vector<scav_rect> boxes(std::vector<std::pair<int32_t, int32_t>> const &wh) {
+  Vector<scav_rect> out;
   out.reserve(wh.size());
   for (std::pair<int32_t, int32_t> const &e : wh) {
     out.push_back({ .x = 0, .y = 0, .w = e.first, .h = e.second });
@@ -55,7 +56,7 @@ std::vector<scav_rect> boxes(std::vector<std::pair<int32_t, int32_t>> const &wh)
   return out;
 }
 
-bool same(std::vector<scav_rect> const &a, std::vector<scav_rect> const &b) {
+bool same(Vector<scav_rect> const &a, Vector<scav_rect> const &b) {
   if (a.size() != b.size()) { return false; }
   for (uint32_t i = 0; i < a.size(); ++i) {
     if ((a[i].x != b[i].x) || (a[i].y != b[i].y) || (a[i].w != b[i].w) ||
@@ -100,7 +101,7 @@ int64_t filled(Packing const &p) {
 }
 
 // Compaction keeps the filled area and shrinks or keeps each extent.
-void check_compaction(std::vector<scav_rect> const &rects,
+void check_compaction(Vector<scav_rect> const &rects,
                       int32_t sep,
                       int32_t dar_num,
                       int32_t dar_den) {
@@ -121,7 +122,7 @@ void check_compaction(std::vector<scav_rect> const &rects,
 
 // Whitespace elimination keeps both extents; each rect grows or stays and moves
 // only right or down, and a zero-extent rect keeps its size.
-void check_expansion(std::vector<scav_rect> const &rects,
+void check_expansion(Vector<scav_rect> const &rects,
                      int32_t sep,
                      int32_t dar_num,
                      int32_t dar_den,
@@ -322,8 +323,7 @@ TEST_CASE("pack: sane on a spread of shapes, and twice the same") {
 TEST_CASE("pack: a column of maximal rects saturates rather than wrapping") {
   // 5000 COORD_MAX squares, one per row: the column sums to 2.6 billion and `h`
   // saturates.
-  std::vector<scav_rect> const tall(5000,
-                                    { .x = 0, .y = 0, .w = COORD_MAX, .h = COORD_MAX });
+  Vector<scav_rect> const tall(5000, { .x = 0, .y = 0, .w = COORD_MAX, .h = COORD_MAX });
 
   Packing const p{ pack_lr(tall, 0, 16, 10, Compaction::Off) };
   REQUIRE(p.at.size() == tall.size());
@@ -344,7 +344,7 @@ TEST_CASE("pack: a column of maximal rects saturates rather than wrapping") {
 
 TEST_CASE("pack: one oversized child sets the target and nothing shares its row") {
   // The widest rect floors the target at 1000; the other two share the subrow under it.
-  std::vector<scav_rect> const in{ boxes({ { 1000, 100 }, { 100, 100 }, { 100, 100 } }) };
+  Vector<scav_rect> const in{ boxes({ { 1000, 100 }, { 100, 100 }, { 100, 100 } }) };
   Packing const p{ pack_rows(in, 10, 16, 10, Compaction::Off, false) };
   REQUIRE(p.at.size() == 3);
   CHECK(p.at[0].x == 0);
@@ -361,7 +361,7 @@ TEST_CASE("pack: one oversized child sets the target and nothing shares its row"
 TEST_CASE("pack: equal heights are where the row packer wins") {
   // Two regions of equal height: the target fits one, so `pack_lr` stacks them, and
   // `pack_box`'s single row scores better.
-  std::vector<scav_rect> const in{ boxes({ { 1888, 1594 }, { 1773, 1594 } }) };
+  Vector<scav_rect> const in{ boxes({ { 1888, 1594 }, { 1773, 1594 } }) };
   Packing const p{ pack_lr(in, 192, 16, 10, Compaction::Off) };
   CHECK(p.w == 1888);
   CHECK(p.h == 3380);
@@ -377,7 +377,7 @@ TEST_CASE("pack: both last steps keep every property over a seeded spread") {
     CAPTURE(item);
     uint32_t const n{ 1 + static_cast<uint32_t>(rnd(9091, 0, item, 0) % 9) };
     int32_t const sep{ static_cast<int32_t>(rnd(9091, 1, item, 0) % 200) };
-    std::vector<scav_rect> in;
+    Vector<scav_rect> in;
     in.reserve(n);
     for (uint32_t k = 0; k < n; ++k) {
       in.push_back({ .x = 0,
@@ -397,7 +397,7 @@ TEST_CASE("pack: both last steps keep every property over a seeded spread") {
 TEST_CASE("pack: a saturated column is left as it is") {
   // 5000 COORD_MAX squares over a half-width rect: `h` saturates and whitespace
   // elimination keeps placement's positions, the last rect's width included.
-  std::vector<scav_rect> tall(5000, { .x = 0, .y = 0, .w = COORD_MAX, .h = COORD_MAX });
+  Vector<scav_rect> tall(5000, { .x = 0, .y = 0, .w = COORD_MAX, .h = COORD_MAX });
   tall.push_back({ .x = 0, .y = 0, .w = COORD_MAX / 2, .h = COORD_MAX });
   Packing const placed{ pack_rows(tall, 0, 16, 10, Compaction::Off, false) };
   Packing const p{ pack_lr(tall, 0, 16, 10, Compaction::Off) };
@@ -407,7 +407,7 @@ TEST_CASE("pack: a saturated column is left as it is") {
   CHECK(same(p.at, placed.at));
 
   // The same column's last three rects, short of saturation: the half-width rect widens.
-  std::vector<scav_rect> const short_of(tall.end() - 3, tall.end());
+  Vector<scav_rect> const short_of(tall.end() - 3, tall.end());
   Packing const filled_out{ pack_lr(short_of, 0, 16, 10, Compaction::Off) };
   CHECK(filled_out.h == (3 * COORD_MAX));
   CHECK(filled_out.at.back().w == COORD_MAX);
@@ -416,8 +416,7 @@ TEST_CASE("pack: a saturated column is left as it is") {
 TEST_CASE("pack: whitespace elimination fills a column to the drawing's width") {
   // A column of three subrows, one rect each: the narrower two grow to the widest's
   // 2695.
-  std::vector<scav_rect> const in{ boxes(
-      { { 2695, 653 }, { 1434, 653 }, { 1895, 653 } }) };
+  Vector<scav_rect> const in{ boxes({ { 2695, 653 }, { 1434, 653 }, { 1895, 653 } }) };
   Packing const p{ pack_lr(in, 288, 16, 10, Compaction::Off) };
   REQUIRE(p.at.size() == 3);
   CHECK(p.w == 2695);
@@ -439,7 +438,7 @@ TEST_CASE("pack: whitespace elimination fills a column to the drawing's width") 
 TEST_CASE("pack: whitespace elimination fills the notch a row-level rect left") {
   // The third rect sits at row level and grows from 50 x 50 to 50 x 110, down to the
   // row's floor.
-  std::vector<scav_rect> const in{ boxes({ { 100, 50 }, { 100, 50 }, { 50, 50 } }) };
+  Vector<scav_rect> const in{ boxes({ { 100, 50 }, { 100, 50 }, { 50, 50 } }) };
   Packing const p{ pack_lr(in, 10, 16, 10, Compaction::Off) };
   REQUIRE(p.at.size() == 3);
   CHECK(p.at[2].x == 110);
@@ -456,7 +455,7 @@ TEST_CASE("pack: whitespace elimination fills the notch a row-level rect left") 
 TEST_CASE("pack: whitespace elimination shares a row's slack between its blocks") {
   // A 310-wide row in a 400-wide drawing, in two blocks: each block gets 45 of the
   // 90 spare, keeping the 10 gap and ending the row at the drawing's right edge.
-  std::vector<scav_rect> const in{ boxes(
+  Vector<scav_rect> const in{ boxes(
       { { 200, 100 }, { 200, 100 }, { 100, 100 }, { 400, 100 } }) };
   Packing const placed{ pack_rows(in, 10, 16, 10, Compaction::Off, false) };
   CHECK(placed.at[2].x == 210);
@@ -487,7 +486,7 @@ TEST_CASE("pack: the row packer levels its rects' heights") {
 }
 
 TEST_CASE("pack: a rect with no extent is not grown into one") {
-  std::vector<scav_rect> const in{ boxes({ { 400, 300 }, { 0, 0 }, { 200, 100 } }) };
+  Vector<scav_rect> const in{ boxes({ { 400, 300 }, { 0, 0 }, { 200, 100 } }) };
   Packing const p{ pack_lr(in, 10, 16, 10, Compaction::Off) };
   REQUIRE(p.at.size() == 3);
   CHECK(p.at[1].w == 0);
@@ -498,7 +497,7 @@ TEST_CASE("pack: a rect with no extent is not grown into one") {
 TEST_CASE("pack: compaction takes the late arrival back into the hole above it") {
   // Target is isqrt(240400 * 16 / 10) = 620: placement puts the third rect at row
   // level and the fourth in a new row.
-  std::vector<scav_rect> const in{ boxes(
+  Vector<scav_rect> const in{ boxes(
       { { 500, 100 }, { 200, 400 }, { 100, 100 }, { 200, 400 } }) };
 
   Packing const placed{ pack_rows(in, 10, 16, 10, Compaction::Off, false) };
@@ -536,8 +535,7 @@ TEST_CASE("pack: compaction takes the late arrival back into the hole above it")
 TEST_CASE("pack: compaction pulls a row-level rect back beside its predecessor") {
   // Placement puts the third rect at row level (1696 + 288 + 1088 = 3072 <= 3186);
   // compaction moves it beside the second, 262 to the left.
-  std::vector<scav_rect> const in{ boxes(
-      { { 1696, 941 }, { 1434, 1229 }, { 1088, 653 } }) };
+  Vector<scav_rect> const in{ boxes({ { 1696, 941 }, { 1434, 1229 }, { 1088, 653 } }) };
 
   Packing const placed{ pack_rows(in, 288, 16, 10, Compaction::Off, false) };
   CHECK(placed.at[2].x == 1984);
@@ -558,7 +556,7 @@ TEST_CASE("pack: compaction pulls a row-level rect back beside its predecessor")
 }
 
 TEST_CASE("pack: vac's root frame is a packing compaction cannot improve") {
-  std::vector<scav_rect> const in{ boxes(
+  Vector<scav_rect> const in{ boxes(
       { { 3066, 2535 }, { 2842, 1050 }, { 10785, 6299 }, { 1696, 1594 } }) };
 
   Packing const p{ pack_rows(in, 288, 16, 10, Compaction::On, false) };
@@ -579,8 +577,7 @@ TEST_CASE("pack: vac's root frame is a packing compaction cannot improve") {
 
 TEST_CASE("pack: compaction leaves a saturated column saturated") {
   // 64 COORD_MAX squares in one column: compaction keeps placement's positions.
-  std::vector<scav_rect> const tall(64,
-                                    { .x = 0, .y = 0, .w = COORD_MAX, .h = COORD_MAX });
+  Vector<scav_rect> const tall(64, { .x = 0, .y = 0, .w = COORD_MAX, .h = COORD_MAX });
   Packing const placed{ pack_rows(tall, 0, 16, 10, Compaction::Off, false) };
   Packing const p{ pack_lr(tall, 0, 16, 10, Compaction::On) };
   CHECK(p.w == COORD_MAX);

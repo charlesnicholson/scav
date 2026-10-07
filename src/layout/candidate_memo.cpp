@@ -5,6 +5,7 @@
 #include "scav_int.h"
 #include "scav_stable_sort.h"
 #include "scav_vec.h"
+#include "scav_vector.h"
 
 #include <algorithm>
 #include <cstring>
@@ -503,7 +504,7 @@ SCAV_COLD uint32_t CandidateMemo::drawing(SubmachineOrders const &o,
 }
 
 SCAV_COLD void CandidateMemo::box_faces(SearchPins const *pins,
-                                        std::vector<uint32_t> &faces) const {
+                                        Vector<uint32_t> &faces) const {
   faces.clear();
   static std::vector<EndPin> const NONE;
   for (EndPin const &fp : (pins != nullptr) ? pins->ends : NONE) {
@@ -524,7 +525,7 @@ SCAV_COLD void CandidateMemo::box_faces(SearchPins const *pins,
     if (had != faces.end()) {
       *had = end | fp.face;
     } else {
-      vec_push_back(faces, end | fp.face);
+      faces.push_back(end | fp.face);
     }
   }
   scav_stable_sort(faces, [](uint32_t x, uint32_t y) { return x < y; });
@@ -536,11 +537,11 @@ namespace {
 void facing_key(uint32_t row,
                 uint32_t arranged,
                 SubmachineOrders const &o,
-                std::vector<uint32_t> &key) {
+                Vector<uint32_t> &key) {
   key.clear();
-  vec_insert(key, key.end(), { row, arranged });
+  key.insert(key.end(), { row, arranged });
   for (uint32_t seg = 0; seg < o.seg_sided.size(); ++seg) {
-    if (o.seg_sided[seg] != 0) { vec_insert(key, key.end(), { seg, o.seg_sided[seg] }); }
+    if (o.seg_sided[seg] != 0) { key.insert(key.end(), { seg, o.seg_sided[seg] }); }
   }
 }
 
@@ -550,7 +551,7 @@ FacingFound CandidateMemo::find_facing(uint32_t row,
                                        uint32_t arranged,
                                        SubmachineOrders const &o,
                                        Facing &out) {
-  thread_local std::vector<uint32_t> key;
+  thread_local Vector<uint32_t> key;
   facing_key(row, arranged, o, key);
   uint64_t const hash{ memo_hash(key) };
   FacingShard &f{ facings[shard_of(hash)] };
@@ -580,7 +581,7 @@ SCAV_COLD void CandidateMemo::store_facing(uint32_t row,
                                            uint32_t arranged,
                                            SubmachineOrders const &o,
                                            Facing const *turned) {
-  thread_local std::vector<uint32_t> key;
+  thread_local Vector<uint32_t> key;
   facing_key(row, arranged, o, key);
   uint64_t const hash{ memo_hash(key) };
   // A side's end and face share one word.
@@ -629,14 +630,13 @@ SCAV_COLD void CandidateMemo::answer(ScoreRecord const &r, bool labelled, Recall
   out.route_bound = labelled ? imax(r.bound[0], r.bound[1]) : r.bound[0];
 }
 
-SCAV_COLD CandidateMemo::Recalled CandidateMemo::find_score(
-    uint32_t drawn,
-    std::vector<uint32_t> const &faces,
-    bool labelled) {
-  thread_local std::vector<uint32_t> key;
+SCAV_COLD CandidateMemo::Recalled CandidateMemo::find_score(uint32_t drawn,
+                                                            Vector<uint32_t> const &faces,
+                                                            bool labelled) {
+  thread_local Vector<uint32_t> key;
   key.clear();
-  vec_push_back(key, drawn);
-  vec_insert(key, key.end(), faces.begin(), faces.end());
+  key.push_back(drawn);
+  key.insert(key.end(), faces.begin(), faces.end());
   uint64_t const hash{ memo_hash(key) };
   uint32_t const shard{ shard_of(hash) };
   ScoreShard &sh{ scores[shard] };
@@ -678,11 +678,11 @@ CandidateMemo::Recalled CandidateMemo::recall(uint32_t e, bool labelled) {
 SCAV_COLD CandidateMemo::Linked CandidateMemo::find_ordering(
     uint32_t row,
     uint32_t arranged,
-    std::vector<uint32_t> const &faces) {
-  thread_local std::vector<uint32_t> key;
+    Vector<uint32_t> const &faces) {
+  thread_local Vector<uint32_t> key;
   key.clear();
-  vec_insert(key, key.end(), { row, arranged });
-  vec_insert(key, key.end(), faces.begin(), faces.end());
+  key.insert(key.end(), { row, arranged });
+  key.insert(key.end(), faces.begin(), faces.end());
   uint64_t const hash{ memo_hash(key) };
   uint32_t const shard{ shard_of(hash) };
   LinkShard &sh{ orderings[shard] };

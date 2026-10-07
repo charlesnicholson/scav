@@ -12,6 +12,7 @@
 #include "scav/scav_layout.h"
 #include "scav_thread.h"
 #include "scav_vec.h"
+#include "scav_vector.h"
 
 #include <array>
 #include <atomic>
@@ -96,7 +97,7 @@ class CandidateMemo {
 
   // The router's box-end faces under `pins`, as `route_transitions` reads them: the last
   // pin naming an end decides it; one word per end, sorted.
-  void box_faces(SearchPins const *pins, std::vector<uint32_t> &faces) const;
+  void box_faces(SearchPins const *pins, Vector<uint32_t> &faces) const;
 
   // The facing pass's turns for phase-1 ordering `o`, of arrangement `arranged`, in `row`:
   // `Failed` where its first sizing failed, `Turned` with `out` filled.
@@ -121,7 +122,7 @@ class CandidateMemo {
 
   // Finds or makes drawing `drawn`'s score entry under `faces`: a bound request reads the
   // unlabelled score if set, any other the labelled one; a retried entry reads INVALID.
-  Recalled find_score(uint32_t drawn, std::vector<uint32_t> const &faces, bool labelled);
+  Recalled find_score(uint32_t drawn, Vector<uint32_t> const &faces, bool labelled);
 
   // Entry `e` read as `find_score` reads it.
   Recalled recall(uint32_t e, bool labelled);
@@ -133,9 +134,7 @@ class CandidateMemo {
   };
 
   // Finds or makes the key for arrangement `arranged` laid in `row` under `faces`.
-  Linked find_ordering(uint32_t row,
-                       uint32_t arranged,
-                       std::vector<uint32_t> const &faces);
+  Linked find_ordering(uint32_t row, uint32_t arranged, Vector<uint32_t> const &faces);
 
   // Links ordering key `key` to score entry `e`.
   void link(uint32_t key, uint32_t e);

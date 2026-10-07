@@ -13,6 +13,7 @@
 #include "scav_internal.h"
 #include "scav_stable_sort.h"
 #include "scav_vec.h"
+#include "scav_vector.h"
 
 #include <array>
 #include <cstdint>
@@ -716,7 +717,7 @@ Outcome pruned(Local const &l, Scratch &s) {
 }
 
 // `memo_hash`'s round taken two words at a time.
-uint64_t label_hash(std::vector<uint32_t> const &key) {
+uint64_t label_hash(Vector<uint32_t> const &key) {
   uint64_t h{ 0 };
   size_t k{ 0 };
   for (; (k + 1) < key.size(); k += 2) {
@@ -738,10 +739,9 @@ Memo &memo() {
 }
 
 // Every field of `l`, counts before contents, so distinct problems get distinct keys.
-void key_of(Local const &l, std::vector<uint32_t> &key) {
-  vec_resize(key,
-             16 + (2 * l.route.size()) + (4 * l.walls.size()) + (4 * l.foreign.size()) +
-                 (4 * l.below.size()));
+void key_of(Local const &l, Vector<uint32_t> &key) {
+  key.resize(16 + (2 * l.route.size()) + (4 * l.walls.size()) + (4 * l.foreign.size()) +
+             (4 * l.below.size()));
   uint32_t *at{ key.data() };
   auto const word = [&at](int32_t v) { *at++ = static_cast<uint32_t>(v); };
   auto const rect = [&word](scav_rect const &r) {
@@ -773,8 +773,8 @@ void key_of(Local const &l, std::vector<uint32_t> &key) {
 }
 
 Outcome remembered(Local const &l, Scratch &s) {
-  thread_local std::vector<uint32_t> key;
-  thread_local std::vector<int32_t> value;
+  thread_local Vector<uint32_t> key;
+  thread_local Vector<int32_t> value;
   key_of(l, key);
   Memo &m{ memo() };
   int32_t const *hit{ nullptr };
@@ -786,8 +786,7 @@ Outcome remembered(Local const &l, Scratch &s) {
              .mid = hit[4] };
   }
   Outcome const out{ pruned(l, s) };
-  vec_assign(
-      value,
+  value.assign(
       { out.found ? 1 : 0, out.at.x, out.at.y, static_cast<int32_t>(out.seg), out.mid });
   m.insert(key, value);
   return out;
@@ -799,7 +798,7 @@ struct CallBuffers {
   std::vector<scav_rect> pieces;
   std::vector<Pieces> by_route;
   std::vector<uint32_t> live, queue, merge, settled;
-  std::vector<scav_extent> loop_label;
+  Vector<scav_extent> loop_label;
   Local local;
 };
 

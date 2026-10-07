@@ -15,6 +15,7 @@
 #include "scav_internal.h"
 #include "scav_stable_sort.h"
 #include "scav_vec.h"
+#include "scav_vector.h"
 
 #include <algorithm>
 #include <array>
@@ -348,7 +349,7 @@ SCAV_COLD bool on_drawn_edge(SizedLayout const &z,
   uint32_t const ruled{ ((s.box_state != nullptr) && (st < s.n_box_state))
                             ? s.box_state[st].ruled
                             : 0U };
-  auto const row = [st](std::vector<scav_rect> const &v) {
+  auto const row = [st](Vector<scav_rect> const &v) {
     return (st < v.size()) ? v[st] : scav_rect{};
   };
   scav_rect const b{ row(z.before) };
@@ -1646,7 +1647,7 @@ CostTerms cost_bound(Chart const &c,
                      SplitGraph const &g,
                      std::vector<std::vector<uint32_t>> const &bends,
                      SizedLayout const &z,
-                     std::vector<uint32_t> const &faces,
+                     Vector<uint32_t> const &faces,
                      scav_profile const &p,
                      int32_t clear,
                      Router const &router,
@@ -1756,7 +1757,7 @@ SCAV_COLD CostTerms cost_columns(Chart const &c,
   auto const rows = [&c](char const *name, auto &out) {
     ColumnId const id{ column_find(c, name) };
     if (id.v == INVALID) { return; }
-    vec_resize(out, column_count(c, id));
+    out.resize(column_count(c, id));
     if (!out.empty()) {
       std::memcpy(out.data(),
                   column_data(c, id),

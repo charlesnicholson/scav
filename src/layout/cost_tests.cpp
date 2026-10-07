@@ -14,6 +14,7 @@
 #include "scav_stable_sort.h"
 
 #include "doctest.h"
+#include "scav_vector.h"
 
 #include <algorithm>
 #include <array>
@@ -2784,7 +2785,7 @@ CostTerms terms(Chart const &c,
     for (uint32_t st = 0; st < c.states.size(); ++st) {
       if (c.states[st].live == 0) { continue; }
       // Bands with zero width or height are ignored.
-      auto const wall = [&](std::vector<scav_rect> const &v) {
+      auto const wall = [&](Vector<scav_rect> const &v) {
         return (st < v.size()) && (v[st].w > 0) && (v[st].h > 0) &&
                overlaps(r.placed[i], v[st]);
       };
@@ -2852,7 +2853,7 @@ CostTerms terms(Chart const &c,
                           (at.y >= box.y) && (at.y <= box.y + box.h)) ||
                          (((at.y == box.y) || (at.y == box.y + box.h)) &&
                           (at.x >= box.x) && (at.x <= box.x + box.w)) };
-      auto const row = [st](std::vector<scav_rect> const &v) {
+      auto const row = [st](Vector<scav_rect> const &v) {
         return (st < v.size()) ? v[st] : scav_rect{};
       };
       scav_rect const b{ row(z.before) };
@@ -3465,7 +3466,7 @@ struct TwoBoxes {
 
   // The bound's bends under `router` with `faces` named.
   [[nodiscard]] int64_t turns(Router const &router,
-                              std::vector<uint32_t> const &faces = {}) const {
+                              Vector<uint32_t> const &faces = {}) const {
     scav_profile const p{ profile() };
     return cost_bound(c, g, bends, z, faces, p, route_clearance(p), router).bends;
   }
@@ -3608,7 +3609,7 @@ TEST_CASE("cost bound: unseated, an unnamed end may leave from anywhere on its b
   int32_t const clear{ route_clearance(p) };
   auto const unseated = [&](scav_rect const &a,
                             scav_rect const &b,
-                            std::vector<uint32_t> const &faces = {}) {
+                            Vector<uint32_t> const &faces = {}) {
     TwoBoxes const two{ a, b };
     return cost_bound(two.c, two.g, two.bends, two.z, faces, p, clear, ORTHO, false).bends;
   };

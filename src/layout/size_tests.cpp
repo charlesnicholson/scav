@@ -14,6 +14,7 @@
 #include "scav_int.h"
 
 #include "doctest.h"
+#include "scav_vector.h"
 
 #include <cstdint>
 #include <string>
@@ -2012,14 +2013,14 @@ FrameDar size_hole_ratio(int32_t w, int32_t h);
 void size_owner_holes(Chart const &c,
                       SizedLayout const &z,
                       int32_t sep,
-                      std::vector<FrameDar> &hole);
+                      Vector<FrameDar> &hole);
 
 }  // namespace scav
 
 namespace {
 
-std::vector<FrameDar> size_owner_holes(Chart const &c, SizedLayout const &z) {
-  std::vector<FrameDar> hole;
+Vector<FrameDar> size_owner_holes(Chart const &c, SizedLayout const &z) {
+  Vector<FrameDar> hole;
   scav::size_owner_holes(c, z, 0, hole);
   return hole;
 }
@@ -2102,7 +2103,7 @@ TEST_CASE("size: only a state with a live frame in it leaves a hole") {
   std::vector<Diagnostic> diags;
   REQUIRE(size_layout(c, g, order_submachines(c, g, {}, p), {}, p, z, diags));
 
-  std::vector<FrameDar> const hole{ size_owner_holes(c, z) };
+  Vector<FrameDar> const hole{ size_owner_holes(c, z) };
   REQUIRE(hole.size() == c.states.size());
   // The 100000-tall owner around a short frame leaves a hole far taller than wide.
   CHECK(hole[owner.v].num < hole[owner.v].den);
@@ -2325,7 +2326,7 @@ Traced traced(Sample const &x, scav_profile const &p, Fold fold) {
 }
 
 bool same(Traced const &a, Traced const &b) {
-  auto const rects = [](std::vector<scav_rect> const &u, std::vector<scav_rect> const &v) {
+  auto const rects = [](Vector<scav_rect> const &u, Vector<scav_rect> const &v) {
     if (u.size() != v.size()) { return false; }
     for (uint32_t i = 0; i < u.size(); ++i) {
       if (!(u[i] == v[i])) { return false; }

@@ -21,6 +21,7 @@
 
 #include "core/tests/corpus.h"
 #include "scav_int.h"
+#include "scav_vector.h"
 #include "scav_xxhash.h"
 
 #include <array>
@@ -1538,7 +1539,7 @@ TEST_CASE("layout: the pick is the row exact Cost ranks first over the whole tab
 
   SplitGraph const g{ decompose(searched) };
   std::vector<Cost> cost;
-  std::vector<scav_rect> shipped;
+  Vector<scav_rect> shipped;
   for (uint32_t row = 0; row < 4; ++row) {
     CAPTURE(row);
     auto const [knobs, dar, pack, fold]{ search_row(p, row) };
