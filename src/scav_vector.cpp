@@ -31,20 +31,34 @@ bool within(void const *p, void const *base, size_t bytes) {
   return (at >= lo) && (at - lo < bytes);
 }
 
+template <typename W>
+W load(void const *x) {
+  W w{};
+  std::memcpy(&w, x, sizeof(W));
+  return w;
+}
+
+template <typename W>
+void fill_words(Byte *d, size_t n, W w) {
+  for (size_t i = 0; i < n; ++i) { std::memcpy(d + (i * sizeof(W)), &w, sizeof(W)); }
+}
+
 // Writes n copies of the elem bytes at x to dst, or zeros when x is null; x may lie in
 // dst.
 void fill(void *dst, size_t n, void const *x, size_t elem) {
   if (n == 0) { return; }
-  bool zero{ true };
-  if (x != nullptr) {
-    auto const *const b{ static_cast<Byte const *>(x) };
-    for (size_t i = 0; (i < elem) && zero; ++i) { zero = (b[i] == 0); }
-  }
-  if (zero) {
-    std::memset(dst, 0, n * elem);
+  auto *const d{ static_cast<Byte *>(dst) };
+  if (x == nullptr) {
+    std::memset(d, 0, n * elem);
     return;
   }
-  auto *const d{ static_cast<Byte *>(dst) };
+  switch (elem) {
+    case 1: std::memset(d, *static_cast<Byte const *>(x), n); return;
+    case 2: fill_words(d, n, load<uint16_t>(x)); return;
+    case 4: fill_words(d, n, load<uint32_t>(x)); return;
+    case 8: fill_words(d, n, load<uint64_t>(x)); return;
+    default: break;
+  }
   std::memmove(d, x, elem);
   size_t done{ 1 };
   while (done < n) {
@@ -129,7 +143,7 @@ void VectorBase::copy_from(VectorBase const &o, size_t elem) {
 
 void VectorBase::move_from(VectorBase &o) {
   if (&o == this) { return; }
-  std::free(ptr);
+  if (ptr != nullptr) { std::free(ptr); }
   ptr = o.ptr;
   count = o.count;
   cap = o.cap;
@@ -149,9 +163,11 @@ void *VectorBase::insert_copy(size_t at, void const *src, size_t n, size_t elem)
   }
   if (need > cap) { reserve(grown(cap, need), elem); }
   auto *const base{ static_cast<Byte *>(ptr) };
-  std::memmove(base + ((at + n) * elem), base + (at * elem), (count - at) * elem);
+  if (at < count) {
+    std::memmove(base + ((at + n) * elem), base + (at * elem), (count - at) * elem);
+  }
   std::memcpy(base + (at * elem), src, n * elem);
-  std::free(held);
+  if (held != nullptr) { std::free(held); }
   count = static_cast<uint32_t>(need);
   return base + (at * elem);
 }

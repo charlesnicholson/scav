@@ -27,6 +27,10 @@ scav_static_library(scavcore
 )
 scav_install_library(scavcore core)
 scav_optimize_for_size(scavcore)
+if(NOT CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+  set_source_files_properties(../scav_vector.cpp TARGET_DIRECTORY scavcore PROPERTIES
+    COMPILE_OPTIONS "$<$<CONFIG:Release>:-O3>")
+endif()
 
 # The redistributable shared library, `scav`. Each later library adds its c_api.cpp
 # here and links in; scavcore comes transitively through their PUBLIC links.

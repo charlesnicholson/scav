@@ -7,22 +7,21 @@
 #include "layout/order.h"
 #include "scav/scav_core.h"
 #include "scav_cold.h"
-#include "scav_vec.h"
+#include "scav_vector.h"
 
 #include <cstdint>
 #include <utility>
-#include <vector>
 
 namespace scav {
 
 namespace {
 
 // `s` plus every enclosing state, innermost first; at most one entry per state.
-SCAV_COLD void chain_of(Chart const &c, StateId s, std::vector<StateId> &out) {
+SCAV_COLD void chain_of(Chart const &c, StateId s, Vector<StateId> &out) {
   out.clear();
   for (StateId x{ s }; (x.v != INVALID) && (out.size() < c.states.size());
        x = enclosing_state(c, x)) {
-    vec_push_back(out, x);
+    out.push_back(x);
   }
 }
 
@@ -30,8 +29,8 @@ SCAV_COLD void chain_of(Chart const &c, StateId s, std::vector<StateId> &out) {
 // prefix.
 CommonAncestor common_of(Chart const &c,
                          Transition const &tr,
-                         std::vector<StateId> const &chain_src,
-                         std::vector<StateId> const &chain_dst,
+                         Vector<StateId> const &chain_src,
+                         Vector<StateId> const &chain_dst,
                          size_t i,
                          size_t j) {
   if (tr.src == tr.dst) {
@@ -89,17 +88,17 @@ bool ancestor_or_self(Chart const &c, StateId ancestor, StateId of) {
 
 SCAV_COLD SplitGraph decompose(Chart const &c) {
   SplitGraph g;
-  std::vector<StateId> chain_src;  // scratch, reused per state and transition
-  std::vector<StateId> chain_dst;
-  std::vector<Crossing> route;
+  Vector<StateId> chain_src;  // scratch, reused per state and transition
+  Vector<StateId> chain_dst;
+  Vector<Crossing> route;
 
-  vec_assign(g.state_depth, c.states.size(), 0);
+  g.state_depth.assign(c.states.size(), 0);
   for (uint32_t s = 0; s < c.states.size(); ++s) {
     chain_of(c, { s }, chain_src);
     g.state_depth[s] = static_cast<uint32_t>(chain_src.size() - 1);
   }
-  vec_assign(g.trans_segments, c.transitions.size(), Span{});
-  vec_assign(g.trans_common, c.transitions.size(), CommonAncestor{});
+  g.trans_segments.assign(c.transitions.size(), Span{});
+  g.trans_common.assign(c.transitions.size(), CommonAncestor{});
 
   for (uint32_t t = 0; t < c.transitions.size(); ++t) {
     Transition const &tr{ c.transitions[t] };
@@ -126,14 +125,12 @@ SCAV_COLD SplitGraph decompose(Chart const &c) {
       if (i == 0) {  // src encloses dst; its border splits unless internal or local
         src_inner = (tr.kind == TransKind::Internal) || (tr.kind == TransKind::Local);
         if (!src_inner) {
-          vec_push_back(
-              route,
+          route.push_back(
               { .kind = Crossing::Enter, .state = tr.src, .sub = {}, .into = {} });
         }
       }
       for (size_t k = 1; k < i; ++k) {
-        vec_push_back(
-            route,
+        route.push_back(
             { .kind = Crossing::Exit, .state = chain_src[k], .sub = {}, .into = {} });
       }
       if ((i > 0) && (j > 0) && (i < chain_src.size())) {
@@ -142,27 +139,23 @@ SCAV_COLD SplitGraph decompose(Chart const &c) {
         SubmachineId const sub_src{ c.states[chain_src[i - 1].v].parent };
         SubmachineId const sub_dst{ c.states[chain_dst[j - 1].v].parent };
         if (external && ((i > 1) || (j > 1) || (sub_src != sub_dst))) {
-          vec_push_back(
-              route,
+          route.push_back(
               { .kind = Crossing::Exit, .state = chain_src[i], .sub = {}, .into = {} });
-          vec_push_back(
-              route,
+          route.push_back(
               { .kind = Crossing::Enter, .state = chain_src[i], .sub = {}, .into = {} });
         } else if (sub_src != sub_dst) {
-          vec_push_back(
-              route,
+          route.push_back(
               { .kind = Crossing::Divider, .state = {}, .sub = sub_src, .into = sub_dst });
         }
       }
       // `j == 0` when dst encloses src: an external route exits dst and ends on its
       // border; any other ends inside dst, on its inner face.
       if ((j == 0) && external) {
-        vec_push_back(route,
-                      { .kind = Crossing::Exit, .state = tr.dst, .sub = {}, .into = {} });
+        route.push_back(
+            { .kind = Crossing::Exit, .state = tr.dst, .sub = {}, .into = {} });
       }
       for (size_t k = j; k-- > 1;) {
-        vec_push_back(
-            route,
+        route.push_back(
             { .kind = Crossing::Enter, .state = chain_dst[k], .sub = {}, .into = {} });
       }
       dst_inner = (j == 0) && !external;
@@ -182,20 +175,18 @@ SCAV_COLD SplitGraph decompose(Chart const &c) {
       Crossing const &x{ route[k] };
       bool const divider{ x.kind == Crossing::Divider };
       uint32_t const port{ static_cast<uint32_t>(g.ports.size()) };
-      vec_push_back(g.ports,
-                    { .state = divider ? StateId{ INVALID } : x.state,
-                      .sub = divider ? x.sub : SubmachineId{ INVALID },
-                      .into = divider ? x.into : SubmachineId{ INVALID },
-                      .trans = { t },
-                      .crossing = static_cast<uint32_t>(k) });
-      vec_push_back(g.segments,
-                    { .trans = { t },
-                      .ordinal = static_cast<uint32_t>(k),
-                      .frame = frame,
-                      .src_port = prev,
-                      .dst_port = port,
-                      .src_inner = ((k == 0) && src_inner) ? 1U : 0U,
-                      .dst_inner = 0 });
+      g.ports.push_back({ .state = divider ? StateId{ INVALID } : x.state,
+                          .sub = divider ? x.sub : SubmachineId{ INVALID },
+                          .into = divider ? x.into : SubmachineId{ INVALID },
+                          .trans = { t },
+                          .crossing = static_cast<uint32_t>(k) });
+      g.segments.push_back({ .trans = { t },
+                             .ordinal = static_cast<uint32_t>(k),
+                             .frame = frame,
+                             .src_port = prev,
+                             .dst_port = port,
+                             .src_inner = ((k == 0) && src_inner) ? 1U : 0U,
+                             .dst_inner = 0 });
       switch (x.kind) {
         case Crossing::Exit: frame = c.states[x.state.v].parent; break;
         case Crossing::Divider: frame = x.into; break;
@@ -204,21 +195,20 @@ SCAV_COLD SplitGraph decompose(Chart const &c) {
       }
       prev = port;
     }
-    vec_push_back(g.segments,
-                  { .trans = { t },
-                    .ordinal = static_cast<uint32_t>(route.size()),
-                    .frame = frame,
-                    .src_port = prev,
-                    .dst_port = INVALID,
-                    .src_inner = (route.empty() && src_inner) ? 1U : 0U,
-                    .dst_inner = dst_inner ? 1U : 0U });
+    g.segments.push_back({ .trans = { t },
+                           .ordinal = static_cast<uint32_t>(route.size()),
+                           .frame = frame,
+                           .src_port = prev,
+                           .dst_port = INVALID,
+                           .src_inner = (route.empty() && src_inner) ? 1U : 0U,
+                           .dst_inner = dst_inner ? 1U : 0U });
 
     g.trans_segments[t] =
         make_span(first_segment, static_cast<uint32_t>(g.segments.size()) - first_segment);
   }
   // `g.trans_label` stays empty until every `label_segment` call returns.
-  std::vector<uint32_t> label;
-  vec_assign(label, c.transitions.size(), INVALID);
+  Vector<uint32_t> label;
+  label.assign(c.transitions.size(), INVALID);
   for (uint32_t t = 0; t < label.size(); ++t) { label[t] = label_segment(c, g, t); }
   g.trans_label = std::move(label);
   g.serial = memo_serial();

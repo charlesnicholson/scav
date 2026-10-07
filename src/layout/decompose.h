@@ -5,10 +5,10 @@
 // submachine frame. Internal POD, outside the ABI.
 
 #include "scav/scav_core.h"
+#include "scav_vector.h"
 
 #include <array>
 #include <cstdint>
-#include <vector>
 
 namespace scav {
 
@@ -45,12 +45,12 @@ struct CommonAncestor {
 };
 
 struct SplitGraph {
-  std::vector<SplitPort> ports;              // route order within each transition
-  std::vector<SplitSegment> segments;        // contiguous per transition
-  std::vector<Span> trans_segments;          // parallel to transitions; -> segments
-  std::vector<uint32_t> state_depth;         // enclosing state borders above each state
-  std::vector<uint32_t> trans_label;         // parallel to transitions: `label_segment`
-  std::vector<CommonAncestor> trans_common;  // parallel to transitions
+  Vector<SplitPort> ports;              // route order within each transition
+  Vector<SplitSegment> segments;        // contiguous per transition
+  Vector<Span> trans_segments;          // parallel to transitions; -> segments
+  Vector<uint32_t> state_depth;         // enclosing state borders above each state
+  Vector<uint32_t> trans_label;         // parallel to transitions: `label_segment`
+  Vector<CommonAncestor> trans_common;  // parallel to transitions
   uint32_t serial{ 0 };  // a `memo_serial` naming the graph and its chart; 0 if hand-built
 };
 

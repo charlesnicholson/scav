@@ -43,7 +43,7 @@ scav_profile unfolded() {
 }
 
 // Only `state_depth` set: sizing finds no segments, hence no ports and no label boxes.
-SplitGraph depths(std::vector<uint32_t> const &state_depth) {
+SplitGraph depths(Vector<uint32_t> const &state_depth) {
   SplitGraph g;
   g.state_depth = state_depth;
   return g;
@@ -174,17 +174,10 @@ TEST_CASE("size: a rank run folds when folding scales larger") {
 
   SizedLayout flat;
   std::vector<Diagnostic> diags;
-  REQUIRE(
-      size_layout(c, depths(std::vector<uint32_t>(6, 0)), o, {}, unfolded(), flat, diags));
+  REQUIRE(size_layout(c, depths(Vector<uint32_t>(6, 0)), o, {}, unfolded(), flat, diags));
   SizedLayout folded;
   diags.clear();
-  REQUIRE(size_layout(c,
-                      depths(std::vector<uint32_t>(6, 0)),
-                      o,
-                      {},
-                      profile(),
-                      folded,
-                      diags));
+  REQUIRE(size_layout(c, depths(Vector<uint32_t>(6, 0)), o, {}, profile(), folded, diags));
 
   CHECK(flat.chart.h == flat.state[0].h);     // one row, six columns
   CHECK(folded.chart.h > folded.state[0].h);  // more than one row
@@ -919,7 +912,7 @@ TEST_CASE("size: a fold never cuts between an initial pseudostate and its target
   trace_sink_set(&t);
   bool const sized{ size_layout(
       c,
-      depths(std::vector<uint32_t>(c.states.size(), 0)),
+      depths(Vector<uint32_t>(c.states.size(), 0)),
       one_frame(c, root, nodes, edges, std::vector<int32_t>(7, 0)),
       s,
       p,
@@ -1065,7 +1058,7 @@ TEST_CASE("size: a boundary holds a lane for each edge that turns in it, and no 
     SizedLayout z;
     std::vector<Diagnostic> diags;
     REQUIRE(size_layout(c,
-                        depths(std::vector<uint32_t>(6, 0)),
+                        depths(Vector<uint32_t>(6, 0)),
                         one_frame(c, root, nodes, edges, { 0 }),
                         {},
                         p,
@@ -1246,7 +1239,7 @@ TEST_CASE("size: a rank past the domain is diagnosed rather than truncated") {
   SizedLayout z;
   std::vector<Diagnostic> diags;
   CHECK_FALSE(size_layout(c,
-                          depths(std::vector<uint32_t>(c.states.size(), 0)),
+                          depths(Vector<uint32_t>(c.states.size(), 0)),
                           one_frame(c, root, nodes, edges, { 0 }),
                           s,
                           profile(),
@@ -1342,7 +1335,7 @@ TEST_CASE("size: a boundary node sits on the frame's border, not on its piece's"
   SizedLayout z;
   std::vector<Diagnostic> diags;
   REQUIRE(size_layout(c,
-                      depths(std::vector<uint32_t>(c.states.size(), 0)),
+                      depths(Vector<uint32_t>(c.states.size(), 0)),
                       one_frame(c, root, nodes, edges, { 0, 0, 0, 0, 0, 0, 0, 0 }),
                       s,
                       pf,
@@ -1482,13 +1475,8 @@ TEST_CASE("size: orders that name nodes but no rank size nothing") {
 
   SizedLayout z;
   std::vector<Diagnostic> diags;
-  REQUIRE(size_layout(c,
-                      depths(std::vector<uint32_t>(c.states.size(), 0)),
-                      o,
-                      {},
-                      p,
-                      z,
-                      diags));
+  REQUIRE(
+      size_layout(c, depths(Vector<uint32_t>(c.states.size(), 0)), o, {}, p, z, diags));
 
   CHECK(diags.empty());
   CHECK(z.sub[root.v].w == 0);
@@ -1535,7 +1523,7 @@ TEST_CASE("size: a fold whose pieces will not pack is dropped for the flat run")
   SizedLayout z;
   std::vector<Diagnostic> diags;
   REQUIRE(size_layout(c,
-                      depths(std::vector<uint32_t>(c.states.size(), 0)),
+                      depths(Vector<uint32_t>(c.states.size(), 0)),
                       one_frame(c, root, nodes, edges, {}),
                       s,
                       p,
@@ -1576,7 +1564,7 @@ TEST_CASE("size: a row that leaves the domain does not displace the column that 
   SizedLayout z;
   std::vector<Diagnostic> diags;
   REQUIRE(size_layout(c,
-                      depths(std::vector<uint32_t>(c.states.size(), 0)),
+                      depths(Vector<uint32_t>(c.states.size(), 0)),
                       one_frame(c, root, nodes, {}, {}),
                       {},
                       p,
@@ -1593,7 +1581,7 @@ TEST_CASE("size: a row that leaves the domain does not displace the column that 
   SizedLayout column;
   diags.clear();
   REQUIRE(size_layout(c,
-                      depths(std::vector<uint32_t>(c.states.size(), 0)),
+                      depths(Vector<uint32_t>(c.states.size(), 0)),
                       one_frame(c, root, nodes, {}, {}),
                       {},
                       p,
@@ -1647,7 +1635,7 @@ TEST_CASE("size: a column that leaves the domain gives way to the row that fits"
   SizedLayout z;
   std::vector<Diagnostic> diags;
   REQUIRE(size_layout(c,
-                      depths(std::vector<uint32_t>(c.states.size(), 0)),
+                      depths(Vector<uint32_t>(c.states.size(), 0)),
                       one_frame(c, root, five.nodes, {}, {}),
                       s,
                       p,
@@ -1668,7 +1656,7 @@ TEST_CASE("size: a column that leaves the domain gives way to the row that fits"
   SizedLayout stacked;
   diags.clear();
   CHECK_FALSE(size_layout(c,
-                          depths(std::vector<uint32_t>(c.states.size(), 0)),
+                          depths(Vector<uint32_t>(c.states.size(), 0)),
                           one_frame(c, root, five.nodes, {}, {}),
                           s,
                           p,
@@ -1692,7 +1680,7 @@ TEST_CASE("size: a frame no packing fits is diagnosed, not saturated") {
   SizedLayout z;
   std::vector<Diagnostic> diags;
   CHECK_FALSE(size_layout(c,
-                          depths(std::vector<uint32_t>(c.states.size(), 0)),
+                          depths(Vector<uint32_t>(c.states.size(), 0)),
                           one_frame(c, root, five.nodes, {}, {}),
                           s,
                           p,
@@ -1757,7 +1745,7 @@ TEST_CASE("size: a row of fold pieces that leaves the domain keeps the column") 
   SizedLayout z;
   std::vector<Diagnostic> diags;
   REQUIRE(size_layout(c,
-                      depths(std::vector<uint32_t>(c.states.size(), 0)),
+                      depths(Vector<uint32_t>(c.states.size(), 0)),
                       one_frame(c, root, run.nodes, run.edges, {}),
                       s,
                       p,
@@ -1774,7 +1762,7 @@ TEST_CASE("size: a row of fold pieces that leaves the domain keeps the column") 
   SizedLayout column;
   diags.clear();
   REQUIRE(size_layout(c,
-                      depths(std::vector<uint32_t>(c.states.size(), 0)),
+                      depths(Vector<uint32_t>(c.states.size(), 0)),
                       one_frame(c, root, run.nodes, run.edges, {}),
                       s,
                       p,
@@ -1801,7 +1789,7 @@ TEST_CASE("size: a fold whose pieces pack back into a row is the flat run") {
   SizedLayout z;
   std::vector<Diagnostic> diags;
   REQUIRE(size_layout(c,
-                      depths(std::vector<uint32_t>(c.states.size(), 0)),
+                      depths(Vector<uint32_t>(c.states.size(), 0)),
                       one_frame(c, root, run.nodes, run.edges, {}),
                       s,
                       p,
@@ -1817,7 +1805,7 @@ TEST_CASE("size: a fold whose pieces pack back into a row is the flat run") {
   SizedLayout flat;
   diags.clear();
   REQUIRE(size_layout(c,
-                      depths(std::vector<uint32_t>(c.states.size(), 0)),
+                      depths(Vector<uint32_t>(c.states.size(), 0)),
                       one_frame(c, root, run.nodes, run.edges, {}),
                       s,
                       p,
@@ -1849,7 +1837,7 @@ TEST_CASE("size: a fold no packing of the pieces fits is dropped for the flat ru
   SizedLayout z;
   std::vector<Diagnostic> diags;
   REQUIRE(size_layout(c,
-                      depths(std::vector<uint32_t>(c.states.size(), 0)),
+                      depths(Vector<uint32_t>(c.states.size(), 0)),
                       one_frame(c, root, run.nodes, run.edges, {}),
                       s,
                       p,
