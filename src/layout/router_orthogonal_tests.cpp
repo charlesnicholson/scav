@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstdlib>
 #include <utility>
 #include <vector>
 
@@ -2333,6 +2334,100 @@ TEST_CASE("ortho: a route through a waypoint turns only where it must") {
   REQUIRE(out.net_points.size() == 1);
   CHECK(out.metrics[0].failed == RouteFailure::None);
   CHECK(route_bends(out, 0) == 1);
+}
+
+namespace {
+
+// Net 0 out of a tall box's left face to a bar far below-left; its aim clamps its seat to
+// the face's bottom corner, where a box beside the face shuts the way left and down.
+RouteInput clamped_departure() {
+  RouteInput in;
+  in.profile = profile();
+  in.region = rect(-400, -400, 6600, 6800);
+  in.obstacles = { rect(4000, 0, 2000, 3000),
+                   rect(800, 1500, 1000, 4400),
+                   rect(0, 5000, 64, 900) };
+  in.nets.push_back({ .src = pt(5000, 1500),
+                      .dst = pt(32, 5450),
+                      .src_obstacle = 0,
+                      .dst_obstacle = 2,
+                      .src_face = 0,
+                      .dst_face = 0 });
+  return in;
+}
+
+// True when a segment of net `a`'s route crosses or touches one of net `b`'s.
+bool routes_meet(RouteOutput const &out, uint32_t a, uint32_t b) {
+  scav_span const p{ out.net_points[a] };
+  scav_span const q{ out.net_points[b] };
+  for (uint32_t i = 0; (i + 1) < p.len; ++i) {
+    scav_point const a0{ out.points[p.off + i] };
+    scav_point const a1{ out.points[p.off + i + 1] };
+    for (uint32_t j = 0; (j + 1) < q.len; ++j) {
+      scav_point const b0{ out.points[q.off + j] };
+      scav_point const b1{ out.points[q.off + j + 1] };
+      if ((std::max(std::min(a0.x, a1.x), std::min(b0.x, b1.x)) <=
+           std::min(std::max(a0.x, a1.x), std::max(b0.x, b1.x))) &&
+          (std::max(std::min(a0.y, a1.y), std::min(b0.y, b1.y)) <=
+           std::min(std::max(a0.y, a1.y), std::max(b0.y, b1.y)))) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+}  // namespace
+
+TEST_CASE(
+    "ortho: a departure clamped to a corner slides along its face to a clear way out") {
+  RouteInput const in{ clamped_departure() };
+  RouteOutput out;
+  ORTHO.route(in, out);
+  REQUIRE(out.net_points.size() == 1);
+  CHECK(out.metrics[0].failed == RouteFailure::None);
+  scav_point const seat{ out.points[out.net_points[0].off] };
+  CHECK(seat.x == 4000);
+  CHECK(seat.y < 1500);
+  CHECK(route_bends(out, 0) == 2);
+}
+
+TEST_CASE("ortho: a sliding departure takes no seat whose route meets another route") {
+  // A gap between two boxes beside the face is a short way out, but net 1 runs down it.
+  RouteInput in{ clamped_departure() };
+  in.obstacles[1] = rect(800, 1500, 1000, 400);
+  in.obstacles.push_back(rect(800, 2800, 1000, 3100));
+  in.nets.push_back({ .src = pt(1300, 1700),
+                      .dst = pt(1300, 4350),
+                      .src_obstacle = 1,
+                      .dst_obstacle = 3,
+                      .src_face = 3,
+                      .dst_face = 2 });
+  RouteOutput out;
+  ORTHO.route(in, out);
+  REQUIRE(out.net_points.size() == 2);
+  CHECK(out.metrics[0].failed == RouteFailure::None);
+  CHECK_FALSE(routes_meet(out, 0, 1));
+  CHECK(route_bends(out, 0) == 2);
+}
+
+TEST_CASE("ortho: a sliding departure keeps a pitch from the other seats on its face") {
+  // Net 1 arrives on the face just above the nearest clear way out; a small box far from
+  // the face edges another a pitch beyond it.
+  RouteInput in{ clamped_departure() };
+  in.obstacles.push_back(rect(2500, 700, 100, 100));
+  in.nets.push_back(
+      { .src = pt(3000, 1300), .dst = pt(5000, 1500), .dst_obstacle = 0, .dst_face = 0 });
+  RouteOutput out;
+  ORTHO.route(in, out);
+  REQUIRE(out.net_points.size() == 2);
+  scav_point const seat{ out.points[out.net_points[0].off] };
+  scav_point const other{ out.points[out.net_points[1].off + out.net_points[1].len - 1] };
+  REQUIRE(other.x == 4000);
+  CHECK(seat.x == 4000);
+  CHECK(seat.y < 1500);
+  CHECK(std::abs(seat.y - other.y) >= label_line_height(in.profile));
+  CHECK_FALSE(routes_meet(out, 0, 1));
 }
 
 TEST_CASE("ortho: an attached seat lies on the face its aim escapes by") {

@@ -251,7 +251,8 @@ struct OrthoFinish {
 // `ortho_search` from each plane of `from` with a nonnegative `seed`, starting at that
 // cost, to `to` in every plane `to_plane` allows; a first move against that plane's
 // nonzero `heading` is two turns, and a turn at an end `waypoints` marks (bit 0 `from`,
-// bit 1 `to`) is a shade cheaper. Appends each finish's vertices to `hops`.
+// bit 1 `to`) is a shade cheaper. Appends each finish's vertices to `hops`. `starts`, when
+// set, replaces `from` as the vertices the search leaves from.
 bool ortho_search_planes(OrthoGrid const &g,
                          uint32_t from,
                          uint32_t to,
@@ -263,7 +264,8 @@ bool ortho_search_planes(OrthoGrid const &g,
                          uint32_t to_plane,
                          uint32_t waypoints,
                          std::vector<uint32_t> &hops,
-                         std::array<OrthoFinish, 2> &out);
+                         std::array<OrthoFinish, 2> &out,
+                         std::vector<uint32_t> const *starts = nullptr);
 
 // A bend costs one rank separation of length; the clearance a route keeps from a box is
 // `box_clearance`.

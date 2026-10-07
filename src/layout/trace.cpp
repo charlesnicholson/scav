@@ -30,6 +30,7 @@ char const *seat_pass_name(uint16_t p) {
     case SeatPass::Loop: return "loop";
     case SeatPass::Occupied: return "occupied";
     case SeatPass::Order: return "order";
+    case SeatPass::Slide: return "slide";
   }
   return "?";
 }

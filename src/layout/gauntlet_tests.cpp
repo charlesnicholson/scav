@@ -2512,10 +2512,10 @@ TEST_CASE("gauntlet: the shapes still open, counted rather than excused") {
     Laid fork_zero;
     lay("fork.scav", one_row(p), fork_zero);
     CHECK(capped_branches(fork_zero) == 1);
-    // Shipped, one arrival enters the join through its cap.
+    // Shipped, no route meets a bar through its cap.
     Laid fork_shipped;
     lay("fork.scav", p, fork_shipped);
-    CHECK(capped_branches(fork_shipped) == 1);
+    CHECK(capped_branches(fork_shipped) == 0);
   }
 }
 

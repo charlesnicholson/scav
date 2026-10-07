@@ -4,11 +4,11 @@ brew.scav 85a5b30c 54721448 1b6bd83d
 dock.scav 85a5b30c 680f74f3 b50deb91
 elevator.scav 85a5b30c 28d41c3a 356c26f8
 estop.scav 85a5b30c 54fe3996 ad0c589b
-kiln.scav 85a5b30c 8f44fcfa 0518d355
+kiln.scav 85a5b30c b7a328a9 055b8b38
 led.scav 85a5b30c c5553683 ad0c589b
-mill.scav 85a5b30c 5a6d180e 1df58e46
-ota.scav 85a5b30c 2e067e1f a594fd9f
-printer.scav 85a5b30c 31080b12 ce0d6bef
+mill.scav 85a5b30c fc8b43e4 48be0c03
+ota.scav 85a5b30c a612d7be c4463a41
+printer.scav 85a5b30c 196fb6f7 18572224
 tcp.scav 85a5b30c e53d2ad1 cc15f308
 toolchanger.scav 85a5b30c 882db425 34ae1c19
 vac.scav 85a5b30c 8da1122d 4ec6db8a
