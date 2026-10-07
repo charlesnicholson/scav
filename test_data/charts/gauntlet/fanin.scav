@@ -1,7 +1,5 @@
-// Several transitions into one state. Their routes coincide near the target by
-// construction and that trunk is the shape a reader wants: one line arriving
-// with one arrowhead, not four parallel lines a gap apart. The counterpart to
-// gauntlet/lane.scav, which is the case that must come apart.
+// Several transitions into one state. Each arrives as its own arrow at its own
+// point on the target, sharing no line with another.
 chart fanin "many sources, one target" {
   state A,
   state B,

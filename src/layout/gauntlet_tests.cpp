@@ -424,7 +424,7 @@ TEST_CASE("gauntlet: an end on an inscribed glyph is at the middle of a face" *
 
 TEST_CASE("gauntlet: an arrowhead is never inked over another route's own end" *
           doctest::test_suite("full")) {
-  // No route ends where another starts; two arrivals may share a point as a fan-in.
+  // No route ends where another starts; arrivals on a glyph may share its one point.
   for (char const *name : GAUNTLET) {
     for (scav_profile const &p : { readable(), compact() }) {
       CAPTURE(name);
@@ -565,60 +565,6 @@ TEST_CASE("gauntlet: a transition and its return are two straight legs an em apa
     CAPTURE(apart);
     CHECK(apart >= p.font_size_grid);
     CHECK(cost_columns(l.c, l.g, p).crowding == 0);
-  }
-}
-
-TEST_CASE("gauntlet: a fan-in's arrivals are four arrows, none inside another") {
-  for (scav_profile const &p : { readable(), compact() }) {
-    CAPTURE(p.profile_id);
-    Laid l;
-    lay("fanin.scav", p, l);
-    uint32_t fault{ INVALID };
-    for (uint32_t st = 0; st < l.c.states.size(); ++st) {
-      if (chart_string(l.c, l.c.states[st].name) == "Fault") { fault = st; }
-    }
-    REQUIRE(fault != INVALID);
-    std::vector<uint32_t> into;
-    for (uint32_t t = 0; t < l.c.transitions.size(); ++t) {
-      if ((l.r.route[t].len >= 2) && (l.c.transitions[t].dst.v == fault)) {
-        into.push_back(t);
-      }
-    }
-    REQUIRE(into.size() == 4);
-    for (uint32_t const t : into) {
-      scav_span const rt{ l.r.route[t] };
-      CHECK(on_border(l.r.points[rt.off + rt.len - 1], l.z.state[fault]));
-    }
-    // A shared trunk is allowed; each other route covers less than a route's whole length.
-    // A segment counts at most its own length as covered.
-    for (uint32_t const t : into) {
-      scav_span const a{ l.r.route[t] };
-      Wide own{ 0 };
-      for (uint32_t i = 0; (i + 1) < a.len; ++i) {
-        own += run_shared(l.r.points[a.off + i],
-                          l.r.points[a.off + i + 1],
-                          l.r.points[a.off + i],
-                          l.r.points[a.off + i + 1]);
-      }
-      for (uint32_t const u : into) {
-        if (u == t) { continue; }
-        scav_span const b{ l.r.route[u] };
-        Wide covered{ 0 };
-        for (uint32_t i = 0; (i + 1) < a.len; ++i) {
-          scav_point const from{ l.r.points[a.off + i] };
-          scav_point const to{ l.r.points[a.off + i + 1] };
-          Wide under{ 0 };
-          for (uint32_t j = 0; (j + 1) < b.len; ++j) {
-            under +=
-                run_shared(from, to, l.r.points[b.off + j], l.r.points[b.off + j + 1]);
-          }
-          covered += imin(under, run_shared(from, to, from, to));
-        }
-        CAPTURE(t);
-        CAPTURE(u);
-        CHECK(covered < own);
-      }
-    }
   }
 }
 
@@ -1400,7 +1346,7 @@ TEST_CASE("gauntlet: priced whitespace takes the composite drawn tighter") {
 
 TEST_CASE("gauntlet: a route leaving a composite turns one corner into its target") {
   // Each route out of Box onto Fault leaves along its port's lead and turns at most once,
-  // onto the vertical leg that enters Fault's top or bottom face.
+  // onto the leg that enters Fault square to its face.
   for (scav_profile const &p : { readable(), compact() }) {
     CAPTURE(p.profile_id);
     Laid l;
@@ -1433,8 +1379,12 @@ TEST_CASE("gauntlet: a route leaving a composite turns one corner into its targe
       scav_point const last{ l.r.points[route.off + route.len - 1] };
       scav_point const before{ l.r.points[route.off + route.len - 2] };
       scav_rect const box{ l.z.state[fault] };
-      CHECK(before.x == last.x);
-      CHECK(((last.y == box.y) || (last.y == (box.y + box.h))));
+      if (before.x == last.x) {
+        CHECK(((last.y == box.y) || (last.y == (box.y + box.h))));
+      } else {
+        CHECK(before.y == last.y);
+        CHECK(((last.x == box.x) || (last.x == (box.x + box.w))));
+      }
     }
   }
 }
@@ -2158,6 +2108,97 @@ TEST_CASE("gauntlet: an inner or outer loop's label lies within a leader of its 
       CHECK(inner == want.inner);
       CHECK(outer == want.outer);
       CHECK(cost_terms(l.c, l.g, l.z, l.r, s, p).label_far == 0);
+    }
+  }
+}
+
+TEST_CASE("gauntlet: a fan-in's arrivals are four arrows, none sharing a line") {
+  // Each arrival ends at its own point on Fault, and no two share any run. Labels are
+  // boxes sized like real text: 0.55 em a character plus `pad` wide, one line tall.
+  for (scav_profile const &p : { readable(), compact() }) {
+    CAPTURE(p.profile_id);
+    Chart const probe{ loaded("fanin.scav") };
+    std::vector<scav_path_box> boxes;
+    for (uint32_t t = 0; t < probe.transitions.size(); ++t) {
+      int32_t const chars{ static_cast<int32_t>(probe.transitions[t].label.len) };
+      if (chars == 0) { continue; }
+      boxes.push_back({ .subject = t,
+                        .w = ((chars * p.font_size_grid * 11) / 20) + p.pad,
+                        .h = label_line_height(p),
+                        .order = 0 });
+    }
+    scav_spaces const s{ .path_box = boxes.data(),
+                         .n_path_box = static_cast<uint32_t>(boxes.size()),
+                         .path_box_stride = static_cast<uint32_t>(sizeof(scav_path_box)) };
+    Laid l;
+    lay("fanin.scav", p, l, s, nullptr);
+    uint32_t const fault{ state_named(l.c, "Fault") };
+    REQUIRE(fault != INVALID);
+    std::vector<uint32_t> into;
+    for (uint32_t t = 0; t < l.c.transitions.size(); ++t) {
+      if ((l.r.route[t].len >= 2) && (l.c.transitions[t].dst.v == fault)) {
+        into.push_back(t);
+      }
+    }
+    REQUIRE(into.size() == 4);
+    for (uint32_t const t : into) {
+      scav_span const a{ l.r.route[t] };
+      CHECK(on_border(l.r.points[a.off + a.len - 1], l.z.state[fault]));
+      for (uint32_t const u : into) {
+        if (u <= t) { continue; }
+        scav_span const b{ l.r.route[u] };
+        CAPTURE(t);
+        CAPTURE(u);
+        CHECK_FALSE(same(l.r.points[a.off + a.len - 1], l.r.points[b.off + b.len - 1]));
+        Wide shared{ 0 };
+        for (uint32_t i = 0; (i + 1) < a.len; ++i) {
+          for (uint32_t j = 0; (j + 1) < b.len; ++j) {
+            shared += run_shared(l.r.points[a.off + i],
+                                 l.r.points[a.off + i + 1],
+                                 l.r.points[b.off + j],
+                                 l.r.points[b.off + j + 1]);
+          }
+        }
+        CHECK(shared == 0);
+      }
+    }
+  }
+}
+
+TEST_CASE(
+    "gauntlet: a wide fan-in's legs into their last bends cross no arrival's run in") {
+  // On each face of Fault, the leg into one arrival's last bend crosses no other arrival's
+  // final leg, and no two arrivals share an end.
+  for (scav_profile const &p : { readable(), compact() }) {
+    CAPTURE(p.profile_id);
+    Laid l;
+    lay("fanwide.scav", p, l);
+    uint32_t const fault{ state_named(l.c, "Fault") };
+    REQUIRE(fault != INVALID);
+    scav_rect const box{ l.z.state[fault] };
+    std::vector<uint32_t> into;
+    for (uint32_t t = 0; t < l.c.transitions.size(); ++t) {
+      if ((l.r.route[t].len >= 2) && (l.c.transitions[t].dst.v == fault)) {
+        into.push_back(t);
+      }
+    }
+    REQUIRE(into.size() == 14);
+    for (uint32_t const t : into) {
+      scav_span const a{ l.r.route[t] };
+      scav_point const end_a{ l.r.points[a.off + a.len - 1] };
+      for (uint32_t const u : into) {
+        if (u == t) { continue; }
+        scav_span const b{ l.r.route[u] };
+        scav_point const end_b{ l.r.points[b.off + b.len - 1] };
+        CAPTURE(t);
+        CAPTURE(u);
+        CHECK_FALSE(same(end_a, end_b));
+        if ((a.len < 3) || (face_of(end_a, box) != face_of(end_b, box))) { continue; }
+        CHECK_FALSE(crosses(l.r.points[a.off + a.len - 3],
+                            l.r.points[a.off + a.len - 2],
+                            l.r.points[b.off + b.len - 2],
+                            end_b));
+      }
     }
   }
 }

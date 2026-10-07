@@ -73,7 +73,8 @@ enum class SeatPass : uint16_t {
   Separate,
   Nudge,
   Loop,
-  Occupied
+  Occupied,
+  Order
 };
 
 // A Level 1 move's outcome; `CandidateScored.pass`.
