@@ -239,7 +239,7 @@ void write_rows(Chart &c, ColumnId id, std::vector<T> const &rows) {
   }
 }
 
-static_assert(sizeof(scav_profile) == 52 * sizeof(int32_t),
+static_assert(sizeof(scav_profile) == 53 * sizeof(int32_t),
               "the profile must stay a flat block of int32 with no padding, or the "
               "inputs digest below would hash bytes whose values are unspecified");
 
@@ -897,13 +897,21 @@ struct Move {
   MoveKind kind{ MoveKind::Rank };
 };
 
-// Appends `m`'s pin to `into`.
+// Appends `m`'s pin to `into`; a reversal already pinned is lifted instead.
 void add_move(SearchPins &into, Move const &m) {
   switch (m.kind) {
     case MoveKind::Cut: vec_push_back(into.cuts, m.leg); break;
-    case MoveKind::Reverse:
+    case MoveKind::Reverse: {
+      for (size_t k = 0; k < into.reverses.size(); ++k) {
+        ReversePin const &had{ into.reverses[k] };
+        if ((had.trans.v == m.leg.trans.v) && (had.leg == m.leg.leg)) {
+          into.reverses.erase(into.reverses.begin() + static_cast<std::ptrdiff_t>(k));
+          return;
+        }
+      }
       vec_push_back(into.reverses, { .trans = m.leg.trans, .leg = m.leg.leg });
       break;
+    }
     case MoveKind::Face:
     case MoveKind::Side: vec_push_back(into.ends, m.end_pin); break;
     case MoveKind::Fold: vec_push_back(into.folds, m.fold); break;
@@ -2139,17 +2147,22 @@ Improved run_search(Chart const &c,
                       .kind = MoveKind::Cut });
     }
 
-    // Reverse moves: each cyclic segment without a reverse pin.
+    // Reverse moves: each cyclic segment without a reverse pin, and each initial's one-leg
+    // edge either way; reversed, an initial follows its state.
     for (uint32_t seg = 0; (seg < g.segments.size()) && (rev_scored < budget); ++seg) {
-      if ((here.seg_cyclic[seg] == 0) || !in_scope(g.segments[seg].frame.v)) { continue; }
+      if (!in_scope(g.segments[seg].frame.v)) { continue; }
       TransId const t{ g.segments[seg].trans };
       if ((t.v == INVALID) || (t.v >= g.trans_segments.size())) { continue; }
+      bool const initial{ (g.trans_segments[t.v].len == 1) &&
+                          (c.states[c.transitions[t.v].src.v].kind ==
+                           StateKind::Initial) };
+      if ((here.seg_cyclic[seg] == 0) && !initial) { continue; }
       uint32_t const leg{ seg - g.trans_segments[t.v].off };
       bool already{ false };
       for (ReversePin const &had : held.reverses) {
         already = already || ((had.trans.v == t.v) && (had.leg == leg));
       }
-      if (already) { continue; }
+      if (already && !initial) { continue; }
       ++rev_scored;
       vec_push_back(round,
                     { .leg = { .trans = t, .leg = leg }, .kind = MoveKind::Reverse });

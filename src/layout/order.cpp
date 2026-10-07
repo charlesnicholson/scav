@@ -19,6 +19,7 @@
 
 #include <array>
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 namespace scav {
@@ -85,6 +86,7 @@ struct FrameScratch {
   std::vector<uint32_t> spanning;     // -> edges, labelled across several boundaries
   std::vector<OrderEdge> flat;        // edges into a cross-border port, held out
   std::vector<uint8_t> fixed;         // parallel to edges; 1 = oriented by an end pin
+  std::vector<uint32_t> flips;        // -> edges, an initial's reversed by a pin
   std::vector<uint8_t> extreme;       // parallel to nodes; 1 first in its rank, 2 last
 
   // The helpers' working buffers; each sizes what it reads before reading it.
@@ -627,8 +629,9 @@ uint64_t rank_crossings(std::vector<uint32_t> const &south_positions) {
 
 namespace {
 
-// Puts each initial pseudostate one rank before its lowest-ranked neighbour; when that is
-// rank 0, every other node moves up one rank.
+// Puts each initial pseudostate one rank before its lowest-ranked neighbour, or one after
+// its highest where its edge was reversed; when before is rank 0, every other node moves
+// up.
 void seat_initials(Chart const &c, Frame &f) {
   for (uint32_t v = 0; v < f.nodes.size(); ++v) {
     OrderNode const &nd{ f.nodes[v] };
@@ -637,11 +640,21 @@ void seat_initials(Chart const &c, Frame &f) {
       continue;
     }
     uint32_t nearest{ INVALID };
+    uint32_t farthest{ 0 };
+    bool after{ false };
     for (OrderEdge const &e : f.edges) {
       if ((e.src == v) && (e.dst != v)) { nearest = imin(nearest, f.nodes[e.dst].rank); }
-      if ((e.dst == v) && (e.src != v)) { nearest = imin(nearest, f.nodes[e.src].rank); }
+      if ((e.dst == v) && (e.src != v)) {
+        nearest = imin(nearest, f.nodes[e.src].rank);
+        farthest = imax(farthest, f.nodes[e.src].rank);
+        after = true;
+      }
     }
     if (nearest == INVALID) { continue; }
+    if (after) {
+      f.nodes[v].rank = farthest + 1;
+      continue;
+    }
     if (nearest == 0) {
       for (uint32_t u = 0; u < f.nodes.size(); ++u) {
         if (u != v) { ++f.nodes[u].rank; }
@@ -1123,12 +1136,28 @@ void order_submachines(SubmachineOrders &o,
           }
         }
       }
+      // A reversal pin on an initial's edge takes no part in ranking; the dot moves after
+      // its target once ranks settle.
+      std::vector<uint32_t> &flips{ sc.flips };
+      flips.clear();
+      for (uint32_t k = 0; !pre_reversed.empty() && (k < f.edges.size()); ++k) {
+        OrderEdge const &e{ f.edges[k] };
+        OrderNode const &from{ f.nodes[e.src] };
+        if ((pre_reversed[e.segment] != 0) && (from.kind == OrderKind::State) &&
+            (c.states[from.subject].kind == StateKind::Initial)) {
+          vec_push_back(flips, k);
+        }
+      }
+      if (!flips.empty() && (fixed.size() != f.edges.size())) {
+        vec_assign(fixed, f.edges.size(), 0);
+      }
+      for (uint32_t const k : flips) { fixed[k] = 1; }
       orient_acyclic(f, pre_reversed, fixed, sc);
       assign_ranks(f, sc);
 
       // Rank pins apply after ranking, before `rank_derived`; an initial's pin is ignored.
+      bool moved{ false };
       if (!pins.ranks.empty()) {
-        bool moved{ false };
         for (RankPin const &pin : pins.ranks) {
           if ((pin.state.v == INVALID) || (pin.state.v >= sc.state_local.size())) {
             continue;
@@ -1141,10 +1170,16 @@ void order_submachines(SubmachineOrders &o,
           trace_emit({ .kind = TraceKind::RankPinned,
                        .rank = { .state = pin.state.v, .rank = pin.rank } });
         }
-        if (moved) {
-          seat_initials(c, f);
-          squeeze_ranks(f, sc);
-        }
+      }
+      for (uint32_t const k : flips) {
+        OrderEdge &e{ f.edges[k] };
+        std::swap(e.src, e.dst);
+        e.reversed = 1;
+        trace_emit({ .kind = TraceKind::EdgeReversed, .seg = { .seg = e.segment } });
+      }
+      if (moved || !flips.empty()) {
+        seat_initials(c, f);
+        squeeze_ranks(f, sc);
       }
       std::vector<uint8_t> &extreme{ sc.extreme };
       extreme.clear();

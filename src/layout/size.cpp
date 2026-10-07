@@ -318,6 +318,8 @@ struct Sizer {
                      bool carry);
   void seat_riders(ChunkView const &v, Shape &shape, uint32_t chunk, Wide chunk_w);
   void seat_pseudostates(ChunkView const &v, Shape &shape, Wide chunk_w, Wide chunk_h);
+  // Whether chunk node `i` is an initial whose one neighbour lies in a later layer.
+  [[nodiscard]] bool initial_ahead(ChunkView const &v, uint32_t i) const;
   [[nodiscard]] Wide leg_label_room(ChunkView const &v,
                                     Shape const &shape,
                                     Wide chunk_h) const;
@@ -493,7 +495,7 @@ void Sizer::count_turns(ChunkView const &v) {
   };
 
   // Per chunk node, the mate the seating moves it beside, or INVALID: an initial's in the
-  // next layer or a final's in the one before, where the moved box stays inside the chunk.
+  // layer either side or a final's in the one before, where the moved box stays inside.
   Wide chunk_h{ 0 };
   for (uint32_t i = 0; i < n; ++i) {
     chunk_h = imax(chunk_h, (Wide{ v.centre[i] } - (v.cg.extent[i] / 2)) + v.cg.extent[i]);
@@ -508,7 +510,7 @@ void Sizer::count_turns(ChunkView const &v) {
     uint32_t const r{ v.local_rank[v.nodes[v.chunk_nodes[i]]] };
     uint32_t const nr{ v.local_rank[v.nodes[v.chunk_nodes[one]]] };
     bool const toward{ ((kind == StateKind::Initial) && (nr == (r + 1))) ||
-                       ((kind == StateKind::Final) && ((nr + 1) == r)) };
+                       ((kind != StateKind::Normal) && ((nr + 1) == r)) };
     Wide const y{ Wide{ v.centre[one] } + v.seat_at[i] - (v.cg.extent[i] / 2) };
     bool const inside{ (y >= 0) && ((y + v.cg.extent[i]) <= chunk_h) };
     if (toward && inside && (node_of(v.chunk_nodes[one]).kind == OrderKind::State)) {
@@ -608,6 +610,17 @@ void Sizer::count_turns(ChunkView const &v) {
 
 // Each layer's place along the ranks into `layer_x`, and its room into `kept_w`. A seated
 // pseudostate that fits inside its neighbour's layer takes no room in its own.
+bool Sizer::initial_ahead(ChunkView const &v, uint32_t i) const {
+  OrderNode const &nd{ o.nodes[v.span.off + v.nodes[v.chunk_nodes[i]]] };
+  if ((nd.kind != OrderKind::State) || (c.states[nd.subject].kind != StateKind::Initial)) {
+    return false;
+  }
+  uint32_t const one{ (i < sc.mate.size()) ? sc.mate[i] : INVALID };
+  if (one >= v.chunk_nodes.size()) { return true; }
+  return v.local_rank[v.nodes[v.chunk_nodes[one]]] >
+         v.local_rank[v.nodes[v.chunk_nodes[i]]];
+}
+
 void Sizer::step_layers(ChunkView const &v, std::vector<TraceGap> &lanes) {
   auto const along = [&](uint32_t st) {
     return v.down ? out.state[st].h : out.state[st].w;
@@ -686,10 +699,9 @@ void Sizer::step_layers(ChunkView const &v, std::vector<TraceGap> &lanes) {
   // Where a chunk node starts along the ranks within its layer, and its width.
   auto const x_in_layer = [&](uint32_t q) {
     OrderNode const &nd{ node_of(v.chunk_nodes[q]) };
-    bool const dot{ (nd.kind == OrderKind::State) &&
-                    (c.states[nd.subject].kind == StateKind::Initial) };
     uint32_t const r{ v.local_rank[v.nodes[v.chunk_nodes[q]]] };
-    return dot ? (kept_w[r - v.first] - along(nd.subject)) : inset_of(v.chunk_nodes[q]);
+    return initial_ahead(v, q) ? (kept_w[r - v.first] - along(nd.subject))
+                               : inset_of(v.chunk_nodes[q]);
   };
   auto const w_of = [&](uint32_t q) {
     OrderNode const &nd{ node_of(v.chunk_nodes[q]) };
@@ -791,9 +803,10 @@ void Sizer::seat_pseudostates(ChunkView const &v,
     OrderNode const &nn{ o.nodes[v.span.off + v.nodes[v.chunk_nodes[other]]] };
     Wide const nw{ (nn.kind == OrderKind::State) ? Wide{ along(nn.subject) } : Wide{ 0 } };
     Wide const nx{ shape.at[v.chunk_nodes[other]].x };
-    // A final sits `rank_sep` after the state it joins, an initial `rank_sep` before it.
+    // A final sits `rank_sep` after the state it joins, an initial `rank_sep` before or
+    // after the state it enters.
     Wide x{ shape.at[at].x };
-    if ((kind == StateKind::Final) && (r == (near_rank + 1))) { x = nx + nw + p.rank_sep; }
+    if (r == (near_rank + 1)) { x = nx + nw + p.rank_sep; }
     if ((kind == StateKind::Initial) && (near_rank == (r + 1))) {
       x = nx - p.rank_sep - along(nd.subject);
     }
@@ -1477,10 +1490,9 @@ void Sizer::lay_out_sub(uint32_t m) {
           uint32_t const at{ chunk_nodes[i] };
           uint32_t const r{ local_rank[nodes[at]] };
           // An initial sits flush against its layer's trailing edge, beside the state it
-          // enters.
+          // enters in the next.
           OrderNode const &nd{ o.nodes[span.off + nodes[at]] };
-          Wide const flush{ ((nd.kind == OrderKind::State) &&
-                             (c.states[nd.subject].kind == StateKind::Initial))
+          Wide const flush{ initial_ahead(view, i)
                                 ? imax(kept_w[r - first] - along(nd.subject), Wide{ 0 })
                                 : Wide{ 0 } };
           // On its group's centre line, where it has one.

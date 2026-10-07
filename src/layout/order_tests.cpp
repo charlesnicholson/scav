@@ -741,6 +741,37 @@ TEST_CASE("order: an initial pseudostate is ranked just before the state it ente
   CHECK(ranks({ .ranks = { { .state = start, .rank = 2 } } }) == plain);
 }
 
+TEST_CASE("order: a reversal pin on an initial's edge ranks it just after its state") {
+  // Every other node keeps its rank, less the one the initial's own rank held alone.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const start{ build_state(c, root, {}, StateKind::Initial, {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  TransId const in{ build_trans(c, start, a, TransKind::Default, {}) };
+  build_trans(c, a, b, TransKind::Default, {});
+  SplitGraph const g{ decompose(c) };
+
+  SubmachineOrders const plain{ order_submachines(c, g, {}, profile()) };
+  SearchPins const flip{ .reverses = { { .trans = in, .leg = 0 } } };
+  SubmachineOrders const o{ order_submachines(c, g, {}, profile(), 0, flip) };
+  CHECK(node_of(o, start).rank == (node_of(o, a).rank + 1));
+  CHECK((node_of(o, b).rank - node_of(o, a).rank) ==
+        (node_of(plain, b).rank - node_of(plain, a).rank));
+  CHECK(node_of(o, a).rank == 0);
+  for (OrderEdge const &e : o.edges) {
+    if (e.segment != g.trans_segments[in.v].off) { continue; }
+    CHECK(o.nodes[e.dst].subject == start.v);
+    CHECK(e.reversed == 1);
+  }
+
+  // With `B` pinned, the flipped initial still follows `A`.
+  SearchPins const both{ .ranks = { { .state = b, .rank = 4 } },
+                         .reverses = { { .trans = in, .leg = 0 } } };
+  SubmachineOrders const pinned{ order_submachines(c, g, {}, profile(), 0, both) };
+  CHECK(node_of(pinned, start).rank == (node_of(pinned, a).rank + 1));
+}
+
 TEST_CASE("order: a dead submachine gets an empty span and no nodes") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };

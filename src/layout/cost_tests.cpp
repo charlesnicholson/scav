@@ -122,6 +122,26 @@ TEST_CASE("cost: a straight route between two boxes costs its length and the cha
   CHECK(t.aspect == ((400LL * 10) - (40LL * 16)));
 }
 
+TEST_CASE("cost: a start arrow running up is a quarter bend, running left a whole one") {
+  // An initial at the origin into `A`, its last leg each of the four ways.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const start{ build_state(c, root, {}, StateKind::Initial, {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  build_trans(c, start, a, TransKind::Default, {});
+  SizedLayout z{ blank(c) };
+  scav_profile const p{ profile() };
+  auto const starts = [&](scav_point to) {
+    Routes const r{ routes_of(c, { { { .x = 0, .y = 0 }, to } }) };
+    return cost_terms(c, decompose(c), z, r, {}, p).backward_starts;
+  };
+  CHECK(starts({ .x = 0, .y = 100 }) == 0);   // down
+  CHECK(starts({ .x = 100, .y = 0 }) == 0);   // right
+  CHECK(starts({ .x = 0, .y = -100 }) == 1);  // up
+  CHECK(starts({ .x = -100, .y = 0 }) == 4);  // left
+  CHECK((int64_t{ p.w_backward_starts } * 4) == p.w_bends);
+}
+
 TEST_CASE("cost: a corner in a polyline is one bend") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
