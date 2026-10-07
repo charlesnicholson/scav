@@ -78,10 +78,12 @@ class TestGauntlet(unittest.TestCase):
         self.assertEqual(dx + dw // 2, sx + sw // 2)
 
     def test_every_chart_renders_at_both_profiles(self) -> None:
+        # Unsearched: the unit gauntlet suite searches every chart at both profiles.
         for chart in self.charts:
             for profile in PROFILES:
                 with self.subTest(chart=chart.name, profile=profile):
-                    result = self.run_scav("render", "--profile", profile, chart)
+                    result = self.run_scav("render", "--no-search", "--profile", profile,
+                                           chart)
                     self.assertEqual("", result.stderr)
                     self.assertEqual(0, result.returncode)
                     root = ElementTree.fromstring(result.stdout)
