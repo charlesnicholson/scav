@@ -1478,7 +1478,8 @@ bool ortho_search_planes(OrthoGrid const &g,
                          uint32_t waypoints,
                          std::vector<uint32_t> &hops,
                          std::array<OrthoFinish, 2> &out,
-                         std::vector<uint32_t> const *starts) {
+                         std::vector<uint32_t> const *starts,
+                         bool both) {
   return search_planes(g,
                        from,
                        to,
@@ -1489,7 +1490,7 @@ bool ortho_search_planes(OrthoGrid const &g,
                        from_plane,
                        to_plane,
                        waypoints,
-                       true,
+                       both,
                        starts,
                        hops,
                        out);
@@ -2139,7 +2140,8 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
                                ((k > 0) ? 1U : 0U) | (((k + 1) < pieces) ? 2U : 0U),
                                hop,
                                finishes[k],
-                               (k == 0) ? starts : nullptr)) {
+                               (k == 0) ? starts : nullptr,
+                               (k + 1) < pieces)) {
         shape.clear();
         return false;
       }
@@ -2331,7 +2333,9 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
                    std::vector<uint8_t> &pass{ vertical ? g.pass_v : g.pass_h };
                    uint16_t &count{ holding[(vertical ? g.pass_h.size() : 0) + i] };
                    if (!on) {
-                     if ((count > 0) && (--count == 0)) { pass[i] = 1; }
+                     if (count == 0) { return; }
+                     --count;
+                     if (count == 0) { pass[i] = 1; }
                      return;
                    }
                    if ((count == 0) && (pass[i] == 0)) { return; }  // a box's or wall's
@@ -2427,7 +2431,9 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
     if (!holds) {
       holds = true;
       sc.closed.clear();
-      vec_assign(holding, g.pass_h.size() + g.pass_v.size(), uint16_t{ 0 });
+      // Zero past what an earlier call left, which its end reset.
+      size_t const passes{ g.pass_h.size() + g.pass_v.size() };
+      if (holding.size() < passes) { vec_resize(holding, passes, uint16_t{ 0 }); }
       for (uint32_t m = 0; m < in.nets.size(); ++m) { hold(m, true); }
     }
     hold(n, false);
@@ -2471,7 +2477,12 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
     seat[slot] = shape.front();
     hold(n, true);
   }
-  if (holds) { reopen_route(g, sc.closed); }
+  if (holds) {
+    reopen_route(g, sc.closed);
+    for (uint32_t const e : sc.closed) {
+      holding[(((e & 1U) != 0) ? g.pass_h.size() : 0) + (e >> 1U)] = 0;
+    }
+  }
   moved(SeatPass::Slide);
 
   // The arrivals on each box face where two shared a point before the spread.

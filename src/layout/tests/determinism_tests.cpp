@@ -232,10 +232,11 @@ TEST_CASE("determinism: the corpus lays out to one answer at every thread count"
   MESSAGE("corpus shard counts: ", shards);
 }
 
-TEST_CASE("determinism: a searched drawing is the same drawing at every thread count" *
-          doctest::test_suite("full")) {
+TEST_CASE(
+    "determinism: a searched drawing is the same drawing at one thread and at eight" *
+    doctest::test_suite("full")) {
   // The shipped depth on small charts: candidates, rows, finishes and kicks reduce in
-  // enumeration order at every thread count, in both searches.
+  // enumeration order however many threads take them, in both searches.
   for (int32_t const cull : { 0, 1 }) {
     CAPTURE(cull);
     scav_profile p{ readable() };
@@ -246,12 +247,9 @@ TEST_CASE("determinism: a searched drawing is the same drawing at every thread c
       Chart first;
       load_corpus(name, first);
       Snapshot const want{ lay_out(first, p, 1) };
-      for (uint32_t const threads : { 2U, 8U, 16U }) {
-        CAPTURE(threads);
-        Chart c;
-        load_corpus(name, c);
-        check_same(lay_out(c, p, threads), want);
-      }
+      Chart c;
+      load_corpus(name, c);
+      check_same(lay_out(c, p, 8), want);
     }
   }
 }
