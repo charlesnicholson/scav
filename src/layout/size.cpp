@@ -657,8 +657,8 @@ void Sizer::step_layers(ChunkView const &v, Vector<TraceGap> &lanes) {
   auto const node_of = [&](uint32_t i) -> OrderNode const & {
     return o.nodes[v.span.off + v.nodes[i]];
   };
-  std::vector<int32_t> const &label_row{ (o.labels.size() == o.gaps.size()) ? o.labels
-                                                                            : o.gaps };
+  Vector<int32_t> const &label_row{ (o.labels.size() == o.gaps.size()) ? o.labels
+                                                                       : o.gaps };
   auto const label_gap = [&](uint32_t r) {
     uint32_t const b{ v.global_rank[r] };
     return (b < v.gspan.len) ? Wide{ label_row[v.gspan.off + b] } : Wide{ 0 };
@@ -1283,8 +1283,8 @@ void Sizer::lay_out_sub(uint32_t m) {
                                           : Wide{ 0 };
     };
     // Hand-built orders carry no label row, and their gaps are all labels.
-    std::vector<int32_t> const &label_row{ (o.labels.size() == o.gaps.size()) ? o.labels
-                                                                              : o.gaps };
+    Vector<int32_t> const &label_row{ (o.labels.size() == o.gaps.size()) ? o.labels
+                                                                         : o.gaps };
     auto const label_gap = [&](uint32_t r) {
       return (global_rank[r] < gspan.len) ? Wide{ label_row[gspan.off + global_rank[r]] }
                                           : Wide{ 0 };

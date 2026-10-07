@@ -57,9 +57,9 @@ OrderNode state_node(uint32_t subject, uint32_t rank, uint32_t pos) {
 // One frame's worth of orders over `nodes`, everything else empty.
 SubmachineOrders one_frame(Chart const &c,
                            SubmachineId frame,
-                           std::vector<OrderNode> nodes,
-                           std::vector<OrderEdge> edges,
-                           std::vector<int32_t> gaps) {
+                           Vector<OrderNode> nodes,
+                           Vector<OrderEdge> edges,
+                           Vector<int32_t> gaps) {
   SubmachineOrders o;
   o.sub_nodes.assign(c.submachines.size(), Span{});
   o.sub_edges.assign(c.submachines.size(), Span{});
@@ -160,8 +160,8 @@ TEST_CASE("size: a rank run folds when folding scales larger") {
   // Six chained ranks, sized flat at 1024:1 and folded at the readable 16:10.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
-  std::vector<OrderNode> nodes;
-  std::vector<OrderEdge> edges;
+  Vector<OrderNode> nodes;
+  Vector<OrderEdge> edges;
   StateId prev{ INVALID };
   for (uint32_t i = 0; i < 6; ++i) {
     StateId const at{ build_state(c, root, "S", StateKind::Normal, {}) };
@@ -889,8 +889,8 @@ TEST_CASE("size: a fold never cuts between an initial pseudostate and its target
     chain.push_back(build_state(c, root, "S" + std::to_string(i), StateKind::Normal, {}));
   }
   build_trans(c, start, chain[0], TransKind::Default, {});
-  std::vector<OrderNode> nodes{ state_node(start.v, 0, 0) };
-  std::vector<OrderEdge> edges{ { .src = 0, .dst = 1, .segment = 0, .reversed = 0 } };
+  Vector<OrderNode> nodes{ state_node(start.v, 0, 0) };
+  Vector<OrderEdge> edges{ { .src = 0, .dst = 1, .segment = 0, .reversed = 0 } };
   for (uint32_t i = 0; i < chain.size(); ++i) {
     nodes.push_back(state_node(chain[i].v, i + 1, 0));
     if (i + 1 < chain.size()) {
@@ -911,17 +911,16 @@ TEST_CASE("size: a fold never cuts between an initial pseudostate and its target
   std::vector<Diagnostic> diags;
   TraceRecord t;
   trace_sink_set(&t);
-  bool const sized{ size_layout(
-      c,
-      depths(Vector<uint32_t>(c.states.size(), 0)),
-      one_frame(c, root, nodes, edges, std::vector<int32_t>(7, 0)),
-      s,
-      p,
-      z,
-      diags,
-      DarSource::Profile,
-      Compaction::Off,
-      Fold::Always) };
+  bool const sized{ size_layout(c,
+                                depths(Vector<uint32_t>(c.states.size(), 0)),
+                                one_frame(c, root, nodes, edges, Vector<int32_t>(7, 0)),
+                                s,
+                                p,
+                                z,
+                                diags,
+                                DarSource::Profile,
+                                Compaction::Off,
+                                Fold::Always) };
   trace_sink_set(nullptr);
   REQUIRE(sized);
   // The fold refused a cut at rank 1, before `S0`.
@@ -1053,31 +1052,30 @@ TEST_CASE("size: a boundary holds a lane for each edge that turns in it, and no 
   }
   StateId const bar{ build_state(c, root, "F", StateKind::Fork, {}) };
   scav_profile const p{ unfolded() };
-  auto const x_of = [&](std::vector<OrderNode> const &nodes,
-                        std::vector<OrderEdge> const &edges,
-                        uint32_t st) {
-    SizedLayout z;
-    std::vector<Diagnostic> diags;
-    REQUIRE(size_layout(c,
-                        depths(Vector<uint32_t>(6, 0)),
-                        one_frame(c, root, nodes, edges, { 0 }),
-                        {},
-                        p,
-                        z,
-                        diags));
-    return z.state[st].x - (z.state[ids[0].v].x + z.state[ids[0].v].w);
-  };
-  std::vector<OrderNode> const pair{ state_node(ids[0].v, 0, 0),
-                                     state_node(ids[1].v, 0, 1),
-                                     state_node(bar.v, 1, 0) };
+  auto const x_of =
+      [&](Vector<OrderNode> const &nodes, Vector<OrderEdge> const &edges, uint32_t st) {
+        SizedLayout z;
+        std::vector<Diagnostic> diags;
+        REQUIRE(size_layout(c,
+                            depths(Vector<uint32_t>(6, 0)),
+                            one_frame(c, root, nodes, edges, { 0 }),
+                            {},
+                            p,
+                            z,
+                            diags));
+        return z.state[st].x - (z.state[ids[0].v].x + z.state[ids[0].v].w);
+      };
+  Vector<OrderNode> const pair{ state_node(ids[0].v, 0, 0),
+                                state_node(ids[1].v, 0, 1),
+                                state_node(bar.v, 1, 0) };
   CHECK(x_of(pair,
              { { .src = 0, .dst = 2, .segment = 0, .reversed = 0 },
                { .src = 1, .dst = 2, .segment = 1, .reversed = 0 } },
              bar.v) == p.rank_sep);
-  std::vector<OrderNode> const fan{ state_node(ids[0].v, 0, 0),
-                                    state_node(ids[1].v, 0, 1),
-                                    state_node(ids[4].v, 0, 2),
-                                    state_node(ids[2].v, 1, 0) };
+  Vector<OrderNode> const fan{ state_node(ids[0].v, 0, 0),
+                               state_node(ids[1].v, 0, 1),
+                               state_node(ids[4].v, 0, 2),
+                               state_node(ids[2].v, 1, 0) };
   CHECK(x_of(fan,
              { { .src = 0, .dst = 3, .segment = 0, .reversed = 0 },
                { .src = 1, .dst = 3, .segment = 1, .reversed = 0 },
@@ -1138,7 +1136,7 @@ TEST_CASE("size: a port on a cross border sits on the frame's edge over its neig
   for (uint8_t const cross : { uint8_t{ 1 }, uint8_t{ 2 } }) {
     CAPTURE(static_cast<uint32_t>(cross));
     uint32_t const at{ (cross == 1) ? 1U : 2U };
-    std::vector<OrderNode> nodes{ state_node(a.v, 0, 0), state_node(b.v, 1, 0) };
+    Vector<OrderNode> nodes{ state_node(a.v, 0, 0), state_node(b.v, 1, 0) };
     nodes.insert(nodes.begin() + at,
                  { .kind = OrderKind::Boundary, .subject = 1, .rank = 1, .pos = 0 });
     nodes[2].pos = 1;
@@ -1224,8 +1222,8 @@ TEST_CASE("size: a rank past the domain is diagnosed rather than truncated") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const source{ build_state(c, root, "S", StateKind::Normal, {}) };
-  std::vector<OrderNode> nodes{ state_node(source.v, 0, 0) };
-  std::vector<OrderEdge> edges;
+  Vector<OrderNode> nodes{ state_node(source.v, 0, 0) };
+  Vector<OrderEdge> edges;
   for (uint32_t i = 0; i < 5; ++i) {
     StateId const target{ build_state(c, root, "T", StateKind::Normal, {}) };
     nodes.push_back(state_node(target.v, 1, i));
@@ -1312,8 +1310,8 @@ TEST_CASE("size: a boundary node sits on the frame's border, not on its piece's"
   for (uint32_t i = 0; i < 9; ++i) {
     chain.push_back(build_state(c, root, {}, StateKind::Normal, {}));
   }
-  std::vector<OrderNode> nodes;
-  std::vector<OrderEdge> edges;
+  Vector<OrderNode> nodes;
+  Vector<OrderEdge> edges;
   nodes.reserve(10);
   for (uint32_t i = 0; i < 7; ++i) { nodes.push_back(state_node(chain[i].v, i, 0)); }
   uint32_t const boundary{ static_cast<uint32_t>(nodes.size()) };
@@ -1508,18 +1506,15 @@ TEST_CASE("size: a fold whose pieces will not pack is dropped for the flat run")
   scav_spaces const s{ .box_state = boxes.data(),
                        .n_box_state = static_cast<uint32_t>(boxes.size()) };
 
-  std::vector<OrderNode> const nodes{
-    state_node(ids[0].v, 0, 0), state_node(ids[1].v, 0, 1), state_node(ids[2].v, 1, 0),
-    state_node(ids[3].v, 2, 0), state_node(ids[4].v, 2, 1), state_node(ids[5].v, 3, 0)
-  };
-  std::vector<OrderEdge> const edges{
-    { .src = 0, .dst = 2, .segment = 0, .reversed = 0 },
-    { .src = 1, .dst = 2, .segment = 1, .reversed = 0 },
-    { .src = 2, .dst = 3, .segment = 2, .reversed = 0 },
-    { .src = 2, .dst = 4, .segment = 3, .reversed = 0 },
-    { .src = 3, .dst = 5, .segment = 4, .reversed = 0 },
-    { .src = 4, .dst = 5, .segment = 5, .reversed = 0 }
-  };
+  Vector<OrderNode> const nodes{ state_node(ids[0].v, 0, 0), state_node(ids[1].v, 0, 1),
+                                 state_node(ids[2].v, 1, 0), state_node(ids[3].v, 2, 0),
+                                 state_node(ids[4].v, 2, 1), state_node(ids[5].v, 3, 0) };
+  Vector<OrderEdge> const edges{ { .src = 0, .dst = 2, .segment = 0, .reversed = 0 },
+                                 { .src = 1, .dst = 2, .segment = 1, .reversed = 0 },
+                                 { .src = 2, .dst = 3, .segment = 2, .reversed = 0 },
+                                 { .src = 2, .dst = 4, .segment = 3, .reversed = 0 },
+                                 { .src = 3, .dst = 5, .segment = 4, .reversed = 0 },
+                                 { .src = 4, .dst = 5, .segment = 5, .reversed = 0 } };
 
   SizedLayout z;
   std::vector<Diagnostic> diags;
@@ -1560,7 +1555,7 @@ TEST_CASE("size: a row that leaves the domain does not displace the column that 
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  std::vector<OrderNode> const nodes{ state_node(a.v, 0, 0), state_node(b.v, 0, 1) };
+  Vector<OrderNode> const nodes{ state_node(a.v, 0, 0), state_node(b.v, 0, 1) };
 
   SizedLayout z;
   std::vector<Diagnostic> diags;
@@ -1596,7 +1591,7 @@ namespace {
 
 // `n` unconnected states of one shape in rank 0: `n` equal components for the packers.
 struct EqualStates {
-  std::vector<OrderNode> nodes;
+  Vector<OrderNode> nodes;
   std::vector<scav_box_space> boxes;
 };
 
@@ -1700,8 +1695,8 @@ namespace {
 
 // `n` chained states, one per rank: one component whose run the fold cuts into pieces.
 struct RankRun {
-  std::vector<OrderNode> nodes;
-  std::vector<OrderEdge> edges;
+  Vector<OrderNode> nodes;
+  Vector<OrderEdge> edges;
   std::vector<scav_box_space> boxes;
 };
 
