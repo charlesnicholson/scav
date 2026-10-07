@@ -10,6 +10,7 @@
 #include "layout/router.h"
 #include "layout/size.h"
 #include "scav/scav_core.h"
+#include "scav_cold.h"
 #include "scav_int.h"
 #include "scav_internal.h"
 #include "scav_stable_sort.h"
@@ -1288,7 +1289,7 @@ void cost_grid_query(ChildGrid const &g,
 
 SCAV_INTERNAL_END
 
-CostContext cost_context(Chart const &c, SplitGraph const &g) {
+SCAV_COLD CostContext cost_context(Chart const &c, SplitGraph const &g) {
   CostContext k;
   k.an = cost_flatten_ancestry(c);
   child_grid_frames(c, c.states.size(), SCAN_MAX, k.grid);

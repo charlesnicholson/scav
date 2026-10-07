@@ -1,5 +1,6 @@
 #include "layout/memo.h"
 
+#include "scav_cold.h"
 #include "scav_int.h"
 #include "scav_thread.h"
 #include "scav_vec.h"
@@ -49,7 +50,7 @@ struct Registry {
 };
 
 // Never destroyed; memos on pool threads deregister after static destruction.
-Registry &registry() {
+SCAV_COLD Registry &registry() {
   static Registry *const INSTANCE{ new Registry };
   return *INSTANCE;
 }
@@ -81,7 +82,7 @@ void Memo::release() {
   used = 0;
 }
 
-uint32_t memo_serial() {
+SCAV_COLD uint32_t memo_serial() {
   Registry &r{ registry() };
   ScopedLock const held{ r.lock };
   if (++r.serial == 0) { ++r.serial; }

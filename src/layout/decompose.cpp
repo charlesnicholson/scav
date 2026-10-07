@@ -6,6 +6,7 @@
 #include "layout/memo.h"
 #include "layout/order.h"
 #include "scav/scav_core.h"
+#include "scav_cold.h"
 #include "scav_vec.h"
 
 #include <cstdint>
@@ -17,7 +18,7 @@ namespace scav {
 namespace {
 
 // `s` plus every enclosing state, innermost first; at most one entry per state.
-void chain_of(Chart const &c, StateId s, std::vector<StateId> &out) {
+SCAV_COLD void chain_of(Chart const &c, StateId s, std::vector<StateId> &out) {
   out.clear();
   for (StateId x{ s }; (x.v != INVALID) && (out.size() < c.states.size());
        x = enclosing_state(c, x)) {
@@ -86,7 +87,7 @@ bool ancestor_or_self(Chart const &c, StateId ancestor, StateId of) {
   return false;
 }
 
-SplitGraph decompose(Chart const &c) {
+SCAV_COLD SplitGraph decompose(Chart const &c) {
   SplitGraph g;
   std::vector<StateId> chain_src;  // scratch, reused per state and transition
   std::vector<StateId> chain_dst;

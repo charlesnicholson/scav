@@ -1,6 +1,7 @@
 #include "layout/candidate_memo.h"
 
 #include "layout/route.h"
+#include "scav_cold.h"
 #include "scav_int.h"
 #include "scav_stable_sort.h"
 #include "scav_vec.h"
@@ -126,7 +127,7 @@ CandidateMemo::CandidateMemo(Chart const &c, SplitGraph const &g, uint64_t bytes
       owned_list);
 }
 
-uint32_t CandidateMemo::row_word(Row const &row) {
+SCAV_COLD uint32_t CandidateMemo::row_word(Row const &row) {
   ScopedLock const held{ row_lock };
   for (uint32_t i = 0; i < rows.size(); ++i) {
     Row const &r{ rows[i] };
@@ -139,7 +140,7 @@ uint32_t CandidateMemo::row_word(Row const &row) {
   return static_cast<uint32_t>(rows.size() - 1);
 }
 
-uint32_t CandidateMemo::profile_word(scav_profile const &knobs) {
+SCAV_COLD uint32_t CandidateMemo::profile_word(scav_profile const &knobs) {
   scav_profile routed{ knobs };
   routed.trybox = 0;
   ScopedLock const held{ row_lock };
@@ -386,7 +387,7 @@ void CandidateMemo::charge(uint64_t n) {
   if (now > budget) { empty(); }
 }
 
-void CandidateMemo::empty() {
+SCAV_COLD void CandidateMemo::empty() {
   if (emptying.exchange(true)) { return; }
   charged.store(0, std::memory_order_relaxed);
   for (std::array<IndexShard, SHARDS> *const table :
@@ -795,7 +796,7 @@ void CandidateMemo::release(uint32_t e, bool labelled, int64_t t2) {
   r.bound[k] = imax(r.bound[k], t2);
 }
 
-void CandidateMemo::set_retried(uint32_t e) {
+SCAV_COLD void CandidateMemo::set_retried(uint32_t e) {
   if (e == INVALID) { return; }
   ScoreShard &sh{ scores[e & (SHARDS - 1)] };
   ScopedLock const held{ sh.lock };

@@ -11,6 +11,7 @@
 #include "layout/router.h"
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
+#include "scav_cold.h"
 #include "scav_int.h"
 #include "scav_internal.h"
 #include "scav_vec.h"
@@ -2659,7 +2660,7 @@ void loop_rows(Chart const &c,
   }
 }
 
-RowReads size_row_reads(Chart const &c, SubmachineOrders const &o) {
+SCAV_COLD RowReads size_row_reads(Chart const &c, SubmachineOrders const &o) {
   RowReads out;
   std::vector<uint32_t> root;  // union-find over one frame's nodes
   auto const find = [&root](uint32_t v) {
@@ -2707,7 +2708,9 @@ RowReads size_row_reads(Chart const &c, SubmachineOrders const &o) {
   return out;
 }
 
-Row size_row_canonical(Row const &row, RowReads const &reads, scav_profile const &base) {
+SCAV_COLD Row size_row_canonical(Row const &row,
+                                 RowReads const &reads,
+                                 scav_profile const &base) {
   Row out{ row };
   if (!reads.trybox) { out.knobs.trybox = base.trybox; }
   if (!reads.pack) { out.pack = Compaction::Off; }
