@@ -3,7 +3,7 @@
 #include "layout/memo.h"
 
 #include "doctest.h"
-#include "scav_vector.h"
+#include "scav_pod_vector.h"
 
 #include <cstdint>
 
@@ -11,10 +11,10 @@ namespace {
 
 using namespace scav;
 
-uint64_t colliding(Vector<uint32_t> const & /*key*/) { return 7; }
+uint64_t colliding(PodVector<uint32_t> const & /*key*/) { return 7; }
 
 // `find`, with the value copied out.
-bool lookup(Memo &m, Vector<uint32_t> const &key, Vector<int32_t> &value) {
+bool lookup(Memo &m, PodVector<uint32_t> const &key, PodVector<int32_t> &value) {
   int32_t const *at{ nullptr };
   uint32_t len{ 0 };
   if (!m.find(key, at, len)) { return false; }
@@ -22,7 +22,7 @@ bool lookup(Memo &m, Vector<uint32_t> const &key, Vector<int32_t> &value) {
   return true;
 }
 
-Vector<int32_t> value_for(uint32_t i) {
+PodVector<int32_t> value_for(uint32_t i) {
   return { static_cast<int32_t>(i),
            -static_cast<int32_t>(i),
            static_cast<int32_t>(i * 3U) };
@@ -32,7 +32,7 @@ Vector<int32_t> value_for(uint32_t i) {
 
 TEST_CASE("memo: a key never stored is not found") {
   Memo m{ 1024 };
-  Vector<int32_t> got;
+  PodVector<int32_t> got;
   CHECK_FALSE(lookup(m, { 1, 2, 3 }, got));
   m.insert({ 1, 2, 3 }, { 9 });
   CHECK_FALSE(lookup(m, { 3, 2, 1 }, got));
@@ -42,23 +42,23 @@ TEST_CASE("memo: a value comes back exactly as it was stored") {
   Memo m{ 1024 };
   m.insert({ 1, 2, 3 }, { -5, 0, 7, 1 << 30 });
   m.insert({ 4 }, { 11 });
-  Vector<int32_t> got;
+  PodVector<int32_t> got;
   REQUIRE(lookup(m, { 1, 2, 3 }, got));
-  CHECK(got == Vector<int32_t>{ -5, 0, 7, 1 << 30 });
+  CHECK(got == PodVector<int32_t>{ -5, 0, 7, 1 << 30 });
   REQUIRE(lookup(m, { 4 }, got));
-  CHECK(got == Vector<int32_t>{ 11 });
+  CHECK(got == PodVector<int32_t>{ 11 });
 }
 
 TEST_CASE("memo: keys differing in one word or in length are different keys") {
   Memo m{ 1024 };
   m.insert({ 1, 2, 3 }, { 1 });
-  Vector<int32_t> got;
+  PodVector<int32_t> got;
   CHECK_FALSE(lookup(m, { 1, 2, 4 }, got));
   CHECK_FALSE(lookup(m, { 1, 2 }, got));
   CHECK_FALSE(lookup(m, { 1, 2, 3, 0 }, got));
   CHECK_FALSE(lookup(m, { 0, 1, 2, 3 }, got));
   REQUIRE(lookup(m, { 1, 2, 3 }, got));
-  CHECK(got == Vector<int32_t>{ 1 });
+  CHECK(got == PodVector<int32_t>{ 1 });
 }
 
 TEST_CASE("memo: every key colliding, each is still found by its whole key") {
@@ -67,7 +67,7 @@ TEST_CASE("memo: every key colliding, each is still found by its whole key") {
   constexpr uint32_t N{ 3000 };
   for (uint32_t i = 0; i < N; ++i) { m.insert({ i, i ^ 0x5555U }, value_for(i)); }
   bool all{ true };
-  Vector<int32_t> got;
+  PodVector<int32_t> got;
   for (uint32_t i = 0; i < N; ++i) {
     all = all && lookup(m, { i, i ^ 0x5555U }, got) && (got == value_for(i));
   }
@@ -80,7 +80,7 @@ TEST_CASE("memo: growing the table keeps every entry it had") {
   constexpr uint32_t N{ 20000 };
   for (uint32_t i = 0; i < N; ++i) { m.insert({ i }, value_for(i)); }
   bool all{ true };
-  Vector<int32_t> got;
+  PodVector<int32_t> got;
   for (uint32_t i = 0; i < N; ++i) {
     all = all && lookup(m, { i }, got) && (got == value_for(i));
   }
@@ -92,7 +92,7 @@ TEST_CASE("memo: past its budget it empties and starts again") {
   // holds ten and the eleventh empties the table first.
   Memo m{ 40 };
   for (uint32_t i = 0; i < 10; ++i) { m.insert({ i + 1 }, value_for(i)); }
-  Vector<int32_t> got;
+  PodVector<int32_t> got;
   REQUIRE(lookup(m, { 1 }, got));
   m.insert({ 100 }, value_for(100));
   CHECK_FALSE(lookup(m, { 1 }, got));
@@ -110,7 +110,7 @@ TEST_CASE("memo: past its budget it empties and starts again") {
 TEST_CASE("memo: an empty key is never stored, and an empty value is") {
   Memo m{ 1024 };
   m.insert({}, { 1 });
-  Vector<int32_t> got;
+  PodVector<int32_t> got;
   CHECK_FALSE(lookup(m, {}, got));
   m.insert({ 5 }, {});
   got = { 99 };
@@ -127,15 +127,15 @@ TEST_CASE("memo: the hash reads every word of a key") {
   };
   bool all{ true };
   for (uint32_t len = 1; len <= 40; ++len) {
-    Vector<uint32_t> key(len);
+    PodVector<uint32_t> key(len);
     for (uint32_t &w : key) { w = next(); }
     uint64_t const h{ memo_hash(key) };
     for (uint32_t k = 0; k < len; ++k) {
-      Vector<uint32_t> other{ key };
+      PodVector<uint32_t> other{ key };
       other[k] ^= 1U;
       all = all && (memo_hash(other) != h);
     }
-    Vector<uint32_t> longer{ key };
+    PodVector<uint32_t> longer{ key };
     longer.push_back(0);
     all = all && (memo_hash(longer) != h);
   }
@@ -145,7 +145,7 @@ TEST_CASE("memo: the hash reads every word of a key") {
 TEST_CASE("memo: every memo gives back its storage when the last layout ends") {
   Memo m{ 1024 };
   for (uint32_t i = 0; i < 100; ++i) { m.insert({ i + 1 }, value_for(i)); }
-  Vector<int32_t> got;
+  PodVector<int32_t> got;
   {
     MemoRun const outer;
     { MemoRun const inner; }
@@ -177,7 +177,7 @@ TEST_CASE("memo: a serial is never repeated and an interned profile is one word 
   CHECK(memo_profile(q) != pw);
   CHECK(memo_profile(p) == pw);
   // Pushed out by eight others, `p` draws a fresh word, never one another profile holds.
-  Vector<uint32_t> words;
+  PodVector<uint32_t> words;
   for (int32_t k = 0; k < 8; ++k) {
     scav_profile r{};
     r.node_sep = k + 1;
@@ -190,11 +190,11 @@ TEST_CASE("memo: a serial is never repeated and an interned profile is one word 
 
 namespace {
 
-uint32_t find_in(KeyIndex const &k, Vector<uint32_t> const &key) {
+uint32_t find_in(KeyIndex const &k, PodVector<uint32_t> const &key) {
   return k.find(key.data(), static_cast<uint32_t>(key.size()), memo_hash(key));
 }
 
-uint32_t put_in(KeyIndex &k, Vector<uint32_t> const &key) {
+uint32_t put_in(KeyIndex &k, PodVector<uint32_t> const &key) {
   return k.insert(key.data(), static_cast<uint32_t>(key.size()), memo_hash(key));
 }
 
@@ -222,15 +222,15 @@ TEST_CASE(
   constexpr uint32_t N{ 3000 };
   bool all{ true };
   for (uint32_t i = 0; i < N; ++i) {
-    Vector<uint32_t> const key{ i, i ^ 0x5555U };
+    PodVector<uint32_t> const key{ i, i ^ 0x5555U };
     all = all && (k.insert(key.data(), 2, 7) == i);
   }
   for (uint32_t i = 0; i < N; ++i) {
-    Vector<uint32_t> const key{ i, i ^ 0x5555U };
+    PodVector<uint32_t> const key{ i, i ^ 0x5555U };
     all = all && (k.find(key.data(), 2, 7) == i);
   }
   CHECK(all);
-  Vector<uint32_t> const absent{ N, N ^ 0x5555U };
+  PodVector<uint32_t> const absent{ N, N ^ 0x5555U };
   CHECK(k.find(absent.data(), 2, 7) == INVALID);
   CHECK(k.bytes() > 0);
 }

@@ -1,7 +1,7 @@
-// Vector against std::vector over element sizes 1 to 100 bytes and every alignment up to
-// max_align_t, including arguments that name the vector's own elements.
+// PodVector against std::vector over element sizes 1 to 100 bytes and every alignment up
+// to max_align_t, including arguments that name the vector's own elements.
 
-#include "scav_vector.h"
+#include "scav_pod_vector.h"
 
 #include "doctest.h"
 
@@ -19,10 +19,10 @@ namespace {
 
 using namespace scav;
 
-static_assert(sizeof(Vector<uint8_t>) == sizeof(void *) + 8);
-static_assert(sizeof(Vector<uint64_t>) == sizeof(void *) + 8);
-static_assert(std::is_nothrow_move_constructible_v<Vector<uint32_t>> &&
-              std::is_nothrow_move_assignable_v<Vector<uint32_t>>);
+static_assert(sizeof(PodVector<uint8_t>) == sizeof(void *) + 8);
+static_assert(sizeof(PodVector<uint64_t>) == sizeof(void *) + 8);
+static_assert(std::is_nothrow_move_constructible_v<PodVector<uint32_t>> &&
+              std::is_nothrow_move_assignable_v<PodVector<uint32_t>>);
 
 struct B3 {  // 3 bytes, alignment 1
   uint8_t a, b, c;
@@ -72,7 +72,7 @@ T make(uint64_t seed) {
 }
 
 template <typename T>
-bool same(Vector<T> const &got, std::vector<T> const &want) {
+bool same(PodVector<T> const &got, std::vector<T> const &want) {
   if (got.size() != want.size()) { return false; }
   for (size_t i = 0; i < want.size(); ++i) {
     if (!(got[i] == want[i])) { return false; }
@@ -82,18 +82,18 @@ bool same(Vector<T> const &got, std::vector<T> const &want) {
 
 // size() == capacity(), so the next growth reallocates.
 template <typename T>
-Vector<T> full(std::initializer_list<T> items) {
-  Vector<T> v;
+PodVector<T> full(std::initializer_list<T> items) {
+  PodVector<T> v;
   v.reserve(items.size());
   v.insert(v.end(), items);
   REQUIRE(v.size() == v.capacity());
   return v;
 }
 
-// A run of every member on a Vector and a std::vector, compared after each step.
+// A run of every member on a PodVector and a std::vector, compared after each step.
 template <typename T>
 void differential(uint64_t seed) {
-  Vector<T> got;
+  PodVector<T> got;
   std::vector<T> want;
   for (uint64_t step = 0; step < 3000; ++step) {
     uint64_t const r{ rnd(seed, step) };
@@ -194,9 +194,9 @@ void differential(uint64_t seed) {
         break;
       }
       case 17: {
-        Vector<T> c{ got };
+        PodVector<T> c{ got };
         got = c;
-        Vector<T> m{ std::move(c) };
+        PodVector<T> m{ std::move(c) };
         got = std::move(m);
         break;
       }
@@ -222,18 +222,18 @@ void differential(uint64_t seed) {
 
 }  // namespace
 
-TEST_CASE("vector: an empty vector owns no storage") {
-  Vector<uint32_t> v;
+TEST_CASE("pod_vector: an empty vector owns no storage") {
+  PodVector<uint32_t> v;
   CHECK(v.empty());
   CHECK(v.size() == 0);
   CHECK(v.capacity() == 0);
   CHECK(v.data() == nullptr);
   CHECK(v.begin() == v.end());
 
-  Vector<uint32_t> const copy{ v };
+  PodVector<uint32_t> const copy{ v };
   CHECK(copy.capacity() == 0);
   CHECK(copy.data() == nullptr);
-  Vector<uint32_t> moved{ std::move(v) };
+  PodVector<uint32_t> moved{ std::move(v) };
   CHECK(moved.capacity() == 0);
 
   v.reserve(0);
@@ -247,8 +247,8 @@ TEST_CASE("vector: an empty vector owns no storage") {
   CHECK(v == copy);
 }
 
-TEST_CASE("vector: push_back doubles capacity from one") {
-  Vector<uint32_t> v;
+TEST_CASE("pod_vector: push_back doubles capacity from one") {
+  PodVector<uint32_t> v;
   std::vector<size_t> caps;
   for (uint32_t i = 0; i < 100; ++i) {
     v.push_back(i);
@@ -258,8 +258,8 @@ TEST_CASE("vector: push_back doubles capacity from one") {
   for (uint32_t i = 0; i < 100; ++i) { CHECK(v[i] == i); }
 }
 
-TEST_CASE("vector: reserve, assign, copies and constructors allocate exactly") {
-  Vector<uint32_t> v;
+TEST_CASE("pod_vector: reserve, assign, copies and constructors allocate exactly") {
+  PodVector<uint32_t> v;
   v.reserve(10);
   CHECK(v.capacity() == 10);
   v.reserve(3);
@@ -269,23 +269,23 @@ TEST_CASE("vector: reserve, assign, copies and constructors allocate exactly") {
   v.push_back(2);
   CHECK(v.capacity() == 50);
 
-  Vector<uint32_t> const copy{ v };
+  PodVector<uint32_t> const copy{ v };
   CHECK(copy.capacity() == 26);
-  Vector<uint32_t> const sized(7);
+  PodVector<uint32_t> const sized(7);
   CHECK(sized.capacity() == 7);
-  Vector<uint32_t> const filled(5, 3);
+  PodVector<uint32_t> const filled(5, 3);
   CHECK(filled.capacity() == 5);
-  Vector<uint32_t> const listed{ 1, 2, 3 };
+  PodVector<uint32_t> const listed{ 1, 2, 3 };
   CHECK(listed.capacity() == 3);
 
-  Vector<uint32_t> small{ 1 };
+  PodVector<uint32_t> small{ 1 };
   small = copy;
   CHECK(small.capacity() == 26);
   small.assign(listed.begin(), listed.end());
   CHECK(small.capacity() == 26);
 }
 
-TEST_CASE("vector: growth past capacity takes the larger of double and the new size") {
+TEST_CASE("pod_vector: growth past capacity takes the larger of double and the new size") {
   auto v{ full<uint32_t>({ 1, 2, 3, 4 }) };
   std::array<uint32_t, 10> const add{ 9, 9, 9, 9, 9, 9, 9, 9, 9, 9 };
   v.insert(v.end(), add.data(), add.data() + 2);
@@ -298,19 +298,19 @@ TEST_CASE("vector: growth past capacity takes the larger of double and the new s
   CHECK(v.capacity() == 80);
 }
 
-TEST_CASE("vector: resize value-initializes and keeps the prefix") {
-  Vector<uint32_t> v{ 3, 1, 4 };
+TEST_CASE("pod_vector: resize value-initializes and keeps the prefix") {
+  PodVector<uint32_t> v{ 3, 1, 4 };
   v.resize(6);
-  CHECK(v == Vector<uint32_t>{ 3, 1, 4, 0, 0, 0 });
+  CHECK(v == PodVector<uint32_t>{ 3, 1, 4, 0, 0, 0 });
   v.resize(2);
-  CHECK(v == Vector<uint32_t>{ 3, 1 });
+  CHECK(v == PodVector<uint32_t>{ 3, 1 });
   v.resize(4, 8);
-  CHECK(v == Vector<uint32_t>{ 3, 1, 8, 8 });
+  CHECK(v == PodVector<uint32_t>{ 3, 1, 8, 8 });
 
-  Vector<Init> i(2);
+  PodVector<Init> i(2);
   i.resize(5);
   for (Init const &e : i) { CHECK(e == Init{}); }
-  Vector<W12> w;
+  PodVector<W12> w;
   w.resize(3);
   for (W12 const &e : w) { CHECK(e == W12{ 0, 0, 0 }); }
 }
@@ -319,7 +319,7 @@ TEST_CASE(
     "vector: push_back, emplace_back and insert of an element of the same full vector") {
   auto v{ full<uint32_t>({ 7, 8, 9 }) };
   v.push_back(v[0]);
-  CHECK(v == Vector<uint32_t>{ 7, 8, 9, 7 });
+  CHECK(v == PodVector<uint32_t>{ 7, 8, 9, 7 });
 
   auto b{ full<Big>({ make<Big>(1), make<Big>(2) }) };
   b.push_back(b.back());
@@ -328,52 +328,52 @@ TEST_CASE(
   auto e{ full<W12>({ { 1, 2, 3 } }) };
   W12 &made{ e.emplace_back(e[0]) };
   CHECK(&made == &e.back());
-  CHECK(e == Vector<W12>{ { 1, 2, 3 }, { 1, 2, 3 } });
+  CHECK(e == PodVector<W12>{ { 1, 2, 3 }, { 1, 2, 3 } });
 
   auto s{ full<uint32_t>({ 4, 5, 6 }) };
   uint32_t *const at{ s.insert(s.begin(), s[2]) };
   CHECK(at == s.begin());
-  CHECK(s == Vector<uint32_t>{ 6, 4, 5, 6 });
+  CHECK(s == PodVector<uint32_t>{ 6, 4, 5, 6 });
 }
 
-TEST_CASE("vector: assign and resize from an element of the same vector") {
+TEST_CASE("pod_vector: assign and resize from an element of the same vector") {
   auto v{ full<uint32_t>({ 4, 5, 6 }) };
   v.assign(32, v[1]);  // reallocating frees the element named
-  CHECK(v == Vector<uint32_t>(32, 5));
+  CHECK(v == PodVector<uint32_t>(32, 5));
   v.assign(2, v[31]);  // in place
-  CHECK(v == Vector<uint32_t>{ 5, 5 });
+  CHECK(v == PodVector<uint32_t>{ 5, 5 });
 
   auto w{ full<uint32_t>({ 6, 5 }) };
   w.resize(20, w[1]);
   CHECK(w ==
-        Vector<uint32_t>{ 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5 });
+        PodVector<uint32_t>{ 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5 });
 
-  Vector<uint32_t> r{ 1, 2, 3, 4, 5 };
+  PodVector<uint32_t> r{ 1, 2, 3, 4, 5 };
   r.assign(r.begin() + 1, r.end() - 1);
-  CHECK(r == Vector<uint32_t>{ 2, 3, 4 });
+  CHECK(r == PodVector<uint32_t>{ 2, 3, 4 });
 }
 
-TEST_CASE("vector: insert a range of the same vector, with and without room") {
+TEST_CASE("pod_vector: insert a range of the same vector, with and without room") {
   auto v{ full<uint32_t>({ 1, 2, 3 }) };
   v.insert(v.begin() + 1, v.begin(), v.end());
-  CHECK(v == Vector<uint32_t>{ 1, 1, 2, 3, 2, 3 });
+  CHECK(v == PodVector<uint32_t>{ 1, 1, 2, 3, 2, 3 });
 
-  Vector<uint32_t> w{ 1, 2, 3 };
+  PodVector<uint32_t> w{ 1, 2, 3 };
   w.reserve(10);
   uint32_t *const at{ w.insert(w.begin(), w.begin() + 1, w.end()) };
   CHECK(at == w.begin());
-  CHECK(w == Vector<uint32_t>{ 2, 3, 1, 2, 3 });
+  CHECK(w == PodVector<uint32_t>{ 2, 3, 1, 2, 3 });
   CHECK(w.capacity() == 10);
 }
 
-TEST_CASE("vector: insert and erase at the front, middle and end") {
-  Vector<uint32_t> v{ 1, 2, 3 };
+TEST_CASE("pod_vector: insert and erase at the front, middle and end") {
+  PodVector<uint32_t> v{ 1, 2, 3 };
   std::array<uint32_t, 2> const src{ 7, 8 };
   uint32_t *at{ v.insert(v.begin() + 1, src.data(), src.data() + 2) };
-  CHECK(v == Vector<uint32_t>{ 1, 7, 8, 2, 3 });
+  CHECK(v == PodVector<uint32_t>{ 1, 7, 8, 2, 3 });
   CHECK(at == v.begin() + 1);
   at = v.insert(v.end(), { 5, 6 });
-  CHECK(v == Vector<uint32_t>{ 1, 7, 8, 2, 3, 5, 6 });
+  CHECK(v == PodVector<uint32_t>{ 1, 7, 8, 2, 3, 5, 6 });
   CHECK(at == v.begin() + 5);
   at = v.insert(v.begin() + 2, src.data(), src.data());
   CHECK(at == v.begin() + 2);
@@ -381,31 +381,31 @@ TEST_CASE("vector: insert and erase at the front, middle and end") {
 
   at = v.erase(v.begin());
   CHECK(at == v.begin());
-  CHECK(v == Vector<uint32_t>{ 7, 8, 2, 3, 5, 6 });
+  CHECK(v == PodVector<uint32_t>{ 7, 8, 2, 3, 5, 6 });
   at = v.erase(v.begin() + 1, v.begin() + 4);
   CHECK(at == v.begin() + 1);
-  CHECK(v == Vector<uint32_t>{ 7, 5, 6 });
+  CHECK(v == PodVector<uint32_t>{ 7, 5, 6 });
   at = v.erase(v.end() - 1);
   CHECK(at == v.end());
-  CHECK(v == Vector<uint32_t>{ 7, 5 });
+  CHECK(v == PodVector<uint32_t>{ 7, 5 });
 }
 
-TEST_CASE("vector: copy, move, swap and self-assignment") {
-  Vector<uint32_t> a{ 1, 2, 3 };
-  Vector<uint32_t> b{ a };
+TEST_CASE("pod_vector: copy, move, swap and self-assignment") {
+  PodVector<uint32_t> a{ 1, 2, 3 };
+  PodVector<uint32_t> b{ a };
   CHECK(b == a);
   CHECK(b.data() != a.data());
   b.push_back(4);
-  CHECK(a == Vector<uint32_t>{ 1, 2, 3 });
+  CHECK(a == PodVector<uint32_t>{ 1, 2, 3 });
 
-  Vector<uint32_t> &alias{ a };
+  PodVector<uint32_t> &alias{ a };
   a = alias;
-  CHECK(a == Vector<uint32_t>{ 1, 2, 3 });
+  CHECK(a == PodVector<uint32_t>{ 1, 2, 3 });
   a = std::move(alias);
-  CHECK(a == Vector<uint32_t>{ 1, 2, 3 });
+  CHECK(a == PodVector<uint32_t>{ 1, 2, 3 });
 
   uint32_t const *const storage{ b.data() };
-  Vector<uint32_t> c{ std::move(b) };
+  PodVector<uint32_t> c{ std::move(b) };
   CHECK(c.data() == storage);
   CHECK(b.empty());  // NOLINT(bugprone-use-after-move)
   CHECK(b.capacity() == 0);
@@ -414,15 +414,15 @@ TEST_CASE("vector: copy, move, swap and self-assignment") {
   CHECK(c.capacity() == 0);  // NOLINT(bugprone-use-after-move)
 
   a.swap(b);
-  CHECK(a == Vector<uint32_t>{ 1, 2, 3, 4 });
-  CHECK(b == Vector<uint32_t>{ 1, 2, 3 });
+  CHECK(a == PodVector<uint32_t>{ 1, 2, 3, 4 });
+  CHECK(b == PodVector<uint32_t>{ 1, 2, 3 });
   a = b;  // fits, so a keeps its storage
   CHECK(a == b);
   CHECK(a.capacity() == 6);
 }
 
-TEST_CASE("vector: front, back, pop_back and clear keep capacity") {
-  Vector<uint32_t> v{ 4, 5, 6 };
+TEST_CASE("pod_vector: front, back, pop_back and clear keep capacity") {
+  PodVector<uint32_t> v{ 4, 5, 6 };
   CHECK(v.front() == 4);
   CHECK(v.back() == 6);
   v.pop_back();
@@ -433,7 +433,7 @@ TEST_CASE("vector: front, back, pop_back and clear keep capacity") {
   CHECK(v.capacity() == cap);
 }
 
-TEST_CASE("vector: a random run of every member matches std::vector") {
+TEST_CASE("pod_vector: a random run of every member matches std::vector") {
   differential<uint8_t>(1);
   differential<B3>(2);
   differential<uint16_t>(3);
@@ -445,8 +445,8 @@ TEST_CASE("vector: a random run of every member matches std::vector") {
   differential<Big>(9);
 }
 
-TEST_CASE("vector: storage holds max_align_t's alignment") {
-  Vector<Aligned> v;
+TEST_CASE("pod_vector: storage holds max_align_t's alignment") {
+  PodVector<Aligned> v;
   for (uint32_t i = 0; i < 40; ++i) {
     v.push_back(make<Aligned>(i));
     auto const addr{ reinterpret_cast<uintptr_t>(v.data()) };

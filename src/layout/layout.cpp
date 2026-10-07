@@ -20,11 +20,11 @@
 #include "scav_hash_map.h"
 #include "scav_int.h"
 #include "scav_internal.h"
+#include "scav_pod_vector.h"
 #include "scav_rnd.h"
 #include "scav_stable_sort.h"
 #include "scav_thread.h"
 #include "scav_vec.h"
-#include "scav_vector.h"
 #include "scav_xxhash.h"
 
 #include <algorithm>
@@ -72,9 +72,9 @@ uint64_t layout_test_route_bound_pruned();
 uint64_t layout_test_route_bound_checked();
 uint64_t layout_test_route_bound_mismatches();
 void layout_test_row_alias(bool on);
-Vector<Cost> const &layout_test_schedule_first();
-Vector<Cost> const &layout_test_schedule_second();
-Vector<Cost> const &layout_test_schedule_kept();
+PodVector<Cost> const &layout_test_schedule_first();
+PodVector<Cost> const &layout_test_schedule_second();
+PodVector<Cost> const &layout_test_schedule_kept();
 void layout_test_dont_look_verify(bool on);
 uint64_t layout_test_dont_look_checked();
 uint64_t layout_test_dont_look_mismatches();
@@ -90,7 +90,7 @@ SCAV_INTERNAL_BEGIN
 // Test-visible; tests declare their own prototypes (see scav_internal.h).
 bool inflation_done(uint32_t fewest, uint32_t degraded, uint32_t unreachable, bool &keep);
 uint32_t search_tuple_count(scav_profile const &p);
-void search_table(scav_profile const &p, Vector<uint32_t> &rows);
+void search_table(scav_profile const &p, PodVector<uint32_t> &rows);
 uint32_t search_move_budget(scav_profile const &p);
 Row search_row(scav_profile const &p, uint32_t index);
 void search_changes(Chart const &c,
@@ -98,14 +98,14 @@ void search_changes(Chart const &c,
                     Routes const &was_routes,
                     SizedLayout const &now,
                     Routes const &now_routes,
-                    Vector<uint8_t> &frame,
-                    Vector<uint8_t> &route,
-                    Vector<uint8_t> &resized);
-uint32_t search_argmin(Vector<Cost> const &cost, Vector<uint8_t> const &viable);
+                    PodVector<uint8_t> &frame,
+                    PodVector<uint8_t> &route,
+                    PodVector<uint8_t> &resized);
+uint32_t search_argmin(PodVector<Cost> const &cost, PodVector<uint8_t> const &viable);
 // Orders `rest`, kick indices, by `cost` plus `jit`, ties keeping their order.
-void kick_order(Vector<uint32_t> &rest,
-                Vector<Cost> const &cost,
-                Vector<int64_t> const &jit);
+void kick_order(PodVector<uint32_t> &rest,
+                PodVector<Cost> const &cost,
+                PodVector<int64_t> const &jit);
 // Writes to `key` every input of a Level 1 search: the objective, the row, the budget,
 // `refold`, the seed pins in order, and `scope`.
 void search_key(scav_profile const &objective,
@@ -113,8 +113,8 @@ void search_key(scav_profile const &objective,
                 uint32_t budget,
                 bool refold,
                 SearchPins const &seed,
-                Vector<uint8_t> const *scope,
-                Vector<uint32_t> &key);
+                PodVector<uint8_t> const *scope,
+                PodVector<uint32_t> &key);
 SCAV_INTERNAL_END
 
 namespace {
@@ -247,7 +247,7 @@ static_assert(sizeof(scav_profile) == 53 * sizeof(int32_t),
 
 // Hash of every non-geometry layout input: profile, router name and version, spaces.
 uint32_t inputs_digest(scav_spaces const &s, scav_layout_opts const &o) {
-  Vector<scav_byte> b;
+  PodVector<scav_byte> b;
   std::array<int32_t, sizeof(scav_profile) / sizeof(int32_t)> profile{};
   std::memcpy(profile.data(), &o.profile, sizeof(scav_profile));
   for (int32_t const field : profile) { append_i32(b, field); }
@@ -272,7 +272,7 @@ void write_columns(Chart &c, SizedLayout const &z, Routes const &r, uint32_t inp
   write_rows(c, geom_column(c, GEOM[GeomLead]), z.lead);
   write_rows(c, geom_column(c, GEOM[GeomTrail]), z.trail);
   write_rows(c, geom_column(c, GEOM[GeomLoop]), z.loop);
-  Vector<uint32_t> place(z.loop_place.size());
+  PodVector<uint32_t> place(z.loop_place.size());
   for (size_t i = 0; i < place.size(); ++i) { place[i] = z.loop_place[i]; }
   write_rows(c, geom_column(c, GEOM[GeomLoopPlace]), place);
   write_rows(c, geom_column(c, GEOM[GeomSub]), z.sub);
@@ -352,7 +352,7 @@ struct FacingTaken {
 // Fills `out` for legs whose port faces away from its far end or is on a walled face: the
 // port takes a cross border its state sees, else its edge reverses. `taken` is scratch.
 void facing_flips(Facing &out,
-                  Vector<FacingTaken> &taken,
+                  PodVector<FacingTaken> &taken,
                   Chart const &c,
                   SplitGraph const &g,
                   SubmachineOrders const &o,
@@ -546,7 +546,7 @@ void facing_flips(Facing &out,
 // facing pass read no box-end pin; candidates differing only in those share them.
 struct Prefix {
   SubmachineOrders laid;
-  std::vector<Vector<uint32_t>> bends;  // `laid`'s, as `segment_bends` writes them
+  std::vector<PodVector<uint32_t>> bends;  // `laid`'s, as `segment_bends` writes them
   SizedLayout sized;
   Facing flips;
   Routes routes;  // as phase 3 first routes it, over `sized`
@@ -574,7 +574,7 @@ struct CandidateScratch {
   SubmachineOrders facing;
   SizedLayout again;
   Facing flips;
-  Vector<FacingTaken> taken;
+  PodVector<FacingTaken> taken;
 };
 
 // Grows `sized.chart` to cover every route point and placed label box; saves the
@@ -682,14 +682,14 @@ bool lay_facing(Candidate &out,
 // a net outside its region. The counters tally those routings and moves taken onto one.
 bool test_degrade{ false };
 Mutex test_degrade_lock;
-Vector<int32_t> test_degrade_drawing;  // state rects then route points
+PodVector<int32_t> test_degrade_drawing;  // state rects then route points
 std::atomic<uint64_t> test_degraded{ 0 };
 std::atomic<uint64_t> test_taken_degraded{ 0 };
 
 // Counts a net of `out` outside its region where `out` routes the recorded drawing.
 void degrade_for_test(Candidate &out) {
   if (!test_degrade) { return; }
-  Vector<int32_t> words;
+  PodVector<int32_t> words;
   for (scav_rect const &r : out.sized.state) {
     words.insert(words.end(), { r.x, r.y, r.w, r.h });
   }
@@ -837,7 +837,7 @@ void search_candidate(Candidate &out,
     }
     if (prefix != nullptr) {
       prefix->laid = *use;
-      Vector<uint32_t> reversed;
+      PodVector<uint32_t> reversed;
       segment_bends(*use,
                     static_cast<uint32_t>(g.segments.size()),
                     reversed,
@@ -962,7 +962,7 @@ struct Scored {
   bool stopped{ false };   // `cost` is the Tier 2 its count stopped at, a bound
 };
 
-void put_pins(SearchPins const &p, Vector<uint32_t> &w) {
+void put_pins(SearchPins const &p, PodVector<uint32_t> &w) {
   w.push_back(static_cast<uint32_t>(p.ranks.size()));
   for (RankPin const &r : p.ranks) { w.insert(w.end(), { r.state.v, r.rank }); }
   w.push_back(static_cast<uint32_t>(p.cuts.size()));
@@ -982,8 +982,8 @@ void put_pins(SearchPins const &p, Vector<uint32_t> &w) {
 }
 
 bool same_pins(SearchPins const &a, SearchPins const &b) {
-  Vector<uint32_t> wa;
-  Vector<uint32_t> wb;
+  PodVector<uint32_t> wa;
+  PodVector<uint32_t> wb;
   put_pins(a, wa);
   put_pins(b, wb);
   return wa == wb;
@@ -1128,14 +1128,14 @@ struct KeptCandidate {
 
 // Per-thread scratch for scoring one move; a move runs on one thread.
 struct MoveScratch {
-  SearchPins pins;         // the move's pins, valid until its scoring returns
-  Vector<int32_t> shares;  // the move's route bound's bends per transition
+  SearchPins pins;            // the move's pins, valid until its scoring returns
+  PodVector<int32_t> shares;  // the move's route bound's bends per transition
   SubmachineOrders moved;
   Candidate whole, face;
   CandidateScratch keep;
-  Vector<uint32_t> faces;  // the move's box-end faces
-  Vector<uint32_t> reversed;
-  std::vector<Vector<uint32_t>> bends;  // the laid ordering's, per segment
+  PodVector<uint32_t> faces;  // the move's box-end faces
+  PodVector<uint32_t> reversed;
+  std::vector<PodVector<uint32_t>> bends;  // the laid ordering's, per segment
 };
 
 // A search's view of the candidate memo; a null `table` scores every move in full.
@@ -1191,14 +1191,14 @@ MoveScratch &move_scratch() {
 // by `router`; `seated` and `per_trans` as `cost_bound` takes them.
 CostTerms route_bound(Chart const &c,
                       SplitGraph const &g,
-                      std::vector<Vector<uint32_t>> const &bends,
+                      std::vector<PodVector<uint32_t>> const &bends,
                       SizedLayout const &z,
-                      Vector<uint32_t> const &faces,
+                      PodVector<uint32_t> const &faces,
                       scav_profile const &objective,
                       Row const &row,
                       Router const &router,
                       bool seated,
-                      Vector<int32_t> *per_trans = nullptr) {
+                      PodVector<int32_t> *per_trans = nullptr) {
   return cost_bound(c,
                     g,
                     bends,
@@ -1236,7 +1236,7 @@ void check_route_bound(Chart const &c,
                        scav_profile const &objective,
                        Candidate const &cand,
                        CostTerms const &bound,
-                       Vector<int32_t> const &shares) {
+                       PodVector<int32_t> const &shares) {
   bool holds{ true };
   if (cand.viable && (cand.inflations == 0) && (cand.routes.degraded() == 0)) {
     CostTerms const t{ cost_terms(scoring, c, g, cand.sized, cand.routes, s, objective) };
@@ -1300,8 +1300,8 @@ Scored score_memoized(Chart const &c,
     use.pruned = true;
     return true;
   };
-  CostTerms bound{};                     // the move's route bound where `bounded`
-  Vector<int32_t> &shares{ sc.shares };  // its bends per transition
+  CostTerms bound{};                        // the move's route bound where `bounded`
+  PodVector<int32_t> &shares{ sc.shares };  // its bends per transition
   bool bounded{ false };
   // A move routed against a Tier-0-free incumbent stops once it reaches it.
   bool stops{ memo.prune && (memo.incumbent.t0_violations == 0) &&
@@ -1310,7 +1310,7 @@ Scored score_memoized(Chart const &c,
   stops = stops && test_cost_stop;
 #endif
   // Prunes by the stored route bound, else by `bends` sized as `z`'s, which it stores.
-  auto const pruned_by = [&](std::vector<Vector<uint32_t>> const &bends,
+  auto const pruned_by = [&](std::vector<PodVector<uint32_t>> const &bends,
                              SizedLayout const &z) {
     if (prune_at(stored_bound)) { return true; }
     bool const fresh{ memo.prune && (stored_bound < 0) &&
@@ -1854,7 +1854,7 @@ bool ranks_before(Cost const &a,
 template <typename Score, typename Deferred>
 void score_round(uint32_t n,
                  uint32_t threads,
-                 Vector<uint32_t> &again,
+                 PodVector<uint32_t> &again,
                  Score const &score,
                  Deferred const &deferred) {
   parallel_for(n, threads, [&](uint32_t i) { score(i, true); });
@@ -1872,9 +1872,9 @@ void score_round(uint32_t n,
 template <typename Exact>
 uint32_t least_by_bound(uint32_t n,
                         Cost const &incumbent,
-                        Vector<int64_t> const &jit,
-                        Vector<Scored> &got,
-                        Vector<uint32_t> &order,
+                        PodVector<int64_t> const &jit,
+                        PodVector<Scored> &got,
+                        PodVector<uint32_t> &order,
                         Exact const &exact) {
   order.clear();
   uint32_t open{ 0 };
@@ -1916,11 +1916,11 @@ template <typename Score>
 void verify_bounded_round(uint32_t n,
                           uint32_t threads,
                           Cost const &incumbent,
-                          Vector<int64_t> const &jit,
-                          Vector<Scored> const &got,
+                          PodVector<int64_t> const &jit,
+                          PodVector<Scored> const &got,
                           uint32_t win,
                           Score const &score) {
-  Vector<Scored> full(n);
+  PodVector<Scored> full(n);
   parallel_for(n, threads, [&](uint32_t i) { full[i] = score(i, true); });
   auto const jit_of = [&jit](uint32_t i) { return (i < jit.size()) ? jit[i] : 0; };
   uint32_t want{ INVALID };
@@ -2012,7 +2012,7 @@ Improved run_search(Chart const &c,
                     uint32_t budget,
                     bool refold,
                     SearchPins const &seed,
-                    Vector<uint8_t> const *scope,
+                    PodVector<uint8_t> const *scope,
                     CandidateMemo *memo,
                     RunStats *stats) {
   Improved out;
@@ -2050,7 +2050,7 @@ Improved run_search(Chart const &c,
     return out;
   }
   CostContext const scoring{ cost_context(c, g) };
-  Vector<uint8_t> party;  // set where the incumbent's route bends or is charged
+  PodVector<uint8_t> party;  // set where the incumbent's route bends or is charged
   out.cost = cost_of(
       cost_terms(scoring, c, g, out.best.sized, out.best.routes, s, objective, &party),
       objective);
@@ -2075,7 +2075,7 @@ Improved run_search(Chart const &c,
     access.laid = &laid_blocks;
     access.drawing = &drawn_blocks;
   }
-  Vector<uint32_t> held_faces;
+  PodVector<uint32_t> held_faces;
   auto const remember_incumbent = [&]() {
     access.drawn = INVALID;
     if ((access.table == nullptr) || !incumbent.ok) { return; }
@@ -2117,11 +2117,11 @@ Improved run_search(Chart const &c,
   uint32_t pin_scored{ 0 };
   uint32_t fold_scored{ 0 };
   uint32_t loop_scored{ 0 };
-  Vector<Move> round;
-  Vector<Scored> got;
-  Vector<MemoUse> uses;  // parallel to `round`: how each move's first scoring went
-  Vector<uint32_t> order;
-  Vector<uint32_t> again;  // a round's deferred moves
+  PodVector<Move> round;
+  PodVector<Scored> got;
+  PodVector<MemoUse> uses;  // parallel to `round`: how each move's first scoring went
+  PodVector<uint32_t> order;
+  PodVector<uint32_t> again;  // a round's deferred moves
   // A labelled round's least-bound candidates, routed unlabelled; the first `kept_n` are
   // in use.
   std::vector<KeptCandidate> kept;
@@ -2134,10 +2134,10 @@ Improved run_search(Chart const &c,
 #ifdef SCAV_TESTING
   bounded = bounded && test_label_bound;
 #endif
-  Vector<uint8_t> chained;
-  Vector<uint32_t> pin_rank;  // per state: the rank its last pin in `held` names
+  PodVector<uint8_t> chained;
+  PodVector<uint32_t> pin_rank;  // per state: the rank its last pin in `held` names
 #ifdef SCAV_TESTING
-  Vector<Move> culled;  // the round's unoffered moves, under `test_cull_verify`
+  PodVector<Move> culled;  // the round's unoffered moves, under `test_cull_verify`
 #endif
   // True when `m`, which changes nothing, goes unoffered and uncharged.
   auto const cull = [&](Move const &m) {
@@ -2195,7 +2195,7 @@ Improved run_search(Chart const &c,
 
     // End moves, skipping pinned ends: a box end to each face, a face with no router
     // effect counted unscored; a state-border port to each unlined side but its own.
-    Vector<uint8_t> const &faceable{ base.faceable };
+    PodVector<uint8_t> const &faceable{ base.faceable };
     SubmachineOrders const &laid{ incumbent.laid };
     for (uint32_t seg = 0;
          (seg < g.segments.size()) && ((face_scored < budget) || (side_scored < budget));
@@ -2265,7 +2265,7 @@ Improved run_search(Chart const &c,
       }
     }
     // Fold moves under `refold`: a folded frame moves its cut before each other rank.
-    Vector<uint8_t> const &drawn_folded{ out.best.sized.folded };
+    PodVector<uint8_t> const &drawn_folded{ out.best.sized.folded };
     for (uint32_t m = 0; refold && (m < here.sub_ranks.size()); ++m) {
       if ((c.submachines[m].live == 0) || (here.sub_down[m] != 0) ||
           (m >= drawn_folded.size()) || (drawn_folded[m] == 0) || !in_scope(m)) {
@@ -2282,8 +2282,8 @@ Improved run_search(Chart const &c,
     }
     // Loop moves: each state with a loop room to each other placement on an anchored face;
     // on an uninflated incumbent, a placement that leaves the room where it is is culled.
-    Vector<uint8_t> const &drawn_place{ out.best.sized.loop_place };
-    Vector<scav_rect> const &drawn_loop{ out.best.sized.loop };
+    PodVector<uint8_t> const &drawn_place{ out.best.sized.loop_place };
+    PodVector<scav_rect> const &drawn_loop{ out.best.sized.loop };
     for (uint32_t st = 0; (st < drawn_loop.size()) && (loop_scored < budget); ++st) {
       if ((drawn_loop[st].w == 0) || (st >= drawn_place.size()) ||
           !in_scope(c.states[st].parent.v)) {
@@ -2335,17 +2335,17 @@ Improved run_search(Chart const &c,
   // The culled search's don't-look bits: per move key, 1 where its last score could not
   // beat the incumbent then.
   HashMap<uint64_t, uint8_t> dont_look;
-  Vector<uint8_t> dont_look_now;  // parallel to `round`
-  Vector<Move> skipped;           // the round's moves its bits left unscored
-  bool rescan{ false };           // the next pass scores `skipped`
+  PodVector<uint8_t> dont_look_now;  // parallel to `round`
+  PodVector<Move> skipped;           // the round's moves its bits left unscored
+  bool rescan{ false };              // the next pass scores `skipped`
   // What the last move taken changed: per frame, per transition, per state's extent.
-  Vector<uint8_t> frame_changed;
-  Vector<uint8_t> route_changed;
-  Vector<uint8_t> resized;
+  PodVector<uint8_t> frame_changed;
+  PodVector<uint8_t> route_changed;
+  PodVector<uint8_t> resized;
   // True when what `m` reads changed: its frame, a face or side move's route, and a loop
   // move's state extent.
   auto const touched = [&](Move const &m) {
-    auto const flagged = [](Vector<uint8_t> const &v, uint32_t i) {
+    auto const flagged = [](PodVector<uint8_t> const &v, uint32_t i) {
       return (i >= v.size()) || (v[i] != 0);
     };
     auto const leg_frame = [&](TransId t, uint32_t leg) {
@@ -2369,9 +2369,9 @@ Improved run_search(Chart const &c,
     return true;
   };
   uint32_t const jitter_seed{ static_cast<uint32_t>(objective.jitter_seed) };
-  Vector<int64_t> jit;  // parallel to `round` under a jitter seed, else empty
+  PodVector<int64_t> jit;  // parallel to `round` under a jitter seed, else empty
 #ifdef SCAV_TESTING
-  Vector<Move> whole;  // the last enumerated round, under `test_dont_look_verify`
+  PodVector<Move> whole;  // the last enumerated round, under `test_dont_look_verify`
   auto const verify_optimum = [&]() {
     if (!test_dont_look_verify) { return; }
     parallel_for(static_cast<uint32_t>(whole.size()), threads, [&](uint32_t i) {
@@ -2797,7 +2797,7 @@ bool test_row_alias{ true };   // rows whose canonical rows match search once
 std::atomic<uint32_t> test_search_memo_hits{ 0 };
 std::atomic<uint32_t> test_search_memo_mismatches{ 0 };
 // Per row of this thread's last searched layout: each schedule's cost, and the one kept.
-thread_local Vector<Cost> test_schedule_first, test_schedule_second, test_schedule_kept;
+thread_local PodVector<Cost> test_schedule_first, test_schedule_second, test_schedule_kept;
 
 bool same_result(Improved const &a, Improved const &b) {
   return (a.viable == b.viable) && same_cost(a.cost, b.cost) &&
@@ -2817,7 +2817,7 @@ Improved search_moves(Chart const &c,
                       uint32_t budget,
                       bool refold,
                       SearchPins const &seed,
-                      Vector<uint8_t> const *scope,
+                      PodVector<uint8_t> const *scope,
                       SearchMemo *memo,
                       CandidateMemo *candidates,
                       RunStats *stats) {
@@ -2837,9 +2837,9 @@ Improved search_moves(Chart const &c,
                       stats);
   };
   if ((memo == nullptr) || (trace_sink() != nullptr)) { return search(); }
-  Vector<uint32_t> key;
+  PodVector<uint32_t> key;
   search_key(objective, row, budget, refold, seed, scope, key);
-  Vector<int32_t> value;
+  PodVector<int32_t> value;
   bool hit{ false };
   {
     ScopedLock const held{ memo->lock };
@@ -2880,13 +2880,14 @@ Improved search_moves(Chart const &c,
     return out;
   }
   Improved out{ search() };
-  Vector<uint32_t> words{ out.viable ? 1U : 0U,
-                          static_cast<uint32_t>(out.cost.t0_violations),
-                          static_cast<uint32_t>(static_cast<uint64_t>(out.cost.t1_hints) >>
-                                                32U),
-                          static_cast<uint32_t>(static_cast<uint64_t>(out.cost.t1_hints)),
-                          static_cast<uint32_t>(static_cast<uint64_t>(out.cost.t2) >> 32U),
-                          static_cast<uint32_t>(static_cast<uint64_t>(out.cost.t2)) };
+  PodVector<uint32_t> words{
+    out.viable ? 1U : 0U,
+    static_cast<uint32_t>(out.cost.t0_violations),
+    static_cast<uint32_t>(static_cast<uint64_t>(out.cost.t1_hints) >> 32U),
+    static_cast<uint32_t>(static_cast<uint64_t>(out.cost.t1_hints)),
+    static_cast<uint32_t>(static_cast<uint64_t>(out.cost.t2) >> 32U),
+    static_cast<uint32_t>(static_cast<uint64_t>(out.cost.t2))
+  };
   put_pins(out.held, words);
   value.resize(words.size());
   for (size_t i = 0; i < words.size(); ++i) { value[i] = static_cast<int32_t>(words[i]); }
@@ -2915,8 +2916,8 @@ TraceEvent search_event(TraceKind kind, uint16_t pass, uint32_t row, Cost const 
 }
 
 // Flags each frame that encloses a frame `frames` flags and is not flagged itself.
-Vector<uint8_t> enclosing_frames(Chart const &c, Vector<uint8_t> const &frames) {
-  Vector<uint8_t> out(frames.size(), 0);
+PodVector<uint8_t> enclosing_frames(Chart const &c, PodVector<uint8_t> const &frames) {
+  PodVector<uint8_t> out(frames.size(), 0);
   for (uint32_t m = 0; m < frames.size(); ++m) {
     if (frames[m] == 0) { continue; }
     uint32_t at{ m };
@@ -2945,7 +2946,7 @@ constexpr uint32_t ROW_COMPACTION{ 2 };  // the row index bit that sets compacti
 
 // The table rows a search lays out: the first `portfolio_m`, less the compaction rows
 // under the culled search.
-void search_table(scav_profile const &p, Vector<uint32_t> &rows) {
+void search_table(scav_profile const &p, PodVector<uint32_t> &rows) {
   rows.clear();
   for (uint32_t i = 0; i < search_tuple_count(p); ++i) {
     if ((p.search_cull == 0) || ((i & ROW_COMPACTION) == 0)) { rows.push_back(i); }
@@ -2963,16 +2964,16 @@ Row search_row(scav_profile const &p, uint32_t index) {
   return out;
 }
 
-void kick_order(Vector<uint32_t> &rest,
-                Vector<Cost> const &cost,
-                Vector<int64_t> const &jit) {
+void kick_order(PodVector<uint32_t> &rest,
+                PodVector<Cost> const &cost,
+                PodVector<int64_t> const &jit) {
   scav_insertion_sort(rest.data(), rest.data() + rest.size(), [&](uint32_t a, uint32_t b) {
     return cost_less(jittered(cost[a], jit[a]), jittered(cost[b], jit[b]));
   });
 }
 
 // The viable row of least cost, lowest index among equals; 0 when none is viable.
-uint32_t search_argmin(Vector<Cost> const &cost, Vector<uint8_t> const &viable) {
+uint32_t search_argmin(PodVector<Cost> const &cost, PodVector<uint8_t> const &viable) {
   uint32_t best{ 0 };
   bool found{ false };
   for (uint32_t i = 0; i < cost.size(); ++i) {
@@ -2990,8 +2991,8 @@ void search_key(scav_profile const &objective,
                 uint32_t budget,
                 bool refold,
                 SearchPins const &seed,
-                Vector<uint8_t> const *scope,
-                Vector<uint32_t> &key) {
+                PodVector<uint8_t> const *scope,
+                PodVector<uint32_t> &key) {
   static_assert((sizeof(scav_profile) % sizeof(uint32_t)) == 0);
   std::array<uint32_t, sizeof(scav_profile) / sizeof(uint32_t)> words{};
   key.clear();
@@ -3020,10 +3021,10 @@ void search_changes(Chart const &c,
                     Routes const &was_routes,
                     SizedLayout const &now,
                     Routes const &now_routes,
-                    Vector<uint8_t> &frame,
-                    Vector<uint8_t> &route,
-                    Vector<uint8_t> &resized) {
-  auto const at = [](Vector<scav_rect> const &v, uint32_t i) {
+                    PodVector<uint8_t> &frame,
+                    PodVector<uint8_t> &route,
+                    PodVector<uint8_t> &resized) {
+  auto const at = [](PodVector<scav_rect> const &v, uint32_t i) {
     return (i < v.size()) ? v[i] : scav_rect{};
   };
   frame.assign(c.submachines.size(), uint8_t{ 0 });
@@ -3112,7 +3113,7 @@ bool layout_run(Chart &c,
   // Level 2: lays out each admitted row; a pinned `row` is a table of one. `table` holds
   // each searched row's index in the table.
   bool const pinned{ row != INVALID };
-  Vector<uint32_t> table;
+  PodVector<uint32_t> table;
   if (pinned) {
     table.push_back(row);
   } else {
@@ -3127,8 +3128,8 @@ bool layout_run(Chart &c,
     reads = { .trybox = true, .pack = true, .dar = true, .fold = true };
   }
 #endif
-  Vector<Row> canonical(rows);
-  Vector<uint32_t> alias(rows);
+  PodVector<Row> canonical(rows);
+  PodVector<uint32_t> alias(rows);
   SearchStats aliased;
   for (uint32_t i = 0; i < rows; ++i) {
     canonical[i] = size_row_canonical(search_row(p, table[i]), reads, p);
@@ -3142,8 +3143,8 @@ bool layout_run(Chart &c,
   auto const row_of = [&](uint32_t i) { return canonical[i]; };
   bool const culled_search{ p.search_cull != 0 };
   std::vector<Candidate> candidates(rows);
-  Vector<Cost> cost(rows);
-  Vector<uint8_t> viable(rows, 0);
+  PodVector<Cost> cost(rows);
+  PodVector<uint8_t> viable(rows, 0);
   // Rows run in parallel on one thread each; a lone row takes the caller's threads.
   std::vector<std::vector<Diagnostic>> spilled(rows);
   CostContext const scoring{ cost_context(c, g) };
@@ -3205,9 +3206,9 @@ bool layout_run(Chart &c,
 #endif
   // Searches each viable row `which` flags from its `held` pins, once per alias and pins;
   // a viable result replaces the row's candidate, cost and pins.
-  auto const search_rows = [&](Vector<uint8_t> const &which, bool refold) {
-    Vector<uint32_t> active;
-    Vector<uint32_t> twin(rows, INVALID);  // per row, the `active` slot it repeats
+  auto const search_rows = [&](PodVector<uint8_t> const &which, bool refold) {
+    PodVector<uint32_t> active;
+    PodVector<uint32_t> twin(rows, INVALID);  // per row, the `active` slot it repeats
     for (uint32_t i = 0; i < rows; ++i) {
       if ((viable[i] == 0) || (which[i] == 0)) { continue; }
       for (uint32_t k = 0; (k < active.size()) && (twin[i] == INVALID); ++k) {
@@ -3252,15 +3253,16 @@ bool layout_run(Chart &c,
   };
 
   // Level 1: searches every viable row to convergence; rows rank by what each reaches.
-  if (budget != 0) { search_rows(Vector<uint8_t>(rows, 1), false); }
-  Vector<uint8_t> const &eligible{ viable };
+  if (budget != 0) { search_rows(PodVector<uint8_t>(rows, 1), false); }
+  PodVector<uint8_t> const &eligible{ viable };
 
   // Iterated local search from row `best`: each kick restarts a search, kept where it
   // converges below the incumbent; winning kicks in distinct frames combine.
   auto const kick = [&](uint32_t best) {
     Row const best_row{ row_of(best) };
     // Searches row `best` from `start`, its moves confined to `within`'s frames if given.
-    auto const search_from = [&](SearchPins const &start, Vector<uint8_t> const *within) {
+    auto const search_from = [&](SearchPins const &start,
+                                 PodVector<uint8_t> const *within) {
       return search_moves(c,
                           g,
                           s,
@@ -3280,8 +3282,8 @@ bool layout_run(Chart &c,
     // in the `redo` frames again, until a search improves nothing. `framed` gets the first
     // search's cost.
     auto const search_kicked =
-        [&](SearchPins const &start, Vector<uint8_t> const &redo, Cost &framed) {
-          Vector<uint8_t> const around{ enclosing_frames(c, redo) };
+        [&](SearchPins const &start, PodVector<uint8_t> const &redo, Cost &framed) {
+          PodVector<uint8_t> const around{ enclosing_frames(c, redo) };
           Improved out{ search_from(start, &redo) };
           framed = out.cost;
           bool outward{ true };
@@ -3298,12 +3300,12 @@ bool layout_run(Chart &c,
       Span const segs{ g.trans_segments[t.v] };
       return (leg < segs.len) ? g.segments[segs.off + leg].frame.v : INVALID;
     };
-    auto const outside = [&](uint32_t frame, Vector<uint8_t> const &redo) {
+    auto const outside = [&](uint32_t frame, PodVector<uint8_t> const &redo) {
       return (frame >= redo.size()) || (redo[frame] == 0);
     };
     // `from` less every rank, cut, end, fold and loop pin in a `redo` frame; orientations
     // and reversals stay.
-    auto const warm = [&](SearchPins const &from, Vector<uint8_t> const &redo) {
+    auto const warm = [&](SearchPins const &from, PodVector<uint8_t> const &redo) {
       SearchPins out;
       out.reverses = from.reverses;
       out.orients = from.orients;
@@ -3343,13 +3345,13 @@ bool layout_run(Chart &c,
     uint32_t kick_scored{ 0 };  // kicks offered, capped at `budget`
     for (;;) {
       SubmachineOrders const here{ order_submachines(c, g, s, p, o.threads, held[best]) };
-      Vector<uint8_t> turned(g.segments.size(), 0);
+      PodVector<uint8_t> turned(g.segments.size(), 0);
       for (OrderEdge const &e : here.edges) {
         if ((e.reversed != 0) && (e.segment < turned.size())) { turned[e.segment] = 1; }
       }
       // Reversal kicks: each cyclic segment phase 1 left unreversed.
-      Vector<Move> kicks;
-      Vector<uint32_t> kick_frame;
+      PodVector<Move> kicks;
+      PodVector<uint32_t> kick_frame;
       for (uint32_t seg = 0; seg < g.segments.size(); ++seg) {
         if ((here.seg_cyclic[seg] == 0) || (turned[seg] != 0)) { continue; }
         TransId const t{ g.segments[seg].trans };
@@ -3376,7 +3378,7 @@ bool layout_run(Chart &c,
         kick_frame.push_back(m);
       }
       // Fold kicks: each across-page frame without a fold pin flips its drawn fold.
-      Vector<uint8_t> const &folded{ candidates[best].sized.folded };
+      PodVector<uint8_t> const &folded{ candidates[best].sized.folded };
       for (uint32_t m = 0; m < here.sub_ranks.size(); ++m) {
         bool const fold_pinned{ std::ranges::any_of(
             held[best].folds,
@@ -3395,9 +3397,9 @@ bool layout_run(Chart &c,
       if (kicks.empty()) { break; }
 
       std::vector<Improved> tried(kicks.size());
-      Vector<Cost> framed(kicks.size());
+      PodVector<Cost> framed(kicks.size());
       parallel_for(static_cast<uint32_t>(kicks.size()), o.threads, [&](uint32_t j) {
-        Vector<uint8_t> redo(c.submachines.size(), 0);
+        PodVector<uint8_t> redo(c.submachines.size(), 0);
         if (kick_frame[j] < redo.size()) { redo[kick_frame[j]] = 1; }
         SearchPins start{ warm(held[best], redo) };
         add_move(start, kicks[j]);
@@ -3425,7 +3427,7 @@ bool layout_run(Chart &c,
 
       // Each frame's best improving kick, and the best overall, by cost plus jitter; ties
       // go to enumeration order.
-      Vector<int64_t> jit(kicks.size(), 0);
+      PodVector<int64_t> jit(kicks.size(), 0);
       for (uint32_t j = 0; (p.jitter_seed != 0) && (j < kicks.size()); ++j) {
         jit[j] = jitter(static_cast<uint32_t>(p.jitter_seed),
                         move_key(kicks[j]),
@@ -3440,7 +3442,7 @@ bool layout_run(Chart &c,
                             pick,
                             cost[best]);
       };
-      Vector<uint32_t> in_frame(c.submachines.size(), INVALID);
+      PodVector<uint32_t> in_frame(c.submachines.size(), INVALID);
       uint32_t single{ INVALID };
       for (uint32_t j = 0; j < tried.size(); ++j) {
         if (!tried[j].viable || !cost_less(tried[j].cost, cost[best])) { continue; }
@@ -3450,12 +3452,12 @@ bool layout_run(Chart &c,
       }
       if (single == INVALID) { break; }
 
-      Vector<uint32_t> winners;
+      PodVector<uint32_t> winners;
       for (uint32_t const j : in_frame) {
         if (j != INVALID) { winners.push_back(j); }
       }
       if (winners.size() > 1) {
-        Vector<uint8_t> redo(c.submachines.size(), 0);
+        PodVector<uint8_t> redo(c.submachines.size(), 0);
         for (uint32_t const j : winners) {
           if (kick_frame[j] < redo.size()) { redo[kick_frame[j]] = 1; }
         }
@@ -3473,15 +3475,15 @@ bool layout_run(Chart &c,
       kicked = true;
       // The other frames' best kicks, cheapest first, each searched on top of the
       // round's taken pins and kept where it still improves.
-      Vector<uint32_t> rest;
+      PodVector<uint32_t> rest;
       for (uint32_t const j : winners) {
         if (j != single) { rest.push_back(j); }
       }
-      Vector<Cost> tried_cost(tried.size());
+      PodVector<Cost> tried_cost(tried.size());
       for (uint32_t j = 0; j < tried.size(); ++j) { tried_cost[j] = tried[j].cost; }
       kick_order(rest, tried_cost, jit);
       for (uint32_t const j : rest) {
-        Vector<uint8_t> redo(c.submachines.size(), 0);
+        PodVector<uint8_t> redo(c.submachines.size(), 0);
         if (kick_frame[j] < redo.size()) { redo[kick_frame[j]] = 1; }
         SearchPins start{ warm(held[best], redo) };
         add_move(start, kicks[j]);
@@ -3508,7 +3510,7 @@ bool layout_run(Chart &c,
   };
   if (budget != 0) {
     // Repeats are found before any kick changes a row's drawing.
-    Vector<uint8_t> repeat(rows, 0);
+    PodVector<uint8_t> repeat(rows, 0);
     for (uint32_t i = 0; i < rows; ++i) {
       for (uint32_t j = 0; (j < i) && (viable[i] != 0) && (repeat[i] == 0); ++j) {
         if ((viable[j] != 0) && (repeat[j] == 0) && same_drawing(i, j)) {
@@ -3519,7 +3521,7 @@ bool layout_run(Chart &c,
         }
       }
     }
-    Vector<uint32_t> kicking;
+    PodVector<uint32_t> kicking;
     for (uint32_t i = 0; i < rows; ++i) {
       if ((viable[i] != 0) && (repeat[i] == 0)) { kicking.push_back(i); }
     }
@@ -3538,9 +3540,9 @@ bool layout_run(Chart &c,
     // A second search from each row's converged pins adds the fold moves; the cheaper is
     // kept, ties to the first. The culled search refolds only the rows that repeat none.
     std::vector<Candidate> first{ candidates };
-    Vector<Cost> const first_cost{ cost };
+    PodVector<Cost> const first_cost{ cost };
     std::vector<SearchPins> first_held{ held };
-    Vector<uint8_t> refolding(rows, 1);
+    PodVector<uint8_t> refolding(rows, 1);
     for (uint32_t i = 0; culled_search && (i < rows); ++i) {
       refolding[i] = (repeat[i] != 0) ? 0U : 1U;
     }
@@ -3579,7 +3581,7 @@ bool layout_run(Chart &c,
     // Each port end the facing pass would turn on a re-lay from `taken` keeps its side.
     SubmachineOrders const drawn{ order_submachines(c, g, s, p, o.threads, *taken) };
     Facing again;
-    Vector<FacingTaken> seats;
+    PodVector<FacingTaken> seats;
     facing_flips(again, seats, c, g, drawn, candidates[best].sized, s);
     for (EndPin const &e : again.sides) {
       if (e.trans.v >= g.trans_segments.size()) { continue; }
@@ -3620,10 +3622,10 @@ namespace {
 
 // A copy of the named column's rows; empty when the column is absent.
 template <typename T>
-Vector<T> rows_of(Chart const &c, char const *name) {
+PodVector<T> rows_of(Chart const &c, char const *name) {
   ColumnId const id{ column_find(c, name) };
   if (id.v == INVALID) { return {}; }
-  Vector<T> rows(column_count(c, id));
+  PodVector<T> rows(column_count(c, id));
   if (!rows.empty()) {
     std::memcpy(rows.data(), column_data(c, id), rows.size() * sizeof(T));
   }
@@ -3671,7 +3673,7 @@ uint32_t layout_inputs_digest(Chart const &c) {
 }
 
 uint32_t layout_coordinate_hash(Chart const &c) {
-  Vector<scav_byte> b;
+  PodVector<scav_byte> b;
   for (char const *name : { "scav.geom.state",
                             "scav.geom.state_before",
                             "scav.geom.state_after",
@@ -3782,8 +3784,8 @@ bool layout_trace(Chart &c,
 }
 
 uint32_t layout_structural_hash(Chart const &c) {
-  Vector<scav_byte> b;
-  Vector<scav_point> const points{ rows_of<scav_point>(c, "scav.geom.point") };
+  PodVector<scav_byte> b;
+  PodVector<scav_point> const points{ rows_of<scav_point>(c, "scav.geom.point") };
   for (scav_span const route : rows_of<scav_span>(c, "scav.geom.route")) {
     append_u32(b, route.len);
     // Direction tokens per step; invariant under translation.
@@ -3940,9 +3942,9 @@ void layout_test_no_search(bool on) { test_no_search = on; }
 void layout_test_row_alias(bool on) { test_row_alias = on; }
 uint32_t layout_test_search_memo_hits() { return test_search_memo_hits; }
 uint32_t layout_test_search_memo_mismatches() { return test_search_memo_mismatches; }
-Vector<Cost> const &layout_test_schedule_first() { return test_schedule_first; }
-Vector<Cost> const &layout_test_schedule_second() { return test_schedule_second; }
-Vector<Cost> const &layout_test_schedule_kept() { return test_schedule_kept; }
+PodVector<Cost> const &layout_test_schedule_first() { return test_schedule_first; }
+PodVector<Cost> const &layout_test_schedule_second() { return test_schedule_second; }
+PodVector<Cost> const &layout_test_schedule_kept() { return test_schedule_kept; }
 void layout_test_dont_look_verify(bool on) {
   ScopedLock const held{ test_dont_look_lock };
   test_dont_look_verify = on;

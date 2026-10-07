@@ -110,7 +110,7 @@ if(SCAV_BUILD_TESTS)
     ../scav_shard_tests.cpp
     ../scav_thread_tests.cpp
     ../scav_vec_tests.cpp
-    ../scav_vector_tests.cpp
+    ../scav_pod_vector_tests.cpp
     # The last shard excludes the others' filters; every case runs once.
     SHARDS
       gauntlet "-tc=gauntlet:*"

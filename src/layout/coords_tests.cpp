@@ -4,7 +4,7 @@
 #include "layout/coords.h"
 
 #include "doctest.h"
-#include "scav_vector.h"
+#include "scav_pod_vector.h"
 
 #include <cstdint>
 #include <utility>
@@ -13,12 +13,12 @@
 namespace scav {
 
 // Test-only declarations of the SCAV_INTERNAL functions in `coords.cpp`.
-Vector<uint8_t> coords_mark_type1(CoordGraph const &g);
-Vector<int64_t> coords_one_pass(CoordGraph const &g,
-                                Vector<uint8_t> const &mark,
-                                bool upward,
-                                bool rightward);
-Vector<int32_t> coords_place(CoordGraph const &g);
+PodVector<uint8_t> coords_mark_type1(CoordGraph const &g);
+PodVector<int64_t> coords_one_pass(CoordGraph const &g,
+                                   PodVector<uint8_t> const &mark,
+                                   bool upward,
+                                   bool rightward);
+PodVector<int32_t> coords_place(CoordGraph const &g);
 
 }  // namespace scav
 
@@ -26,8 +26,8 @@ namespace {
 
 using namespace scav;
 
-Vector<int32_t> cross_coordinates(CoordGraph const &g) {
-  Vector<int32_t> out;
+PodVector<int32_t> cross_coordinates(CoordGraph const &g) {
+  PodVector<int32_t> out;
   scav::cross_coordinates(g, out);
   return out;
 }
@@ -37,9 +37,9 @@ constexpr int32_t SEP{ 20 };
 
 // Every node `EXT` wide, separated by `SEP`.
 CoordGraph uniform(uint32_t nodes,
-                   std::vector<Vector<uint32_t>> layers,
-                   Vector<CoordGraph::Edge> edges) {
-  return { .extent = Vector<int32_t>(nodes, EXT),
+                   std::vector<PodVector<uint32_t>> layers,
+                   PodVector<CoordGraph::Edge> edges) {
+  return { .extent = PodVector<int32_t>(nodes, EXT),
            .layers = std::move(layers),
            .edges = std::move(edges),
            .sep = SEP };
@@ -57,11 +57,11 @@ CoordGraph crossing_graph() {
                    { .from = 4, .to = 5, .inner = 0 } });
 }
 
-int32_t leading(CoordGraph const &g, Vector<int32_t> const &c, uint32_t node) {
+int32_t leading(CoordGraph const &g, PodVector<int32_t> const &c, uint32_t node) {
   return c[node] - (g.extent[node] / 2);
 }
 
-int32_t trailing(CoordGraph const &g, Vector<int32_t> const &c, uint32_t node) {
+int32_t trailing(CoordGraph const &g, PodVector<int32_t> const &c, uint32_t node) {
   return c[node] + (g.extent[node] / 2);
 }
 
@@ -70,7 +70,7 @@ int32_t trailing(CoordGraph const &g, Vector<int32_t> const &c, uint32_t node) {
 TEST_CASE("coords: an empty graph and an unplaced node") {
   CHECK(cross_coordinates({}).empty());
   CoordGraph g{ uniform(2, { { 0 } }, {}) };
-  Vector<int32_t> const c{ cross_coordinates(g) };
+  PodVector<int32_t> const c{ cross_coordinates(g) };
   REQUIRE(c.size() == 2);
   CHECK(leading(g, c, 0) == 0);
   CHECK(c[1] == 0);  // in no layer, left at zero
@@ -78,7 +78,7 @@ TEST_CASE("coords: an empty graph and an unplaced node") {
 
 TEST_CASE("coords: one node sits at the origin") {
   CoordGraph const g{ uniform(1, { { 0 } }, {}) };
-  Vector<int32_t> const c{ cross_coordinates(g) };
+  PodVector<int32_t> const c{ cross_coordinates(g) };
   REQUIRE(c.size() == 1);
   CHECK(c[0] == EXT / 2);
 }
@@ -89,8 +89,8 @@ TEST_CASE("coords: one pass over two nodes and a shared successor, by hand") {
   CoordGraph const g{
     uniform(3, { { 0, 1 }, { 2 } }, { { .from = 0, .to = 2, .inner = 0 } })
   };
-  Vector<uint8_t> const mark(g.edges.size(), 0);
-  Vector<int64_t> const x{ coords_one_pass(g, mark, false, false) };
+  PodVector<uint8_t> const mark(g.edges.size(), 0);
+  PodVector<int64_t> const x{ coords_one_pass(g, mark, false, false) };
   REQUIRE(x.size() == 3);
   CHECK(x[0] == 0);
   CHECK(x[1] == 120);
@@ -99,7 +99,7 @@ TEST_CASE("coords: one pass over two nodes and a shared successor, by hand") {
 
 TEST_CASE("coords: type-1 marks the real segment, not the inner one") {
   CoordGraph const g{ crossing_graph() };
-  Vector<uint8_t> const mark{ coords_mark_type1(g) };
+  PodVector<uint8_t> const mark{ coords_mark_type1(g) };
   REQUIRE(mark.size() == 5);
   CHECK(mark[2] == 0);  // 1 -> 4, the inner segment
   CHECK(mark[3] == 1);  // 2 -> 3, the real segment crossing it
@@ -110,13 +110,15 @@ TEST_CASE("coords: type-1 marks the real segment, not the inner one") {
 
 TEST_CASE("coords: marking is what keeps the inner segment straight") {
   CoordGraph const g{ crossing_graph() };
-  Vector<int64_t> const marked{ coords_one_pass(g, coords_mark_type1(g), false, false) };
+  PodVector<int64_t> const marked{
+    coords_one_pass(g, coords_mark_type1(g), false, false)
+  };
   CHECK(marked[1] == marked[4]);
 
   // Unmarked, the crossing segment takes the alignment and the chain bends by two
   // separations.
-  Vector<uint8_t> const none(g.edges.size(), 0);
-  Vector<int64_t> const unmarked{ coords_one_pass(g, none, false, false) };
+  PodVector<uint8_t> const none(g.edges.size(), 0);
+  PodVector<int64_t> const unmarked{ coords_one_pass(g, none, false, false) };
   CHECK(unmarked[1] != unmarked[4]);
 }
 
@@ -125,7 +127,7 @@ TEST_CASE("coords: a chain through three layers comes out straight") {
       3,
       { { 0 }, { 1 }, { 2 } },
       { { .from = 0, .to = 1, .inner = 0 }, { .from = 1, .to = 2, .inner = 0 } }) };
-  Vector<int32_t> const c{ cross_coordinates(g) };
+  PodVector<int32_t> const c{ cross_coordinates(g) };
   CHECK(c[0] == c[1]);
   CHECK(c[1] == c[2]);
 }
@@ -137,14 +139,14 @@ TEST_CASE("coords: an edge met off its ends' centres aligns where it meets them"
       3,
       { { 0 }, { 1, 2 } },
       { { .from = 0, .to = 1, .inner = 0, .from_at = 10, .to_at = -230 } }) };
-  Vector<uint8_t> const mark(g.edges.size(), 0);
+  PodVector<uint8_t> const mark(g.edges.size(), 0);
   for (uint32_t k = 0; k < 4; ++k) {
     CAPTURE(k);
-    Vector<int64_t> const x{ coords_one_pass(g, mark, (k & 2U) != 0, (k & 1U) != 0) };
+    PodVector<int64_t> const x{ coords_one_pass(g, mark, (k & 2U) != 0, (k & 1U) != 0) };
     CHECK(x[0] + 10 == x[1] - 230);
     CHECK(x[2] - x[1] >= EXT + SEP);
   }
-  Vector<int32_t> const c{ cross_coordinates(g) };
+  PodVector<int32_t> const c{ cross_coordinates(g) };
   CHECK(c[0] + 10 == c[1] - 230);
   CHECK(leading(g, c, 2) - trailing(g, c, 1) >= SEP);
 }
@@ -157,8 +159,8 @@ TEST_CASE("coords: a weak edge anchors its lower end only where nothing else can
                               { { .from = 0, .to = 2, .inner = 0, .weak = 1 },
                                 { .from = 1, .to = 2, .inner = 0 },
                                 { .from = 1, .to = 3, .inner = 0, .weak = 1 } }) };
-  Vector<uint8_t> const mark(g.edges.size(), 0);
-  Vector<int64_t> const x{ coords_one_pass(g, mark, false, false) };
+  PodVector<uint8_t> const mark(g.edges.size(), 0);
+  PodVector<int64_t> const x{ coords_one_pass(g, mark, false, false) };
   CHECK(x[2] == x[1]);
   CHECK(x[2] != x[0]);
 
@@ -167,7 +169,7 @@ TEST_CASE("coords: a weak edge anchors its lower end only where nothing else can
                                     { { .from = 0, .to = 2, .inner = 0 },
                                       { .from = 0, .to = 3, .inner = 0 },
                                       { .from = 1, .to = 3, .inner = 0, .weak = 1 } }) };
-  Vector<int64_t> const y{ coords_one_pass(blocked, mark, false, false) };
+  PodVector<int64_t> const y{ coords_one_pass(blocked, mark, false, false) };
   CHECK(y[2] == y[0]);
   CHECK(y[3] == y[1]);
 }
@@ -182,14 +184,14 @@ TEST_CASE("coords: adjacent nodes keep their separation, mixed extents") {
               { .from = 4, .to = 5, .inner = 0 }, { .from = 4, .to = 6, .inner = 0 } };
   g.sep = 13;
 
-  Vector<int32_t> const c{ cross_coordinates(g) };
-  for (Vector<uint32_t> const &lay : g.layers) {
+  PodVector<int32_t> const c{ cross_coordinates(g) };
+  for (PodVector<uint32_t> const &lay : g.layers) {
     for (uint32_t k = 1; k < lay.size(); ++k) {
       CHECK((leading(g, c, lay[k]) - trailing(g, c, lay[k - 1])) >= g.sep);
     }
   }
   int32_t least{ INT32_MAX };
-  for (Vector<uint32_t> const &lay : g.layers) {
+  for (PodVector<uint32_t> const &lay : g.layers) {
     for (uint32_t const node : lay) {
       least = (leading(g, c, node) < least) ? leading(g, c, node) : least;
     }
@@ -207,8 +209,8 @@ TEST_CASE("coords: separation survives a graph with a long chain and a wide node
               { .from = 4, .to = 6, .inner = 0 }, { .from = 5, .to = 6, .inner = 0 } };
   g.sep = 10;
 
-  Vector<int32_t> const c{ cross_coordinates(g) };
-  for (Vector<uint32_t> const &lay : g.layers) {
+  PodVector<int32_t> const c{ cross_coordinates(g) };
+  for (PodVector<uint32_t> const &lay : g.layers) {
     for (uint32_t k = 1; k < lay.size(); ++k) {
       CHECK((leading(g, c, lay[k]) - trailing(g, c, lay[k - 1])) >= g.sep);
     }
@@ -222,10 +224,10 @@ TEST_CASE("coords: all four passes agree on separation on their own") {
                           { .from = 1, .to = 2, .inner = 0 },
                           { .from = 2, .to = 5, .inner = 0 },
                           { .from = 3, .to = 4, .inner = 0 } }) };
-  Vector<uint8_t> const mark{ coords_mark_type1(g) };
+  PodVector<uint8_t> const mark{ coords_mark_type1(g) };
   for (uint32_t k = 0; k < 4; ++k) {
-    Vector<int64_t> const x{ coords_one_pass(g, mark, (k & 2U) != 0, (k & 1U) != 0) };
-    for (Vector<uint32_t> const &lay : g.layers) {
+    PodVector<int64_t> const x{ coords_one_pass(g, mark, (k & 2U) != 0, (k & 1U) != 0) };
+    for (PodVector<uint32_t> const &lay : g.layers) {
       for (uint32_t i = 1; i < lay.size(); ++i) {
         int64_t const gap{ (x[lay[i]] - (g.extent[lay[i]] / 2)) -
                            (x[lay[i - 1]] + (g.extent[lay[i - 1]] / 2)) };
@@ -255,14 +257,14 @@ CoordGraph random_graph(Lcg &r) {
   g.sep = 10 + static_cast<int32_t>(r.next(30));
   uint32_t const layers{ 2 + r.next(4) };
   for (uint32_t l = 0; l < layers; ++l) {
-    Vector<uint32_t> lay;
+    PodVector<uint32_t> lay;
     uint32_t const width{ 1 + r.next(4) };
     for (uint32_t k = 0; k < width; ++k) {
       lay.push_back(static_cast<uint32_t>(g.extent.size()));
       g.extent.push_back(20 + static_cast<int32_t>(r.next(180)));
     }
     if (l > 0) {
-      Vector<uint32_t> const &up{ g.layers.back() };
+      PodVector<uint32_t> const &up{ g.layers.back() };
       for (uint32_t const node : lay) {
         uint32_t const fan{ 1 + r.next(2) };
         for (uint32_t f = 0; f < fan; ++f) {
@@ -288,7 +290,7 @@ CoordGraph mutated(CoordGraph g, uint32_t kind, Lcg &r) {
     case 0: g.sep += 7; break;
     case 1: g.extent[r.next(static_cast<uint32_t>(g.extent.size()))] += 40; break;
     case 2: {
-      Vector<uint32_t> &lay{ g.layers[r.next(static_cast<uint32_t>(g.layers.size()))] };
+      PodVector<uint32_t> &lay{ g.layers[r.next(static_cast<uint32_t>(g.layers.size()))] };
       if (lay.size() > 1) { std::swap(lay[0], lay[lay.size() - 1]); }
       break;
     }
@@ -308,17 +310,17 @@ TEST_CASE("coords: a remembered placement is the placement of that graph") {
   // placed both through the memo and afresh.
   Lcg r{ 12345 };
   constexpr uint32_t KINDS{ 8 };
-  Vector<uint32_t> moved(KINDS, 0);
+  PodVector<uint32_t> moved(KINDS, 0);
   bool agree{ true };
   for (uint32_t trial = 0; trial < 400; ++trial) {
     CoordGraph const g{ random_graph(r) };
     if (g.edges.empty()) { continue; }
-    Vector<int32_t> const first{ cross_coordinates(g) };
+    PodVector<int32_t> const first{ cross_coordinates(g) };
     agree = agree && (first == coords_place(g));
     for (uint32_t kind = 0; kind < KINDS; ++kind) {
       CoordGraph const h{ mutated(g, kind, r) };
-      Vector<int32_t> const got{ cross_coordinates(h) };
-      Vector<int32_t> const want{ coords_place(h) };
+      PodVector<int32_t> const got{ cross_coordinates(h) };
+      PodVector<int32_t> const want{ coords_place(h) };
       agree = agree && (got == want);
       if ((h.extent.size() == g.extent.size()) && (want != first)) { ++moved[kind]; }
     }

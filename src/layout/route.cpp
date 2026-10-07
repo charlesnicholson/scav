@@ -17,11 +17,11 @@
 #include "scav/scav_layout.h"
 #include "scav_cold.h"
 #include "scav_int.h"
+#include "scav_pod_vector.h"
 #include "scav_shard.h"
 #include "scav_stable_sort.h"
 #include "scav_thread.h"
 #include "scav_vec.h"
-#include "scav_vector.h"
 
 #include <array>
 #include <bit>
@@ -105,7 +105,7 @@ struct Gap {
 };
 
 // Appends the gaps between each live state's live regions.
-void region_gaps(Chart const &c, SizedLayout const &z, Vector<Gap> &out) {
+void region_gaps(Chart const &c, SizedLayout const &z, PodVector<Gap> &out) {
   out.clear();
   for (uint32_t st = 0; st < c.states.size(); ++st) {
     Span const subs{ c.states[st].submachines };
@@ -157,7 +157,7 @@ int32_t gap_face(Gap const &gap, uint32_t m) {
 
 // The gap beside region `frame` that `end` lies in, off `frame`'s face; INVALID where none
 // is.
-uint32_t gap_of(Vector<Gap> const &gaps, uint32_t frame, scav_point end) {
+uint32_t gap_of(PodVector<Gap> const &gaps, uint32_t frame, scav_point end) {
   for (uint32_t i = 0; i < gaps.size(); ++i) {
     Gap const &gap{ gaps[i] };
     if (((gap.low == frame) || (gap.high == frame)) && (end.x >= gap.rect.x) &&
@@ -175,7 +175,7 @@ uint32_t gap_of(Vector<Gap> const &gaps, uint32_t frame, scav_point end) {
 // the face where a state of `frame` comes within `bumper` of that.
 bool gap_stub(Chart const &c,
               SizedLayout const &z,
-              Vector<Gap> const &gaps,
+              PodVector<Gap> const &gaps,
               int32_t band,
               int32_t bumper,
               uint32_t frame,
@@ -202,7 +202,7 @@ bool gap_stub(Chart const &c,
 
 // The gap a route from region `from` to region `to` crosses: the one between them, else
 // the first beside `from` on the side facing `to`; INVALID where none is.
-uint32_t gap_toward(Vector<Gap> const &gaps,
+uint32_t gap_toward(PodVector<Gap> const &gaps,
                     SizedLayout const &z,
                     uint32_t from,
                     uint32_t to) {
@@ -256,8 +256,8 @@ SCAV_COLD int32_t on_divider(Chart const &c,
                              uint32_t wanted,
                              std::array<DividerSide, 2> const &sides,
                              DividerRoom const &room,
-                             Vector<OnDivider> &taken,
-                             Vector<std::array<int32_t, 2>> &blocks) {
+                             PodVector<OnDivider> &taken,
+                             PodVector<std::array<int32_t, 2>> &blocks) {
   int32_t const lo{ gap.vertical ? gap.rect.y : gap.rect.x };
   int32_t const len{ gap.vertical ? gap.rect.h : gap.rect.w };
   int32_t const inset{ imin(room.clear, len / 2) };
@@ -350,13 +350,13 @@ void slide_slots(Chart const &c,
                  SplitGraph const &g,
                  SizedLayout const &z,
                  scav_profile const &p,
-                 std::vector<Vector<uint32_t>> const &seg_bends,
-                 Vector<Span> const &trans_nets,
-                 Vector<scav_span> const &trans_slots,
-                 Vector<uint32_t> const &slot_port,
+                 std::vector<PodVector<uint32_t>> const &seg_bends,
+                 PodVector<Span> const &trans_nets,
+                 PodVector<scav_span> const &trans_slots,
+                 PodVector<uint32_t> const &slot_port,
                  std::vector<OccupiedSpan> const &occupied,  // keyed by state
-                 Vector<scav_port_slot> &slots,
-                 Vector<Planned> &planned) {
+                 PodVector<scav_port_slot> &slots,
+                 PodVector<Planned> &planned) {
   int32_t const clear{ route_clearance(p) };
   int32_t const bumper{ box_clearance(p) };
   auto const state_of = [&](uint32_t i) { return g.ports[slot_port[i]].state.v; };
@@ -448,7 +448,7 @@ void slide_slots(Chart const &c,
   auto const slide = [&](Span nets, uint32_t i, uint32_t k, bool next) {
     Planned const &pn{ planned[nets.off + k + (next ? 1U : 0U)] };
     uint32_t const inner{ planned[nets.off + k + (next ? 0U : 1U)].frame };
-    Vector<uint32_t> const &bends{ seg_bends[pn.seg] };
+    PodVector<uint32_t> const &bends{ seg_bends[pn.seg] };
     if (bends.empty() && ((next ? pn.dst_state : pn.src_state) != INVALID)) { return; }
     scav_point to{ next ? pn.dst : pn.src };
     if (!bends.empty()) { to = z.node[next ? bends.front() : bends.back()]; }
@@ -631,19 +631,19 @@ bool same_but_shifted(RouteFrameCache const &a,
 
 // One frame's routes, written by the shard that owns the frame, read back in frame order.
 struct FrameRoutes {
-  Vector<scav_point> points;
-  Vector<scav_span> net_points;  // -> points, parallel to the frame's nets
-  Vector<RouteMetrics> metrics;  // parallel to the frame's nets
+  PodVector<scav_point> points;
+  PodVector<scav_span> net_points;  // -> points, parallel to the frame's nets
+  PodVector<RouteMetrics> metrics;  // parallel to the frame's nets
 };
 
 // Adds the turns of `fr`'s nets, planned as `nets` into `planned`, to `turned`, and moves
 // `sum`, the larger of each transition's `least` and its turns, summed.
 void count_turns(FrameRoutes const &fr,
-                 Vector<uint32_t> const &nets,
-                 Vector<Planned> const &planned,
+                 PodVector<uint32_t> const &nets,
+                 PodVector<Planned> const &planned,
                  SplitGraph const &g,
-                 Vector<int32_t> const &least,
-                 Vector<int32_t> &turned,
+                 PodVector<int32_t> const &least,
+                 PodVector<int32_t> &turned,
                  int64_t &sum) {
   for (uint32_t j = 0; (j < nets.size()) && (j < fr.net_points.size()); ++j) {
     uint32_t const t{ g.segments[planned[nets[j]].seg].trans.v };
@@ -664,14 +664,14 @@ void count_turns(FrameRoutes const &fr,
 struct FrameScratch {
   RouteInput in;
   RouteOutput ro;
-  Vector<uint32_t> obstacle_index;  // -> in.obstacles; INVALID off this frame
-  Vector<uint32_t> obstacle_states;
-  Vector<scav_rect> own;
-  Vector<scav_path_clear> keep;  // parallel to `in.nets`: each net's end clears
-  Vector<uint8_t> in_chain;      // parallel to states; 1 on the frame owner's chain
-  Vector<uint32_t> chain;        // -> states, the owner and its enclosing states
-  Vector<scav_rect> walls;       // what the nudger keeps the frame's lanes out of
-  Vector<uint64_t> pick;         // one bit per state, the gather's candidates
+  PodVector<uint32_t> obstacle_index;  // -> in.obstacles; INVALID off this frame
+  PodVector<uint32_t> obstacle_states;
+  PodVector<scav_rect> own;
+  PodVector<scav_path_clear> keep;  // parallel to `in.nets`: each net's end clears
+  PodVector<uint8_t> in_chain;      // parallel to states; 1 on the frame owner's chain
+  PodVector<uint32_t> chain;        // -> states, the owner and its enclosing states
+  PodVector<scav_rect> walls;       // what the nudger keeps the frame's lanes out of
+  PodVector<uint64_t> pick;         // one bit per state, the gather's candidates
 };
 
 FrameScratch &frame_scratch() {
@@ -688,30 +688,30 @@ struct CallScratch {
   SCAV_NOINLINE CallScratch &operator=(CallScratch &&) noexcept;
   SCAV_NOINLINE ~CallScratch();
 
-  std::array<Vector<uint32_t>, 2> faces;
-  Vector<uint32_t> port_seg, seg_reversed;
-  std::vector<Vector<uint32_t>> seg_bends;
-  Vector<uint32_t> slot_port;  // parallel to `Routes::slots`: each slot's port
-  Vector<Planned> planned;
-  Vector<Span> trans_nets;
-  Vector<scav_extent> loop_label;
-  Vector<scav_rect> loop_row;
-  Vector<scav_point> loop_points;
-  Vector<scav_span> loop_span;         // per transition, its inner loop in `loop_points`
+  std::array<PodVector<uint32_t>, 2> faces;
+  PodVector<uint32_t> port_seg, seg_reversed;
+  std::vector<PodVector<uint32_t>> seg_bends;
+  PodVector<uint32_t> slot_port;  // parallel to `Routes::slots`: each slot's port
+  PodVector<Planned> planned;
+  PodVector<Span> trans_nets;
+  PodVector<scav_extent> loop_label;
+  PodVector<scav_rect> loop_row;
+  PodVector<scav_point> loop_points;
+  PodVector<scav_span> loop_span;      // per transition, its inner loop in `loop_points`
   std::vector<OccupiedSpan> occupied;  // keyed by state
-  std::vector<Vector<uint32_t>> by_frame;
+  std::vector<PodVector<uint32_t>> by_frame;
   std::vector<FrameRoutes> frames;
-  Vector<scav_point> routed;
-  Vector<scav_span> net_span;
-  Vector<scav_rect> walls, held;
-  Vector<uint32_t> enclosing;  // parallel to states: `enclosing_state` of each
+  PodVector<scav_point> routed;
+  PodVector<scav_span> net_span;
+  PodVector<scav_rect> walls, held;
+  PodVector<uint32_t> enclosing;  // parallel to states: `enclosing_state` of each
   // The live states each state encloses, as lists threaded through `kid_next`
   // from `kid_head`, and the live states a gather must always visit.
-  Vector<uint32_t> kid_head, kid_next, loose;
-  Vector<Gap> gaps;
-  Vector<OnDivider> on_dividers;  // the divider ends planned so far
-  Vector<std::array<int32_t, 2>> blocks;
-  Vector<int32_t> turned;  // per transition, its routed nets' turns
+  PodVector<uint32_t> kid_head, kid_next, loose;
+  PodVector<Gap> gaps;
+  PodVector<OnDivider> on_dividers;  // the divider ends planned so far
+  PodVector<std::array<int32_t, 2>> blocks;
+  PodVector<int32_t> turned;  // per transition, its routed nets' turns
 };
 
 CallScratch::CallScratch(CallScratch &&) noexcept = default;
@@ -728,17 +728,17 @@ std::vector<CallScratch> &call_stack() {
 }
 
 // Resizes `v` to `n` empty lists, each keeping its capacity.
-void reset_lists(std::vector<Vector<uint32_t>> &v, size_t n) {
+void reset_lists(std::vector<PodVector<uint32_t>> &v, size_t n) {
   vec_resize(v, n);
-  for (Vector<uint32_t> &list : v) { list.clear(); }
+  for (PodVector<uint32_t> &list : v) { list.clear(); }
 }
 
 }  // namespace
 
 void segment_bends(SubmachineOrders const &o,
                    uint32_t segments,
-                   Vector<uint32_t> &reversed,
-                   std::vector<Vector<uint32_t>> &bends) {
+                   PodVector<uint32_t> &reversed,
+                   std::vector<PodVector<uint32_t>> &bends) {
   reversed.assign(segments, 0);
   for (OrderEdge const &e : o.edges) { reversed[e.segment] = e.reversed; }
   reset_lists(bends, segments);
@@ -748,7 +748,7 @@ void segment_bends(SubmachineOrders const &o,
     }
   }
   for (uint32_t seg = 0; seg < bends.size(); ++seg) {
-    Vector<uint32_t> &chain{ bends[seg] };
+    PodVector<uint32_t> &chain{ bends[seg] };
     scav_stable_sort(chain, [&](uint32_t a, uint32_t b) {
       return o.nodes[a].rank < o.nodes[b].rank;
     });
@@ -807,10 +807,10 @@ void route_transitions(Routes &out,
   if (!stack.empty()) { stack.pop_back(); }
   // End pins at portless ends as `faces[end][seg]`; INVALID where unpinned, both empty
   // with no end pins.
-  std::array<Vector<uint32_t>, 2> &faces{ cs.faces };
-  for (Vector<uint32_t> &side : faces) { side.clear(); }
+  std::array<PodVector<uint32_t>, 2> &faces{ cs.faces };
+  for (PodVector<uint32_t> &side : faces) { side.clear(); }
   if ((pins != nullptr) && !pins->ends.empty()) {
-    for (Vector<uint32_t> &side : faces) { side.assign(g.segments.size(), INVALID); }
+    for (PodVector<uint32_t> &side : faces) { side.assign(g.segments.size(), INVALID); }
     for (EndPin const &fp : pins->ends) {
       if ((fp.trans.v == INVALID) || (fp.trans.v >= g.trans_segments.size()) ||
           (fp.end > 1) || (fp.face > 3)) {
@@ -836,21 +836,21 @@ void route_transitions(Routes &out,
   out.failed.assign(n, 0);
 
   // Each port's segment, and each segment's bend nodes from source to destination.
-  Vector<uint32_t> &port_seg{ cs.port_seg };
+  PodVector<uint32_t> &port_seg{ cs.port_seg };
   port_seg.assign(g.ports.size(), INVALID);
   for (uint32_t seg = 0; seg < g.segments.size(); ++seg) {
     if (o.seg_port[seg] != INVALID) { port_seg[o.seg_port[seg]] = seg; }
   }
-  std::vector<Vector<uint32_t>> &seg_bends{ cs.seg_bends };
+  std::vector<PodVector<uint32_t>> &seg_bends{ cs.seg_bends };
   segment_bends(o, static_cast<uint32_t>(g.segments.size()), cs.seg_reversed, seg_bends);
 
   // Each inner loop's four points out of its state's border and back, in its row of the
   // state's loop room; `occupied` gets its ends' run on each face they touch, padded.
-  Vector<scav_rect> &loop_row{ cs.loop_row };
+  PodVector<scav_rect> &loop_row{ cs.loop_row };
   loop_rows(c, z, s, p, cs.loop_label, loop_row);
-  Vector<scav_point> &loop_points{ cs.loop_points };
+  PodVector<scav_point> &loop_points{ cs.loop_points };
   loop_points.clear();
-  Vector<scav_span> &loop_span{ cs.loop_span };
+  PodVector<scav_span> &loop_span{ cs.loop_span };
   loop_span.assign(n, scav_span{});
   std::vector<OccupiedSpan> &occupied{ cs.occupied };
   occupied.clear();
@@ -928,7 +928,7 @@ void route_transitions(Routes &out,
     return scav_port_slot{ .x = at.x, .y = at.y, .side = side, .boundary_depth = depth };
   };
 
-  Vector<Gap> &gaps{ cs.gaps };
+  PodVector<Gap> &gaps{ cs.gaps };
   region_gaps(c, z, gaps);
   cs.on_dividers.clear();
   DividerRoom const room{ .clear = clear,
@@ -975,7 +975,7 @@ void route_transitions(Routes &out,
       uint32_t const facing{ (gap.vertical ? 0U : 2U) + ((gap.low == m) ? 1U : 0U) };
       if (o.seg_side[at] == facing) { want[wanted++] = level(z.node[node]); }
     }
-    Vector<uint32_t> const &bends{ seg_bends[seg] };
+    PodVector<uint32_t> const &bends{ seg_bends[seg] };
     want[wanted++] = level(bends.empty() ? from : z.node[bends.back()]);
     int32_t const along{
       on_divider(c, z, gap, want, wanted, sides, room, cs.on_dividers, cs.blocks)
@@ -1015,9 +1015,9 @@ void route_transitions(Routes &out,
   };
 
   // Plans every net before routing any; port slots are in transition order.
-  Vector<Planned> &planned{ cs.planned };
+  PodVector<Planned> &planned{ cs.planned };
   planned.clear();
-  Vector<Span> &trans_nets{ cs.trans_nets };
+  PodVector<Span> &trans_nets{ cs.trans_nets };
   trans_nets.assign(n, Span{});
   cs.slot_port.clear();
   for (uint32_t t = 0; t < n; ++t) {
@@ -1203,7 +1203,7 @@ void route_transitions(Routes &out,
   }
 
   // One batch per frame, in submachine order, of nets in `(transition, ordinal)` order.
-  std::vector<Vector<uint32_t>> &by_frame{ cs.by_frame };
+  std::vector<PodVector<uint32_t>> &by_frame{ cs.by_frame };
   reset_lists(by_frame, c.submachines.size());
   for (uint32_t i = 0; i < planned.size(); ++i) {
     if (planned[i].frame < by_frame.size()) { by_frame[planned[i].frame].push_back(i); }
@@ -1226,14 +1226,14 @@ void route_transitions(Routes &out,
   // Every obstacle of a frame is loose or enclosed by a state on the owner's chain. A
   // loose state has no enclosing state, or lies outside its enclosing state's box.
   uint32_t const state_count{ static_cast<uint32_t>(c.states.size()) };
-  Vector<uint32_t> &enclosing{ cs.enclosing };
+  PodVector<uint32_t> &enclosing{ cs.enclosing };
   enclosing.resize(state_count);
   for (uint32_t st = 0; st < state_count; ++st) {
     enclosing[st] = enclosing_state(c, { st }).v;
   }
-  Vector<uint32_t> &kid_head{ cs.kid_head };
-  Vector<uint32_t> &kid_next{ cs.kid_next };
-  Vector<uint32_t> &loose{ cs.loose };
+  PodVector<uint32_t> &kid_head{ cs.kid_head };
+  PodVector<uint32_t> &kid_next{ cs.kid_next };
+  PodVector<uint32_t> &loose{ cs.loose };
   kid_head.assign(state_count, INVALID);
   kid_next.resize(state_count);
   loose.clear();
@@ -1432,7 +1432,7 @@ void route_transitions(Routes &out,
     if ((reuse != nullptr) && (m < reuse->frame.size()) && (reuse->frame[m].valid != 0) &&
         same_but_shifted(reuse->frame[m], in, frame, dx, dy)) {
       RouteFrameCache const &had{ reuse->frame[m] };
-      Vector<scav_point> &moved{ frames[m].points };
+      PodVector<scav_point> &moved{ frames[m].points };
       moved.resize(had.points.size());
       for (size_t k = 0; k < moved.size(); ++k) {
         moved[k] = { .x = had.points[k].x + dx, .y = had.points[k].y + dy };
@@ -1528,9 +1528,9 @@ void route_transitions(Routes &out,
   }
 
   // Merges in frame order; totals and points are the same at every worker count.
-  Vector<scav_point> &routed{ cs.routed };
+  PodVector<scav_point> &routed{ cs.routed };
   routed.clear();
-  Vector<scav_span> &net_span{ cs.net_span };
+  PodVector<scav_span> &net_span{ cs.net_span };
   net_span.assign(planned.size(), scav_span{});
   for (uint32_t m = 0; m < by_frame.size(); ++m) {
     FrameRoutes const &fr{ frames[m] };
@@ -1584,7 +1584,7 @@ void route_transitions(Routes &out,
 
   // Nudges the composed polylines chart-wide, for lanes shared across frames or segments.
   if (margin > 0) {
-    Vector<scav_rect> &walls{ cs.walls };
+    PodVector<scav_rect> &walls{ cs.walls };
     walls.clear();
     for (uint32_t st = 0; st < c.states.size(); ++st) {
       if ((c.states[st].live == 0) || (z.state[st].w == 0) || (z.state[st].h == 0)) {
@@ -1598,7 +1598,7 @@ void route_transitions(Routes &out,
     for (Gap const &gap : gaps) { walls.push_back(gap.rect); }
     // Bounds each transition by the innermost state strictly enclosing both its ends, or
     // the coordinate domain where none does; an inner loop by its own state.
-    Vector<scav_rect> &held{ cs.held };
+    PodVector<scav_rect> &held{ cs.held };
     held.assign(out.route.size(), domain);
     for (uint32_t t = 0; t < out.route.size(); ++t) {
       if (t >= c.transitions.size()) { continue; }

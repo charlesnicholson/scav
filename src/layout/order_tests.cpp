@@ -11,7 +11,7 @@
 #include "scav_thread.h"
 
 #include "doctest.h"
-#include "scav_vector.h"
+#include "scav_pod_vector.h"
 
 #include <algorithm>
 #include <array>
@@ -510,7 +510,7 @@ TEST_CASE("order: a sweep removes a crossing document order would have left") {
   SubmachineOrders const o{ order_of(c) };
   REQUIRE(o.sub_ranks[root.v] == 2);
   // Zero crossings: each sink takes its source's position.
-  Vector<uint32_t> south;
+  PodVector<uint32_t> south;
   south.reserve(o.edges.size());
   for (OrderEdge const &e : o.edges) { south.push_back(o.nodes[e.dst].pos); }
   CHECK(rank_crossings(south) == 0);
@@ -1059,7 +1059,7 @@ TEST_CASE("order: a segment on a cycle is reported, and one on none is not") {
   build_trans(chain, y, w, TransKind::Default, {});
   SplitGraph const cg{ decompose(chain) };
   SubmachineOrders const co{ order_submachines(chain, cg, {}, profile()) };
-  CHECK(co.seg_cyclic == Vector<uint8_t>{ 0, 0 });
+  CHECK(co.seg_cyclic == PodVector<uint8_t>{ 0, 0 });
 }
 
 TEST_CASE("order: cycle detection survives a frame deep enough to overflow recursion") {

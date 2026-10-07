@@ -7,8 +7,8 @@
 #include "layout/partition.h"
 #include "layout/trace.h"
 #include "scav_int.h"
+#include "scav_pod_vector.h"
 #include "scav_stable_sort.h"
-#include "scav_vector.h"
 
 #include <array>
 #include <cstdint>
@@ -61,8 +61,8 @@ bool kept(Wide before, Wide after) {
 
 // True when the nets of `x` and `y` match point for point from the segment's second point
 // to the end, or from the start to its first point.
-bool bundled(Vector<scav_point> const &points,
-             Vector<scav_span> const &nets,
+bool bundled(PodVector<scav_point> const &points,
+             PodVector<scav_span> const &nets,
              Member const &x,
              Member const &y) {
   scav_span const a{ nets[x.net] };
@@ -97,7 +97,7 @@ uint64_t line_key(scav_point a, scav_point b) {
 bool axial(scav_point a, scav_point b) { return (a.x == b.x) != (a.y == b.y); }
 
 // First index with `v[i].key >= key` in `v`, sorted by key.
-uint32_t line_start(Vector<OnLine> const &v, uint64_t key) {
+uint32_t line_start(PodVector<OnLine> const &v, uint64_t key) {
   uint32_t lo{ 0 };
   uint32_t hi{ static_cast<uint32_t>(v.size()) };
   while (lo < hi) {
@@ -113,24 +113,24 @@ uint32_t line_start(Vector<OnLine> const &v, uint64_t key) {
 
 // Per-thread buffers for one call, reassigned in place; a call never waits on the pool.
 struct NudgeScratch {
-  Vector<Member> members;
-  Vector<uint32_t> lane;
-  Partition link;         // -> members, the lanes of one axis
-  Partition parent;       // -> lane, the bundles of one lane
-  Vector<uint32_t> slot;  // -> lane, each entry's bundle, then that bundle's position
-  Vector<uint32_t> sizes;
-  Vector<uint32_t> group;
-  Vector<uint32_t> kin;
-  Vector<int32_t> votes;  // groups x groups, antisymmetric
-  Vector<uint32_t> degree;
-  Vector<uint32_t> order;
-  Vector<uint32_t> rank;  // -> order, inverted
+  PodVector<Member> members;
+  PodVector<uint32_t> lane;
+  Partition link;            // -> members, the lanes of one axis
+  Partition parent;          // -> lane, the bundles of one lane
+  PodVector<uint32_t> slot;  // -> lane, each entry's bundle, then that bundle's position
+  PodVector<uint32_t> sizes;
+  PodVector<uint32_t> group;
+  PodVector<uint32_t> kin;
+  PodVector<int32_t> votes;  // groups x groups, antisymmetric
+  PodVector<uint32_t> degree;
+  PodVector<uint32_t> order;
+  PodVector<uint32_t> rank;  // -> order, inverted
   // -> members: the next of each one's lane, and the last so far of each root's.
-  Vector<uint32_t> next_member, last_member;
-  Vector<Member> member_merge;  // the sorts' merge buffers
-  Vector<uint32_t> lane_merge;
+  PodVector<uint32_t> next_member, last_member;
+  PodVector<Member> member_merge;  // the sorts' merge buffers
+  PodVector<uint32_t> lane_merge;
   // Every net's segments by line as the axis pass began, and those it has since moved.
-  Vector<OnLine> lines, moved, line_merge;
+  PodVector<OnLine> lines, moved, line_merge;
 };
 
 NudgeScratch &nudge_scratch() {
@@ -141,13 +141,13 @@ NudgeScratch &nudge_scratch() {
 }  // namespace
 
 void nudge_lanes(scav_rect const &region,
-                 Vector<scav_rect> const &bounds,
-                 Vector<scav_rect> const &obstacles,
+                 PodVector<scav_rect> const &bounds,
+                 PodVector<scav_rect> const &obstacles,
                  int32_t gap,
                  int32_t clear,
                  int32_t band,
-                 Vector<scav_span> const &nets,
-                 Vector<scav_point> &points,
+                 PodVector<scav_span> const &nets,
+                 PodVector<scav_point> &points,
                  scav_path_clear const *keep,
                  uint32_t n_keep) {
   if (gap <= 0) { return; }
@@ -156,20 +156,20 @@ void nudge_lanes(scav_rect const &region,
   uint32_t const net_count{ static_cast<uint32_t>(nets.size()) };
 
   NudgeScratch &sc{ nudge_scratch() };
-  Vector<Member> &members{ sc.members };
-  Vector<uint32_t> &lane{ sc.lane };
+  PodVector<Member> &members{ sc.members };
+  PodVector<uint32_t> &lane{ sc.lane };
   Partition &link{ sc.link };
   Partition &parent{ sc.parent };
-  Vector<uint32_t> &slot{ sc.slot };
-  Vector<uint32_t> &sizes{ sc.sizes };
-  Vector<uint32_t> &group{ sc.group };
-  Vector<uint32_t> &kin{ sc.kin };
-  Vector<int32_t> &votes{ sc.votes };
-  Vector<uint32_t> &degree{ sc.degree };
-  Vector<uint32_t> &order{ sc.order };
-  Vector<uint32_t> &rank{ sc.rank };
-  Vector<uint32_t> &next_member{ sc.next_member };
-  Vector<uint32_t> &last_member{ sc.last_member };
+  PodVector<uint32_t> &slot{ sc.slot };
+  PodVector<uint32_t> &sizes{ sc.sizes };
+  PodVector<uint32_t> &group{ sc.group };
+  PodVector<uint32_t> &kin{ sc.kin };
+  PodVector<int32_t> &votes{ sc.votes };
+  PodVector<uint32_t> &degree{ sc.degree };
+  PodVector<uint32_t> &order{ sc.order };
+  PodVector<uint32_t> &rank{ sc.rank };
+  PodVector<uint32_t> &next_member{ sc.next_member };
+  PodVector<uint32_t> &last_member{ sc.last_member };
   kin.clear();
   for (uint32_t axis = 0; axis < 2; ++axis) {
     bool const horizontal{ axis == 0 };
@@ -221,8 +221,8 @@ void nudge_lanes(scav_rect const &region,
     if (members.size() < 2) { continue; }
 
     // Built on the pass's first `known_good`.
-    Vector<OnLine> &lines{ sc.lines };
-    Vector<OnLine> &moved{ sc.moved };
+    PodVector<OnLine> &lines{ sc.lines };
+    PodVector<OnLine> &moved{ sc.moved };
     bool indexed{ false };
     lines.clear();
     moved.clear();
@@ -314,7 +314,7 @@ void nudge_lanes(scav_rect const &region,
       for (uint32_t r = 0; ok && (r < now.size()); ++r) {
         if (!axial(way[r], way[r + 1])) { continue; }
         uint64_t const key{ line_key(way[r], way[r + 1]) };
-        for (Vector<OnLine> const *v : { &lines, &moved }) {
+        for (PodVector<OnLine> const *v : { &lines, &moved }) {
           for (uint32_t j = line_start(*v, key);
                ok && (j < v->size()) && ((*v)[j].key == key);
                ++j) {

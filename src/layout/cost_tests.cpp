@@ -11,8 +11,8 @@
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
 #include "scav_int.h"
+#include "scav_pod_vector.h"
 #include "scav_stable_sort.h"
-#include "scav_vector.h"
 
 #include "doctest.h"
 
@@ -38,13 +38,13 @@ int32_t cost_through_boxes(Chart const &c,
                            SizedLayout const &z,
                            Ancestry const &an,
                            ChildGrid const &g,
-                           Vector<Piece> const &pieces);
-int64_t cost_crossings(Vector<Piece> const &pieces, Vector<uint32_t> &per_trans);
-Wide cost_corridor(Routes const &r, Vector<Piece> const &pieces);
-Wide cost_crowding(Vector<Piece> const &pieces, int32_t em);
+                           PodVector<Piece> const &pieces);
+int64_t cost_crossings(PodVector<Piece> const &pieces, PodVector<uint32_t> &per_trans);
+Wide cost_corridor(Routes const &r, PodVector<Piece> const &pieces);
+Wide cost_crowding(PodVector<Piece> const &pieces, int32_t em);
 int32_t cost_path_turns(scav_rect const &s,
                         uint32_t s_face,
-                        Vector<scav_point> const &via,
+                        PodVector<scav_point> const &via,
                         scav_rect const &t,
                         uint32_t t_face);
 
@@ -70,7 +70,7 @@ SizedLayout blank(Chart const &c) {
 }
 
 // One polyline per transition, in transition order, as `Routes` holds them.
-Routes routes_of(Chart const &c, std::vector<Vector<scav_point>> const &lines) {
+Routes routes_of(Chart const &c, std::vector<PodVector<scav_point>> const &lines) {
   Routes r;
   r.route.assign(c.transitions.size(), scav_span{});
   r.port.assign(c.transitions.size(), scav_span{});
@@ -83,8 +83,8 @@ Routes routes_of(Chart const &c, std::vector<Vector<scav_point>> const &lines) {
 }
 
 // Splits `r` into the flat segment list `cost_terms` builds, in transition order.
-Vector<Piece> pieces_of(Routes const &r) {
-  Vector<Piece> out;
+PodVector<Piece> pieces_of(Routes const &r) {
+  PodVector<Piece> out;
   for (uint32_t t = 0; t < r.route.size(); ++t) {
     scav_span const route{ r.route[t] };
     for (uint32_t k = 0; (k + 1) < route.len; ++k) {
@@ -196,14 +196,15 @@ Transit transit_chart() {
 }
 
 // Src's right side to Dst's left, jogging down at `x`: two bends there.
-Vector<scav_point> jog_at(int32_t x) {
+PodVector<scav_point> jog_at(int32_t x) {
   return { { .x = 100, .y = 130 },
            { .x = x, .y = 130 },
            { .x = x, .y = 230 },
            { .x = 400, .y = 230 } };
 }
 
-CostTerms transit_terms(Transit const &k, std::vector<Vector<scav_point>> const &lines) {
+CostTerms transit_terms(Transit const &k,
+                        std::vector<PodVector<scav_point>> const &lines) {
   return cost_terms(k.c, decompose(k.c), k.z, routes_of(k.c, lines), {}, profile());
 }
 
@@ -229,7 +230,7 @@ TEST_CASE("cost: a crossing route's bend in a state it only passes through costs
         (2 * int64_t{ p.w_transit_bends }));
 
   // The same from the source's end: Dst -> Src along the route reversed.
-  auto const reversed = [](Vector<scav_point> line) {
+  auto const reversed = [](PodVector<scav_point> line) {
     std::reverse(line.begin(), line.end());
     return line;
   };
@@ -295,7 +296,7 @@ Chart edges(uint32_t n) {
   return c;
 }
 
-int64_t corridor_of(Chart const &c, std::vector<Vector<scav_point>> const &lines) {
+int64_t corridor_of(Chart const &c, std::vector<PodVector<scav_point>> const &lines) {
   SizedLayout const z{ blank(c) };
   return cost_terms(c, decompose(c), z, routes_of(c, lines), {}, profile()).corridor;
 }
@@ -318,7 +319,7 @@ TEST_CASE(
         { { .x = 300, .y = 100 }, { .x = 400, .y = 0 } },
         { { .x = 1000, .y = 1000 }, { .x = 1100, .y = 1000 } } }) };
   SplitGraph const g{ decompose(c) };
-  Vector<uint8_t> party;
+  PodVector<uint8_t> party;
   CostTerms const t{ cost_terms(cost_context(c, g), c, g, z, r, {}, profile(), &party) };
   CHECK(t.crossings == 1);
   CHECK(t.bends == 1);
@@ -374,8 +375,8 @@ TEST_CASE("cost: charge is each transition's weighted terms, a pair's to both of
         { { .x = 300, .y = 100 }, { .x = 400, .y = 0 } },
         { { .x = 1000, .y = 1000 }, { .x = 1100, .y = 1000 } } }) };
   SplitGraph const g{ decompose(c) };
-  Vector<uint8_t> party;
-  Vector<Wide> charge;
+  PodVector<uint8_t> party;
+  PodVector<Wide> charge;
   (void)cost_terms(cost_context(c, g), c, g, blank(c), r, {}, p, &party, &charge);
   REQUIRE(charge.size() == 4);
   // The bend, and 200 run where the direct distance is 141.
@@ -421,7 +422,7 @@ TEST_CASE("cost: party marks every transition while the drawing breaks Tier 0") 
                             { { { .x = 20, .y = 1000 }, { .x = 400, .y = 1000 } },
                               { { .x = 20, .y = 1500 }, { .x = 400, .y = 1500 } } }) };
   SplitGraph const g{ decompose(c) };
-  Vector<uint8_t> party;
+  PodVector<uint8_t> party;
   CostTerms t{ cost_terms(cost_context(c, g), c, g, z, r, {}, profile(), &party) };
   CHECK(t.through_box == 1);
   REQUIRE(party.size() == 2);
@@ -469,16 +470,16 @@ TEST_CASE("cost: a shared endpoint alone exempts nothing") {
 TEST_CASE("cost: a run upstream of the merge is charged and the merge is not") {
   Chart const c{ edges(2) };
   auto const lines = [](int32_t end_y) {
-    return std::vector<Vector<scav_point>>{ { { .x = 0, .y = 0 },
-                                              { .x = 300, .y = 0 },
-                                              { .x = 300, .y = 60 },
-                                              { .x = 500, .y = 60 },
-                                              { .x = 500, .y = 100 } },
-                                            { { .x = 100, .y = 0 },
-                                              { .x = 400, .y = 0 },
-                                              { .x = 400, .y = 80 },
-                                              { .x = 500, .y = 80 },
-                                              { .x = 500, .y = end_y } } };
+    return std::vector<PodVector<scav_point>>{ { { .x = 0, .y = 0 },
+                                                 { .x = 300, .y = 0 },
+                                                 { .x = 300, .y = 60 },
+                                                 { .x = 500, .y = 60 },
+                                                 { .x = 500, .y = 100 } },
+                                               { { .x = 100, .y = 0 },
+                                                 { .x = 400, .y = 0 },
+                                                 { .x = 400, .y = 80 },
+                                                 { .x = 500, .y = 80 },
+                                                 { .x = 500, .y = end_y } } };
   };
   // The 200 shared along y=0 is charged; the 20 shared on x=500 only when the ends differ.
   CHECK(corridor_of(c, lines(100)) == 200);
@@ -488,7 +489,7 @@ TEST_CASE("cost: a run upstream of the merge is charged and the merge is not") {
 TEST_CASE("cost: two routes leaving as one line are charged for it") {
   Chart const c{ edges(2) };
   auto const lines = [](int32_t start_x) {
-    return std::vector<Vector<scav_point>>{
+    return std::vector<PodVector<scav_point>>{
       { { .x = 0, .y = 0 }, { .x = 200, .y = 0 }, { .x = 200, .y = 100 } },
       { { .x = start_x, .y = 0 }, { .x = 150, .y = 0 }, { .x = 150, .y = -100 } }
     };
@@ -502,7 +503,7 @@ TEST_CASE("cost: two routes leaving as one line are charged for it") {
 TEST_CASE("cost: three routes on one trunk are free over all three pairs") {
   Chart const c{ edges(3) };
   auto const lines = [](int32_t end_y) {
-    return std::vector<Vector<scav_point>>{
+    return std::vector<PodVector<scav_point>>{
       { { .x = 0, .y = 0 }, { .x = 200, .y = 0 }, { .x = 200, .y = 100 } },
       { { .x = 50, .y = 0 }, { .x = 200, .y = 0 }, { .x = 200, .y = 100 } },
       { { .x = 100, .y = 0 }, { .x = 200, .y = 0 }, { .x = 200, .y = end_y } }
@@ -572,7 +573,7 @@ TEST_CASE("cost: a run against the trunk is charged and the trunk is not") {
 TEST_CASE("cost: two routes on one line with different ends are a Tier-0 shared run") {
   Chart const c{ edges(2) };
   SizedLayout const z{ blank(c) };
-  auto const terms = [&c, &z](std::vector<Vector<scav_point>> const &lines) {
+  auto const terms = [&c, &z](std::vector<PodVector<scav_point>> const &lines) {
     return cost_terms(c, decompose(c), z, routes_of(c, lines), {}, profile());
   };
   // Different starts and ends, 100 shared along x=200.
@@ -1934,7 +1935,7 @@ namespace {
 
 // `n` 40-unit boxes 100 apart on a diagonal, and `bar` over all of them; `bar` lies in
 // every cell of the frame's grid.
-Chart diagonal_chart(uint32_t n, SizedLayout &z, Vector<StateId> &all, StateId &bar) {
+Chart diagonal_chart(uint32_t n, SizedLayout &z, PodVector<StateId> &all, StateId &bar) {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   for (uint32_t i = 0; i < n; ++i) {
@@ -1957,7 +1958,7 @@ Chart diagonal_chart(uint32_t n, SizedLayout &z, Vector<StateId> &all, StateId &
 
 TEST_CASE("cost: a grid query yields a child once, whatever cells it spans") {
   SizedLayout z;
-  Vector<StateId> all;
+  PodVector<StateId> all;
   StateId bar{ INVALID };
   Chart const c{ diagonal_chart(9, z, all, bar) };
   ChildGrid const g{ cost_child_grid(c, z) };
@@ -1982,7 +1983,7 @@ TEST_CASE("cost: a grid query yields a child once, whatever cells it spans") {
 
 TEST_CASE("cost: overlapping siblings come out of the frame's grid, once a pair") {
   SizedLayout z;
-  Vector<StateId> all;
+  PodVector<StateId> all;
   StateId bar{ INVALID };
   Chart const c{ diagonal_chart(24, z, all, bar) };  // too many children to scan
   CHECK(cost_box_overlaps(c, z, cost_child_grid(c, z)) == 24);
@@ -1994,7 +1995,7 @@ TEST_CASE("cost: overlapping siblings come out of the frame's grid, once a pair"
 
 TEST_CASE("cost: overlapping siblings of a small frame are scanned, once a pair") {
   SizedLayout z;
-  Vector<StateId> all;
+  PodVector<StateId> all;
   StateId bar{ INVALID };
   Chart const c{ diagonal_chart(9, z, all, bar) };
   CHECK(cost_box_overlaps(c, z, cost_child_grid(c, z)) == 9);
@@ -2097,37 +2098,37 @@ TEST_CASE("cost: the carve-out excuses a box over an endpoint, not what it holds
 TEST_CASE("cost: a degraded diagonal crosses what the axis-aligned sweep cannot") {
   // The band sweep pairs each vertical with the horizontals in its span; a diagonal
   // is tested against every piece.
-  Vector<Piece> const mixed{
+  PodVector<Piece> const mixed{
     { .a = { .x = 0, .y = 50 }, .b = { .x = 100, .y = 50 }, .trans = 0, .k = 0 },
     { .a = { .x = 50, .y = 0 }, .b = { .x = 50, .y = 100 }, .trans = 1, .k = 0 },
     { .a = { .x = 0, .y = 0 }, .b = { .x = 100, .y = 100 }, .trans = 2, .k = 0 },
   };
-  Vector<uint32_t> per(3, 0);
+  PodVector<uint32_t> per(3, 0);
   CHECK(cost_crossings(mixed, per) == 3);
   CHECK(per[0] == 2);
   CHECK(per[1] == 2);
   CHECK(per[2] == 2);
 
   // Two diagonals are one pair, charged from the earlier of the two alone.
-  Vector<Piece> const crossed{
+  PodVector<Piece> const crossed{
     { .a = { .x = 0, .y = 0 }, .b = { .x = 100, .y = 100 }, .trans = 0, .k = 0 },
     { .a = { .x = 0, .y = 100 }, .b = { .x = 100, .y = 0 }, .trans = 1, .k = 0 },
   };
-  Vector<uint32_t> two(2, 0);
+  PodVector<uint32_t> two(2, 0);
   CHECK(cost_crossings(crossed, two) == 1);
 
   // Neither collinear horizontals nor two legs of one transition count as crossings.
-  Vector<Piece> const parallel{
+  PodVector<Piece> const parallel{
     { .a = { .x = 0, .y = 0 }, .b = { .x = 100, .y = 0 }, .trans = 0, .k = 0 },
     { .a = { .x = 50, .y = 0 }, .b = { .x = 150, .y = 0 }, .trans = 1, .k = 0 },
   };
-  Vector<uint32_t> flat(2, 0);
+  PodVector<uint32_t> flat(2, 0);
   CHECK(cost_crossings(parallel, flat) == 0);
-  Vector<Piece> const own{
+  PodVector<Piece> const own{
     { .a = { .x = 0, .y = 50 }, .b = { .x = 100, .y = 50 }, .trans = 0, .k = 0 },
     { .a = { .x = 50, .y = 0 }, .b = { .x = 50, .y = 100 }, .trans = 0, .k = 1 },
   };
-  Vector<uint32_t> one(1, 0);
+  PodVector<uint32_t> one(1, 0);
   CHECK(cost_crossings(own, one) == 0);
 }
 
@@ -2215,12 +2216,12 @@ TEST_CASE("cost: crowding is continuous with corridor at the line they share") {
 TEST_CASE("cost: crowding sums every tight pair, and order does not matter") {
   int32_t const em{ 192 };
   // Three lanes 64 apart: pairs at 64, 64 and 128, all tight.
-  Vector<Piece> three{ seg(0, 0, 1000, 0, 0),
-                       seg(0, 64, 1000, 64, 1),
-                       seg(0, 128, 1000, 128, 2) };
+  PodVector<Piece> three{ seg(0, 0, 1000, 0, 0),
+                          seg(0, 64, 1000, 64, 1),
+                          seg(0, 128, 1000, 128, 2) };
   Wide const want{ ((1000 * 128) + (1000 * 128) + (1000 * 64)) / 192 };
   CHECK(cost_crowding(three, em) == want);
-  Vector<Piece> shuffled{ three[2], three[0], three[1] };
+  PodVector<Piece> shuffled{ three[2], three[0], three[1] };
   CHECK(cost_crowding(shuffled, em) == want);
 }
 
@@ -2335,7 +2336,10 @@ struct Trunk {
   bool merged_tail{ false };
 };
 
-Trunk trunk_of(Vector<scav_point> const &pts, scav_span a, scav_span b, uint32_t cap = 2) {
+Trunk trunk_of(PodVector<scav_point> const &pts,
+               scav_span a,
+               scav_span b,
+               uint32_t cap = 2) {
   Trunk out;
   uint32_t const shortest{ imin(imin(a.len, b.len), cap) };
   while ((out.tail < shortest) &&
@@ -2355,7 +2359,9 @@ bool trunk_piece(Trunk const &t, uint32_t len, uint32_t k) {
 }
 
 // The span of `pts` reversed into `out`, so a common head reads as a common tail.
-scav_span reversed(Vector<scav_point> const &pts, scav_span s, Vector<scav_point> &out) {
+scav_span reversed(PodVector<scav_point> const &pts,
+                   scav_span s,
+                   PodVector<scav_point> &out) {
   scav_span const at{ .off = static_cast<uint32_t>(out.size()), .len = s.len };
   for (uint32_t k = s.len; k-- > 0;) { out.push_back(pts[s.off + k]); }
   return at;
@@ -2368,7 +2374,7 @@ bool fan_pair(Routes const &r, uint32_t u, uint32_t ku, uint32_t v, uint32_t kv)
   scav_span const b{ r.route[v] };
   Trunk const tail{ trunk_of(r.points, a, b, ~0U) };
   if (trunk_piece(tail, a.len, ku) && trunk_piece(tail, b.len, kv)) { return true; }
-  Vector<scav_point> back;
+  PodVector<scav_point> back;
   scav_span const ra{ reversed(r.points, a, back) };
   scav_span const rb{ reversed(r.points, b, back) };
   Trunk const head{ trunk_of(back, ra, rb, ~0U) };
@@ -2377,7 +2383,7 @@ bool fan_pair(Routes const &r, uint32_t u, uint32_t ku, uint32_t v, uint32_t kv)
 }
 
 // Pairs of different transitions' collinear segments sharing a run outside `fan_pair`.
-int32_t shared_runs(Routes const &r, Vector<Piece> const &pieces) {
+int32_t shared_runs(Routes const &r, PodVector<Piece> const &pieces) {
   int32_t total{ 0 };
   for (uint32_t i = 0; i < pieces.size(); ++i) {
     for (uint32_t j = i + 1; j < pieces.size(); ++j) {
@@ -2423,7 +2429,7 @@ bool within(Chart const &c, StateId state, uint32_t m) {
   return false;
 }
 
-int64_t crossings(Vector<Piece> const &pieces, Vector<uint32_t> &per_trans) {
+int64_t crossings(PodVector<Piece> const &pieces, PodVector<uint32_t> &per_trans) {
   int64_t total{ 0 };
   for (uint32_t i = 0; i < pieces.size(); ++i) {
     for (uint32_t j = i + 1; j < pieces.size(); ++j) {
@@ -2437,7 +2443,7 @@ int64_t crossings(Vector<Piece> const &pieces, Vector<uint32_t> &per_trans) {
   return total;
 }
 
-Wide corridor(Routes const &r, Vector<Piece> const &pieces) {
+Wide corridor(Routes const &r, PodVector<Piece> const &pieces) {
   Wide total{ 0 };
   for (uint32_t i = 0; i < pieces.size(); ++i) {
     for (uint32_t j = i + 1; j < pieces.size(); ++j) {
@@ -2457,7 +2463,7 @@ Wide corridor(Routes const &r, Vector<Piece> const &pieces) {
   return total;
 }
 
-Wide crowding(Vector<Piece> const &pieces, int32_t em) {
+Wide crowding(PodVector<Piece> const &pieces, int32_t em) {
   if (em <= 0) { return 0; }
   Wide scaled{ 0 };
   for (uint32_t i = 0; i < pieces.size(); ++i) {
@@ -2483,8 +2489,8 @@ Wide crowding(Vector<Piece> const &pieces, int32_t em) {
 }
 
 // A frame's children with a rect, live, in span order.
-Vector<uint32_t> children_of(Chart const &c, SizedLayout const &z, uint32_t m) {
-  Vector<uint32_t> out;
+PodVector<uint32_t> children_of(Chart const &c, SizedLayout const &z, uint32_t m) {
+  PodVector<uint32_t> out;
   Span const kids{ c.submachines[m].children };
   for (uint32_t i = 0; i < kids.len; ++i) {
     uint32_t const st{ c.state_ids[kids.off + i].v };
@@ -2497,7 +2503,7 @@ int32_t box_overlaps(Chart const &c, SizedLayout const &z) {
   int32_t total{ 0 };
   for (uint32_t m = 0; m < c.submachines.size(); ++m) {
     if (c.submachines[m].live == 0) { continue; }
-    Vector<uint32_t> const kids{ children_of(c, z, m) };
+    PodVector<uint32_t> const kids{ children_of(c, z, m) };
     for (uint32_t i = 0; i < kids.size(); ++i) {
       for (uint32_t j = i + 1; j < kids.size(); ++j) {
         if (overlaps(z.state[kids[i]], z.state[kids[j]])) { ++total; }
@@ -2550,7 +2556,7 @@ scav_rect region_cell(Chart const &c, SizedLayout const &z, uint32_t m) {
 void through(Chart const &c,
              SizedLayout const &z,
              Ancestry const &an,
-             Vector<Piece> const &pieces,
+             PodVector<Piece> const &pieces,
              CostTerms &t) {
   for (Piece const &piece : pieces) {
     Transition const &tr{ c.transitions[piece.trans] };
@@ -2579,7 +2585,7 @@ void through(Chart const &c,
       foreign = foreign || ((tr.kind == TransKind::External) && src_side && dst_side);
     };
     for (uint32_t const st : an.detached) { charge(st); }
-    Vector<uint32_t> stack;
+    PodVector<uint32_t> stack;
     for (uint32_t m = 0; m < c.submachines.size(); ++m) {
       if (c.submachines[m].owner.v == INVALID) { stack.push_back(m); }
     }
@@ -2601,8 +2607,8 @@ void through(Chart const &c,
 }
 
 // `s` and every state enclosing it, `s` first.
-Vector<StateId> chain_up(Chart const &c, StateId s) {
-  Vector<StateId> out;
+PodVector<StateId> chain_up(Chart const &c, StateId s) {
+  PodVector<StateId> out;
   for (StateId at{ s }; (at.v != INVALID) && (out.size() < c.states.size());
        at = enclosing_state(c, at)) {
     out.push_back(at);
@@ -2612,8 +2618,8 @@ Vector<StateId> chain_up(Chart const &c, StateId s) {
 
 // Each end's chain, the end first, cut where it meets the other's: the states
 // between that end and the innermost state holding both.
-std::array<Vector<StateId>, 2> below_common(Chart const &c, StateId src, StateId dst) {
-  std::array<Vector<StateId>, 2> out{ chain_up(c, src), chain_up(c, dst) };
+std::array<PodVector<StateId>, 2> below_common(Chart const &c, StateId src, StateId dst) {
+  std::array<PodVector<StateId>, 2> out{ chain_up(c, src), chain_up(c, dst) };
   for (size_t i = 0; i < out[0].size(); ++i) {
     for (size_t j = 0; j < out[1].size(); ++j) {
       if (out[0][i] == out[1][j]) {
@@ -2632,7 +2638,7 @@ bool transit_bend(Chart const &c,
                   SizedLayout const &z,
                   Transition const &tr,
                   scav_point at) {
-  for (Vector<StateId> const &chain : below_common(c, tr.src, tr.dst)) {
+  for (PodVector<StateId> const &chain : below_common(c, tr.src, tr.dst)) {
     if (chain.size() < 3) { continue; }
     if (inside(at, z.state[chain[0].v]) || inside(at, z.state[chain[1].v])) { continue; }
     for (size_t k = 2; k < chain.size(); ++k) {
@@ -2656,8 +2662,8 @@ CostTerms terms(Chart const &c,
 
   // Each live state's rect charged to its region's owner by the parent link; a composite
   // is a live owner of a live region.
-  Vector<Wide> held(c.states.size(), 0);
-  Vector<uint8_t> composite(c.states.size(), 0);
+  PodVector<Wide> held(c.states.size(), 0);
+  PodVector<uint8_t> composite(c.states.size(), 0);
   for (Submachine const &m : c.submachines) {
     if ((m.live != 0) && (m.owner.v != INVALID)) { composite[m.owner.v] = 1; }
   }
@@ -2680,8 +2686,8 @@ CostTerms terms(Chart const &c,
   }
   t.whitespace = imin(t.whitespace, t.area);
 
-  Vector<Piece> pieces;
-  Vector<uint32_t> crossings_of(c.transitions.size(), 0);
+  PodVector<Piece> pieces;
+  PodVector<uint32_t> crossings_of(c.transitions.size(), 0);
   for (uint32_t tr = 0; tr < c.transitions.size(); ++tr) {
     scav_span const route{ r.route[tr] };
     for (uint32_t k = 0; (k + 1) < route.len; ++k) {
@@ -2742,7 +2748,7 @@ CostTerms terms(Chart const &c,
     if (excess > 0) { t.excess_len += excess * (1 + crossings_of[tr]); }
   }
 
-  Vector<uint8_t> encloses(c.states.size(), 0);
+  PodVector<uint8_t> encloses(c.states.size(), 0);
   auto const mark = [&](StateId of, uint8_t v) {
     StateId at{ enclosing_state(c, of) };
     for (size_t step = 0; (step < c.states.size()) && (at.v != INVALID); ++step) {
@@ -2778,7 +2784,7 @@ CostTerms terms(Chart const &c,
     for (uint32_t st = 0; st < c.states.size(); ++st) {
       if (c.states[st].live == 0) { continue; }
       // Bands with zero width or height are ignored.
-      auto const wall = [&](Vector<scav_rect> const &v) {
+      auto const wall = [&](PodVector<scav_rect> const &v) {
         return (st < v.size()) && (v[st].w > 0) && (v[st].h > 0) &&
                overlaps(r.placed[i], v[st]);
       };
@@ -2846,7 +2852,7 @@ CostTerms terms(Chart const &c,
                           (at.y >= box.y) && (at.y <= box.y + box.h)) ||
                          (((at.y == box.y) || (at.y == box.y + box.h)) &&
                           (at.x >= box.x) && (at.x <= box.x + box.w)) };
-      auto const row = [st](Vector<scav_rect> const &v) {
+      auto const row = [st](PodVector<scav_rect> const &v) {
         return (st < v.size()) ? v[st] : scav_rect{};
       };
       scav_rect const b{ row(z.before) };
@@ -2933,8 +2939,8 @@ struct Lattice {
 Chart random_chart(Lattice &r) {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
-  Vector<SubmachineId> frames{ root };
-  Vector<StateId> states;
+  PodVector<SubmachineId> frames{ root };
+  PodVector<StateId> states;
   constexpr std::array<StateKind, 4> ODD{ StateKind::Initial,
                                           StateKind::Choice,
                                           StateKind::Fork,
@@ -2957,9 +2963,9 @@ Chart random_chart(Lattice &r) {
       states.push_back(build_state(c, in, "W", StateKind::Normal, {}));
     }
   }
-  Vector<uint8_t> dead(c.states.size(), 0);
+  PodVector<uint8_t> dead(c.states.size(), 0);
   for (StateId const st : states) { dead[st.v] = (r.next(10) == 0) ? 1U : 0U; }
-  Vector<StateId> alive;
+  PodVector<StateId> alive;
   for (StateId const st : states) {
     if (dead[st.v] == 0) { alive.push_back(st); }
   }
@@ -2983,7 +2989,7 @@ Chart random_chart(Lattice &r) {
 struct Candidate {
   SizedLayout z;
   Routes r;
-  Vector<scav_path_box> boxes;
+  PodVector<scav_path_box> boxes;
   [[nodiscard]] scav_spaces spaces() const {
     return { .path_box = boxes.empty() ? nullptr : boxes.data(),
              .n_path_box = static_cast<uint32_t>(boxes.size()) };
@@ -3002,7 +3008,7 @@ Candidate random_candidate(Chart const &c, Lattice &r) {
   for (scav_rect &sub : z.sub) { sub = r.rect(); }
   z.chart = r.rect();
 
-  std::vector<Vector<scav_point>> lines(c.transitions.size());
+  std::vector<PodVector<scav_point>> lines(c.transitions.size());
   for (uint32_t t = 0; t < lines.size(); ++t) {
     uint32_t const len{ r.next(7) };
     if (len == 0) { continue; }
@@ -3013,7 +3019,7 @@ Candidate random_candidate(Chart const &c, Lattice &r) {
       lines[t].push_back(at);
     }
     if ((t > 0) && (r.next(4) == 0)) {
-      Vector<scav_point> const &into{ lines[r.next(t)] };
+      PodVector<scav_point> const &into{ lines[r.next(t)] };
       if (!into.empty()) {
         lines[t].push_back(into[into.size() - 1]);
         if ((into.size() > 1) && (r.next(2) == 0)) {
@@ -3194,7 +3200,7 @@ TEST_CASE("cost: the indexed terms are the direct scans' at the edges") {
                { .x = 200, .y = 100, .w = 60, .h = 30 },
                { .x = 0, .y = 60, .w = 40, .h = 20 },
                { .x = 360, .y = 150, .w = 0, .h = 0 } };
-  Vector<scav_path_box> const boxes{
+  PodVector<scav_path_box> const boxes{
     { .subject = 0, .w = 60, .h = 20, .order = 0 },
     { .subject = 1, .w = 60, .h = 20, .order = 0 },
     { .subject = 0, .w = 60, .h = 30, .order = 1 },
@@ -3417,16 +3423,16 @@ struct TwoBoxes {
   Chart c;
   SplitGraph g;
   SizedLayout z;
-  std::vector<Vector<uint32_t>> bends;
+  std::vector<PodVector<uint32_t>> bends;
 
   TwoBoxes(scav_rect const &a,
            scav_rect const &b,
-           Vector<scav_rect> const &more = {},
+           PodVector<scav_rect> const &more = {},
            StateKind a_kind = StateKind::Normal) {
     SubmachineId const root{ build_chart(c, "t", {}) };
     StateId const sa{ build_state(c, root, "A", a_kind, {}) };
     StateId const sb{ build_state(c, root, "B", StateKind::Normal, {}) };
-    Vector<StateId> kids;
+    PodVector<StateId> kids;
     for (size_t k = 0; k < more.size(); ++k) {
       std::string const name{ "S" + std::to_string(k) };
       kids.push_back(build_state(c, root, name, StateKind::Normal, {}));
@@ -3459,7 +3465,7 @@ struct TwoBoxes {
 
   // The bound's bends under `router` with `faces` named.
   [[nodiscard]] int64_t turns(Router const &router,
-                              Vector<uint32_t> const &faces = {}) const {
+                              PodVector<uint32_t> const &faces = {}) const {
     scav_profile const p{ profile() };
     return cost_bound(c, g, bends, z, faces, p, route_clearance(p), router).bends;
   }
@@ -3602,7 +3608,7 @@ TEST_CASE("cost bound: unseated, an unnamed end may leave from anywhere on its b
   int32_t const clear{ route_clearance(p) };
   auto const unseated = [&](scav_rect const &a,
                             scav_rect const &b,
-                            Vector<uint32_t> const &faces = {}) {
+                            PodVector<uint32_t> const &faces = {}) {
     TwoBoxes const two{ a, b };
     return cost_bound(two.c, two.g, two.bends, two.z, faces, p, clear, ORTHO, false).bends;
   };
@@ -3619,7 +3625,7 @@ TEST_CASE("cost bound: each transition's share of the bends sums to the bound") 
   TwoBoxes const two{ { .x = 0, .y = 0, .w = 100, .h = 400 },
                       { .x = 300, .y = 600, .w = 100, .h = 400 } };
   scav_profile const p{ profile() };
-  Vector<int32_t> share;
+  PodVector<int32_t> share;
   CostTerms const t{ cost_bound(two.c,
                                 two.g,
                                 two.bends,

@@ -5,7 +5,7 @@
 
 #include "scav_int.h"
 #include "scav_internal.h"
-#include "scav_vector.h"
+#include "scav_pod_vector.h"
 
 #include <cstdint>
 
@@ -13,7 +13,7 @@ namespace scav {
 
 // Test entry: `pack_lr` with whitespace elimination switchable.
 SCAV_INTERNAL_BEGIN
-Packing pack_rows(Vector<scav_rect> const &rects,
+Packing pack_rows(PodVector<scav_rect> const &rects,
                   int32_t sep,
                   int32_t dar_num,
                   int32_t dar_den,
@@ -41,8 +41,8 @@ struct Extent {
 };
 
 // Per-thread spot list, reassigned in place by each (non-nested) packing.
-Vector<Spot> &spot_scratch() {
-  thread_local Vector<Spot> s;
+PodVector<Spot> &spot_scratch() {
+  thread_local PodVector<Spot> s;
   return s;
 }
 
@@ -53,7 +53,7 @@ int32_t narrow(Wide v) { return static_cast<int32_t>(imin(v, Wide{ PACK_SATURATE
 // `area * dar_num` fits in int64.
 constexpr Wide AREA_MAX{ Wide{ 1 } << 48 };
 
-Wide target_width(Vector<scav_rect> const &rects,
+Wide target_width(PodVector<scav_rect> const &rects,
                   int32_t sep,
                   int32_t dar_num,
                   int32_t dar_den) {
@@ -115,10 +115,10 @@ Wide seat(Cursor &at, Spot spot, Wide w, Wide h, int32_t sep) {
 
 // Writes each rect's position into `at`, whose sizes are already set, and returns the
 // packing's extents.
-Extent lay(Vector<scav_rect> const &rects,
-           Vector<Spot> const &spot,
+Extent lay(PodVector<scav_rect> const &rects,
+           PodVector<Spot> const &spot,
            int32_t sep,
-           Vector<scav_rect> &at) {
+           PodVector<scav_rect> &at) {
   at[0].x = 0;
   at[0].y = 0;
   Cursor cur{ seeded(rects[0], sep) };
@@ -135,7 +135,10 @@ Extent lay(Vector<scav_rect> const &rects,
 
 // Each rect takes the first spot that fits within `target`: Level (only from a lower
 // subrow), Right, Subrow, else Row.
-void place(Vector<scav_rect> const &rects, int32_t sep, Wide target, Vector<Spot> &spot) {
+void place(PodVector<scav_rect> const &rects,
+           int32_t sep,
+           Wide target,
+           PodVector<Spot> &spot) {
   spot.assign(rects.size(), Spot::Row);
   Cursor at{ seeded(rects[0], sep) };
   for (uint32_t i = 1; i < rects.size(); ++i) {
@@ -165,10 +168,10 @@ bool tighter(Extent const &a, Extent const &b) {
 
 // Each rect, in index order, tries its three other spots and takes the tightest that
 // shrinks one extent and grows neither.
-void compact(Vector<scav_rect> const &rects,
+void compact(PodVector<scav_rect> const &rects,
              int32_t sep,
-             Vector<Spot> &spot,
-             Vector<scav_rect> &at) {
+             PodVector<Spot> &spot,
+             PodVector<scav_rect> &at) {
   Extent cur{ lay(rects, spot, sep, at) };
   Cursor before{ seeded(rects[0], sep) };
   for (uint32_t i = 1; i < rects.size(); ++i) {
@@ -206,7 +209,7 @@ Wide prefix(Wide extra, uint32_t i, uint32_t parts) {
 }
 
 // First index after `at` whose spot is `level` or coarser, else `end`.
-uint32_t run_end(Vector<Spot> const &spot, uint32_t at, uint32_t end, Spot level) {
+uint32_t run_end(PodVector<Spot> const &spot, uint32_t at, uint32_t end, Spot level) {
   uint32_t next{ at + 1 };
   while ((next < end) && (spot[next] < level)) { ++next; }
   return next;
@@ -214,7 +217,7 @@ uint32_t run_end(Vector<Spot> const &spot, uint32_t at, uint32_t end, Spot level
 
 // Grows rows, blocks, subrows and rects to fill their parents, keeping every gap; a
 // rect with zero width or height keeps its size and takes no share.
-void expand(Vector<Spot> const &spot, Extent const &whole, Vector<scav_rect> &at) {
+void expand(PodVector<Spot> const &spot, Extent const &whole, PodVector<scav_rect> &at) {
   uint32_t const n{ static_cast<uint32_t>(at.size()) };
   for (uint32_t row = 0; row < n;) {
     uint32_t const row_last{ run_end(spot, row, n, Spot::Row) };
@@ -285,7 +288,7 @@ void expand(Vector<Spot> const &spot, Extent const &whole, Vector<scav_rect> &at
 
 // `pack_rows`, written into `out` in place.
 void fill_rows(Packing &out,
-               Vector<scav_rect> const &rects,
+               PodVector<scav_rect> const &rects,
                int32_t sep,
                int32_t dar_num,
                int32_t dar_den,
@@ -295,7 +298,7 @@ void fill_rows(Packing &out,
   out.w = 0;
   out.h = 0;
   if (rects.empty()) { return; }
-  Vector<Spot> &spot{ spot_scratch() };
+  PodVector<Spot> &spot{ spot_scratch() };
   place(rects, sep, target_width(rects, sep, dar_num, dar_den), spot);
   if (compaction == Compaction::On) { compact(rects, sep, spot, out.at); }
   Extent const e{ lay(rects, spot, sep, out.at) };
@@ -308,7 +311,7 @@ void fill_rows(Packing &out,
 }  // namespace
 
 SCAV_INTERNAL_BEGIN
-[[maybe_unused]] Packing pack_rows(Vector<scav_rect> const &rects,
+[[maybe_unused]] Packing pack_rows(PodVector<scav_rect> const &rects,
                                    int32_t sep,
                                    int32_t dar_num,
                                    int32_t dar_den,
@@ -321,7 +324,7 @@ SCAV_INTERNAL_BEGIN
 SCAV_INTERNAL_END
 
 void pack_lr(Packing &out,
-             Vector<scav_rect> const &rects,
+             PodVector<scav_rect> const &rects,
              int32_t sep,
              int32_t dar_num,
              int32_t dar_den,
@@ -329,13 +332,13 @@ void pack_lr(Packing &out,
   fill_rows(out, rects, sep, dar_num, dar_den, compaction, true);
 }
 
-void pack_box(Packing &out, Vector<scav_rect> const &rects, int32_t sep) {
+void pack_box(Packing &out, PodVector<scav_rect> const &rects, int32_t sep) {
   out.at.assign(rects.begin(), rects.end());
   out.w = 0;
   out.h = 0;
   if (rects.empty()) { return; }
   // Every rect Right of its predecessor in one subrow; expansion levels the heights.
-  Vector<Spot> &spot{ spot_scratch() };
+  PodVector<Spot> &spot{ spot_scratch() };
   spot.assign(rects.size(), Spot::Right);
   Extent const e{ lay(rects, spot, sep, out.at) };
   out.w = narrow(e.w);

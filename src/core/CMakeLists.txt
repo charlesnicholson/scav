@@ -3,7 +3,7 @@
 scav_static_library(scavcore
   # src/-root primitives belonging to no library; core compiles them, so anything
   # linking core reaches them.
-  ../scav_vector.cpp
+  ../scav_pod_vector.cpp
   ../scav_xxhash.cpp
   # Core-wide sources outside the three subsystems: the C API and the diagnostics table.
   c_api.cpp
@@ -28,7 +28,7 @@ scav_static_library(scavcore
 scav_install_library(scavcore core)
 scav_optimize_for_size(scavcore)
 if(NOT CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
-  set_source_files_properties(../scav_vector.cpp TARGET_DIRECTORY scavcore PROPERTIES
+  set_source_files_properties(../scav_pod_vector.cpp TARGET_DIRECTORY scavcore PROPERTIES
     COMPILE_OPTIONS "$<$<CONFIG:Release>:-O3>")
 endif()
 

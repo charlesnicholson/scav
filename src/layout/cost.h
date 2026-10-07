@@ -10,7 +10,7 @@
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
 #include "scav/scav_layout_c.h"
-#include "scav_vector.h"
+#include "scav_pod_vector.h"
 
 #include <array>
 #include <cstdint>
@@ -28,10 +28,10 @@ struct Piece {
 // Entry and exit times from one DFS of the containment forest; a state's descendants are
 // the states whose interval nests inside its own.
 struct Ancestry {
-  Vector<uint32_t> tin, tout;  // 0 = the walk never reached the state
+  PodVector<uint32_t> tin, tout;  // 0 = the walk never reached the state
   // Live states the Tier 0 descent cannot reach: those under a dead state and those no
   // document root encloses.
-  Vector<uint32_t> detached;
+  PodVector<uint32_t> detached;
 };
 
 // One uniform bucket grid per submachine over its live children.
@@ -43,18 +43,18 @@ struct ChildGrid {
     uint32_t bucket{ 0 };  // -> bucket_off, this frame's first cell
     Span children{};       // -> child
   };
-  Vector<Frame> frame;          // parallel to Chart::submachines
-  Vector<uint32_t> child;       // live child state ordinals, in span order
-  Vector<uint32_t> bucket_off;  // one entry per cell over all frames, plus a tail
-  Vector<uint32_t> bucket_at;   // -> child
+  PodVector<Frame> frame;          // parallel to Chart::submachines
+  PodVector<uint32_t> child;       // live child state ordinals, in span order
+  PodVector<uint32_t> bucket_off;  // one entry per cell over all frames, plus a tail
+  PodVector<uint32_t> bucket_at;   // -> child
 };
 
 // Scratch for grid queries. `hit` lists each child once; `stamp` holds the `epoch` of the
 // query that last yielded it.
 struct GridQuery {
-  Vector<uint64_t> stamp;  // parallel to ChildGrid::child
+  PodVector<uint64_t> stamp;  // parallel to ChildGrid::child
   uint64_t epoch{ 0 };
-  Vector<uint32_t> hit;  // -> ChildGrid::child
+  PodVector<uint32_t> hit;  // -> ChildGrid::child
 };
 
 // What scoring reads of the chart alone; built once per chart and read concurrently by
@@ -64,7 +64,7 @@ struct CostContext {
   ChildGrid grid;  // frames and children only; each candidate fills a per-thread copy
   // Per transition, src end then dst: the lowest common ancestor's child on that end's
   // chain where it lies strictly above the end's enclosing state, else INVALID.
-  Vector<std::array<uint32_t, 2>> transit_top;
+  PodVector<std::array<uint32_t, 2>> transit_top;
 };
 
 CostContext cost_context(Chart const &c, SplitGraph const &g);
@@ -86,8 +86,8 @@ CostTerms cost_terms(CostContext const &ctx,
                      Routes const &r,
                      scav_spaces const &s,
                      scav_profile const &p,
-                     Vector<uint8_t> *party = nullptr,
-                     Vector<Wide> *charge = nullptr,
+                     PodVector<uint8_t> *party = nullptr,
+                     PodVector<Wide> *charge = nullptr,
                      CostStop *stop = nullptr);
 
 // The same with a context built for this one call.
@@ -102,14 +102,14 @@ CostTerms cost_terms(Chart const &c,
 // scores, box ends on their seats' faces where `seated`; `faces` per `box_faces`.
 CostTerms cost_bound(Chart const &c,
                      SplitGraph const &g,
-                     std::vector<Vector<uint32_t>> const &bends,  // `segment_bends`
+                     std::vector<PodVector<uint32_t>> const &bends,  // `segment_bends`
                      SizedLayout const &z,
-                     Vector<uint32_t> const &faces,
+                     PodVector<uint32_t> const &faces,
                      scav_profile const &p,
                      int32_t clear,
                      Router const &router,
                      bool seated = true,
-                     Vector<int32_t> *per_trans = nullptr);  // bends per transition
+                     PodVector<int32_t> *per_trans = nullptr);  // bends per transition
 
 // The same scoring read from the geometry columns; `placed` is the run's placed-box
 // out-param.

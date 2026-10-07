@@ -12,11 +12,11 @@
 #include "scav/scav_layout.h"
 #include "scav/scav_layout_c.h"
 #include "scav_int.h"
+#include "scav_pod_vector.h"
 #include "scav_shard.h"
 #include "scav_stable_sort.h"
 #include "scav_thread.h"
 #include "scav_vec.h"
-#include "scav_vector.h"
 
 #include <array>
 #include <cstdint>
@@ -35,15 +35,15 @@ Memo &frame_memo() {
 
 // Edge indices grouped by one endpoint.
 struct Adjacency {
-  Vector<uint32_t> off, edge;
+  PodVector<uint32_t> off, edge;
 };
 
 // `a.off[i]..a.off[i+1]` is node i's run of `a.edge`; `fill` is the caller's scratch.
 void adjacency_of(Adjacency &a,
-                  Vector<OrderEdge> const &edges,
+                  PodVector<OrderEdge> const &edges,
                   uint32_t nodes,
                   bool by_src,
-                  Vector<uint32_t> &fill) {
+                  PodVector<uint32_t> &fill) {
   a.off.assign(size_t{ nodes } + 1, 0);
   for (OrderEdge const &e : edges) { ++a.off[size_t{ by_src ? e.src : e.dst } + 1]; }
   for (uint32_t i = 0; i < nodes; ++i) { a.off[i + 1] += a.off[i]; }
@@ -56,9 +56,9 @@ void adjacency_of(Adjacency &a,
 
 // One frame's graph in frame-local node indices.
 struct Frame {
-  Vector<OrderNode> nodes;
-  Vector<OrderEdge> edges;
-  std::vector<Vector<uint32_t>> ranks;  // rank -> node indices, in order
+  PodVector<OrderNode> nodes;
+  PodVector<OrderEdge> edges;
+  std::vector<PodVector<uint32_t>> ranks;  // rank -> node indices, in order
   Adjacency in, out;
 };
 
@@ -71,24 +71,24 @@ struct SegPort {
 // One submachine's result, written by the shard that owns it.
 struct FrameOrder {
   Frame f;
-  Vector<int32_t> gaps, labels;
-  Vector<SegPort> seg_ports;
-  Vector<uint32_t> cyclic;  // -> segments, those on a cycle of this frame
+  PodVector<int32_t> gaps, labels;
+  PodVector<SegPort> seg_ports;
+  PodVector<uint32_t> cyclic;  // -> segments, those on a cycle of this frame
 };
 
 // Per-thread scratch reused across frames. Both maps hold frame-local node indices and
 // return to INVALID after each frame.
 struct FrameScratch {
-  Vector<uint32_t> state_local;  // parallel to states
-  Vector<uint32_t> seg_local;    // parallel to SplitGraph::segments
-  Partition part;                // -> nodes, the frame's components
-  Vector<uint32_t> dense;        // parallel to nodes; a component root's ordinal
-  Vector<uint32_t> lanes;        // boundaries x components, row-major
-  Vector<uint32_t> spanning;     // -> edges, labelled across several boundaries
-  Vector<OrderEdge> flat;        // edges into a cross-border port, held out
-  Vector<uint8_t> fixed;         // parallel to edges; 1 = oriented by an end pin
-  Vector<uint32_t> flips;        // -> edges, an initial's reversed by a pin
-  Vector<uint8_t> extreme;       // parallel to nodes; 1 first in its rank, 2 last
+  PodVector<uint32_t> state_local;  // parallel to states
+  PodVector<uint32_t> seg_local;    // parallel to SplitGraph::segments
+  Partition part;                   // -> nodes, the frame's components
+  PodVector<uint32_t> dense;        // parallel to nodes; a component root's ordinal
+  PodVector<uint32_t> lanes;        // boundaries x components, row-major
+  PodVector<uint32_t> spanning;     // -> edges, labelled across several boundaries
+  PodVector<OrderEdge> flat;        // edges into a cross-border port, held out
+  PodVector<uint8_t> fixed;         // parallel to edges; 1 = oriented by an end pin
+  PodVector<uint32_t> flips;        // -> edges, an initial's reversed by a pin
+  PodVector<uint8_t> extreme;       // parallel to nodes; 1 first in its rank, 2 last
 
   // The helpers' working buffers; each sizes what it reads before reading it.
   struct Visit {
@@ -99,13 +99,13 @@ struct FrameScratch {
     uint32_t north, south;
   };
   Adjacency walk;
-  Vector<uint32_t> fill, index, low, comp, held, pending, topo, renumber;
-  Vector<uint8_t> marks;
-  Vector<Visit> visits;
-  Vector<OrderEdge> chained;
-  Vector<SouthPair> pairs, merge;
-  Vector<uint32_t> south, tree, med, medians;
-  std::vector<Vector<uint32_t>> best;
+  PodVector<uint32_t> fill, index, low, comp, held, pending, topo, renumber;
+  PodVector<uint8_t> marks;
+  PodVector<Visit> visits;
+  PodVector<OrderEdge> chained;
+  PodVector<SouthPair> pairs, merge;
+  PodVector<uint32_t> south, tree, med, medians;
+  std::vector<PodVector<uint32_t>> best;
 };
 
 // This thread's `FrameScratch`, both maps sized to `c` and `g`. A shard never waits on the
@@ -124,15 +124,15 @@ FrameScratch &frame_scratch(Chart const &c, SplitGraph const &g) {
 // One `order_submachines` call's buffers, per thread and nesting depth; a call waiting on
 // its shards may run another call's shards on this thread.
 struct CallScratch {
-  Vector<uint32_t> seg_count, seg_off, frame_segs, fill, global;
-  Vector<int32_t> seg_label;
-  Vector<uint8_t> cut, pre_reversed, sided;
+  PodVector<uint32_t> seg_count, seg_off, frame_segs, fill, global;
+  PodVector<int32_t> seg_label;
+  PodVector<uint8_t> cut, pre_reversed, sided;
   std::vector<FrameOrder> frames;
 };
 
 // One scratch per depth, each at a fixed address, deleted when the thread exits.
 struct CallStack {
-  Vector<CallScratch *> at;
+  PodVector<CallScratch *> at;
   CallStack() = default;
   CallStack(CallStack const &) = delete;
   CallStack(CallStack &&) = delete;
@@ -146,7 +146,7 @@ struct CallStack {
 class CallScope {
  public:
   CallScope() {
-    Vector<CallScratch *> &s{ stack().at };
+    PodVector<CallScratch *> &s{ stack().at };
     if (depth() == s.size()) { s.push_back(new CallScratch); }
     at = s[depth()];
     ++depth();
@@ -175,7 +175,7 @@ StateId endpoint_state(Chart const &c, SplitSegment const &seg, bool is_src) {
 }
 
 // Strict inversions in `v` by a Fenwick tree indexed by value; `tree` is caller scratch.
-uint64_t inversions(Vector<uint32_t> const &v, Vector<uint32_t> &tree) {
+uint64_t inversions(PodVector<uint32_t> const &v, PodVector<uint32_t> &tree) {
   if (v.size() < 2) { return 0; }
   uint32_t hi{ 0 };
   for (uint32_t const x : v) { hi = imax(hi, x); }
@@ -195,21 +195,21 @@ uint64_t inversions(Vector<uint32_t> const &v, Vector<uint32_t> &tree) {
 
 // Segments whose edge lies on a cycle of the frame's graph: both ends in one strongly
 // connected component, found by iterative Tarjan's.
-void cyclic_segments(Frame const &f, Vector<uint32_t> &segs, FrameScratch &sc) {
+void cyclic_segments(Frame const &f, PodVector<uint32_t> &segs, FrameScratch &sc) {
   uint32_t const n{ static_cast<uint32_t>(f.nodes.size()) };
   Adjacency &out{ sc.walk };
   adjacency_of(out, f.edges, n, true, sc.fill);
-  Vector<uint32_t> &index{ sc.index };
+  PodVector<uint32_t> &index{ sc.index };
   index.assign(n, INVALID);
-  Vector<uint32_t> &low{ sc.low };
+  PodVector<uint32_t> &low{ sc.low };
   low.assign(n, 0);
-  Vector<uint32_t> &comp{ sc.comp };
+  PodVector<uint32_t> &comp{ sc.comp };
   comp.assign(n, INVALID);
-  Vector<uint8_t> &on_stack{ sc.marks };
+  PodVector<uint8_t> &on_stack{ sc.marks };
   on_stack.assign(n, 0);
-  Vector<uint32_t> &held{ sc.held };
+  PodVector<uint32_t> &held{ sc.held };
   held.clear();
-  Vector<FrameScratch::Visit> &call{ sc.visits };
+  PodVector<FrameScratch::Visit> &call{ sc.visits };
   call.clear();
   uint32_t counter{ 0 };
   uint32_t comps{ 0 };
@@ -263,8 +263,8 @@ void cyclic_segments(Frame const &f, Vector<uint32_t> &segs, FrameScratch &sc) {
 // Makes the frame a DAG by DFS walks that reverse each edge closing onto the walk's path:
 // against the edges from each trailing port, then from each leading port, then node order.
 void orient_acyclic(Frame &f,
-                    Vector<uint8_t> const &pre,
-                    Vector<uint8_t> const &fixed,
+                    PodVector<uint8_t> const &pre,
+                    PodVector<uint8_t> const &fixed,
                     FrameScratch &sc) {
   // Before the walk, reverses each edge `pre` names; skips `fixed` edges, which an end pin
   // has oriented.
@@ -286,9 +286,9 @@ void orient_acyclic(Frame &f,
   adjacency_of(in, f.edges, n, false, sc.fill);
 
   enum : uint8_t { White, Gray, Black };
-  Vector<uint8_t> &color{ sc.marks };
+  PodVector<uint8_t> &color{ sc.marks };
   color.assign(n, White);
-  Vector<FrameScratch::Visit> &stack{ sc.visits };
+  PodVector<FrameScratch::Visit> &stack{ sc.visits };
   stack.clear();
   // A DFS from `root` along out-edges (`forward`) or in-edges.
   auto const walk = [&](uint32_t root, bool forward) {
@@ -341,10 +341,10 @@ void assign_ranks(Frame &f, FrameScratch &sc) {
   auto const out_deg = [&](uint32_t v) { return f.out.off[v + 1] - f.out.off[v]; };
   auto const in_deg = [&](uint32_t v) { return f.in.off[v + 1] - f.in.off[v]; };
 
-  Vector<uint32_t> &pending{ sc.pending };
+  PodVector<uint32_t> &pending{ sc.pending };
   pending.assign(n, 0);
   for (uint32_t v = 0; v < n; ++v) { pending[v] = in_deg(v); }
-  Vector<uint32_t> &topo{ sc.topo };
+  PodVector<uint32_t> &topo{ sc.topo };
   topo.clear();
   topo.reserve(n);
   for (uint32_t v = 0; v < n; ++v) {
@@ -386,10 +386,10 @@ void assign_ranks(Frame &f, FrameScratch &sc) {
     f.nodes[v].rank = nearest - 1;
   }
 
-  Vector<uint32_t> &used{ sc.held };
+  PodVector<uint32_t> &used{ sc.held };
   used.assign(size_t{ top } + 1, 0);
   for (OrderNode const &nd : f.nodes) { used[nd.rank] = 1; }
-  Vector<uint32_t> &renumber{ sc.renumber };
+  PodVector<uint32_t> &renumber{ sc.renumber };
   renumber.assign(used.size(), 0);
   uint32_t next{ 0 };
   for (uint32_t r = 0; r < used.size(); ++r) {
@@ -407,8 +407,8 @@ void assign_ranks(Frame &f, FrameScratch &sc) {
 
 // Chains each forward multi-rank edge through one bend per intervening rank, keeping its
 // segment and reversal; a segment `cut` names keeps its long edge.
-void chain_long_edges(Frame &f, Vector<uint8_t> const &cut, FrameScratch &sc) {
-  Vector<OrderEdge> &out{ sc.chained };
+void chain_long_edges(Frame &f, PodVector<uint8_t> const &cut, FrameScratch &sc) {
+  PodVector<OrderEdge> &out{ sc.chained };
   out.clear();
   out.reserve(f.edges.size());
   for (OrderEdge const &e : f.edges) {
@@ -442,7 +442,7 @@ void chain_long_edges(Frame &f, Vector<uint8_t> const &cut, FrameScratch &sc) {
 
 // Rank buckets in node order; an `extreme` node goes first (1) or last (2) and no sweep
 // moves it.
-void bucket_ranks(Frame &f, Vector<uint8_t> const &extreme) {
+void bucket_ranks(Frame &f, PodVector<uint8_t> const &extreme) {
   if (f.nodes.empty()) {
     f.ranks.clear();
     return;
@@ -456,15 +456,17 @@ void bucket_ranks(Frame &f, Vector<uint8_t> const &extreme) {
       if (at == want) { f.ranks[f.nodes[v].rank].push_back(v); }
     }
   }
-  for (Vector<uint32_t> const &bucket : f.ranks) {
+  for (PodVector<uint32_t> const &bucket : f.ranks) {
     for (uint32_t i = 0; i < bucket.size(); ++i) { f.nodes[bucket[i]].pos = i; }
   }
 }
 
 // South positions of the edges leaving `north_rank`, sorted by (north, south).
-Vector<uint32_t> const &south_of(Frame const &f, uint32_t north_rank, FrameScratch &sc) {
+PodVector<uint32_t> const &south_of(Frame const &f,
+                                    uint32_t north_rank,
+                                    FrameScratch &sc) {
   using Pair = FrameScratch::SouthPair;
-  Vector<Pair> &pairs{ sc.pairs };
+  PodVector<Pair> &pairs{ sc.pairs };
   pairs.clear();
   for (uint32_t const v : f.ranks[north_rank]) {
     for (uint32_t k = f.out.off[v]; k < f.out.off[v + 1]; ++k) {
@@ -476,7 +478,7 @@ Vector<uint32_t> const &south_of(Frame const &f, uint32_t north_rank, FrameScrat
   scav_stable_sort(pairs, sc.merge, [](Pair const &a, Pair const &b) {
     return (a.north != b.north) ? (a.north < b.north) : (a.south < b.south);
   });
-  Vector<uint32_t> &south{ sc.south };
+  PodVector<uint32_t> &south{ sc.south };
   south.clear();
   south.reserve(pairs.size());
   for (Pair const &pr : pairs) { south.push_back(pr.south); }
@@ -496,7 +498,7 @@ uint64_t total_crossings(Frame const &f, FrameScratch &sc) {
 uint32_t median_of(Frame const &f,
                    uint32_t node,
                    bool from_predecessors,
-                   Vector<uint32_t> &scratch) {
+                   PodVector<uint32_t> &scratch) {
   Adjacency const &a{ from_predecessors ? f.in : f.out };
   scratch.clear();
   for (uint32_t k = a.off[node]; k < a.off[node + 1]; ++k) {
@@ -513,10 +515,10 @@ uint32_t median_of(Frame const &f,
 // Bubble-sorts the rank by median with adjacent swaps between two nodes that both have
 // one; a node with no median keeps its slot.
 void reorder_rank(Frame &f, uint32_t rank, bool from_predecessors, FrameScratch &sc) {
-  Vector<uint32_t> &bucket{ f.ranks[rank] };
-  Vector<uint32_t> &med{ sc.med };
+  PodVector<uint32_t> &bucket{ f.ranks[rank] };
+  PodVector<uint32_t> &med{ sc.med };
   med.assign(bucket.size(), INVALID);
-  Vector<uint32_t> &scratch{ sc.medians };
+  PodVector<uint32_t> &scratch{ sc.medians };
   for (uint32_t i = 0; i < bucket.size(); ++i) {
     med[i] = median_of(f, bucket[i], from_predecessors, scratch);
   }
@@ -542,9 +544,9 @@ void reorder_rank(Frame &f, uint32_t rank, bool from_predecessors, FrameScratch 
 // Up to `sweeps` alternating median sweeps; keeps the ordering with the fewest crossings.
 void minimize_crossings(Frame &f, uint32_t sweeps, FrameScratch &sc) {
   if (f.ranks.size() < 2) { return; }
-  std::vector<Vector<uint32_t>> &best{ sc.best };
-  auto const copy_ranks = [](std::vector<Vector<uint32_t>> &to,
-                             std::vector<Vector<uint32_t>> const &from) {
+  std::vector<PodVector<uint32_t>> &best{ sc.best };
+  auto const copy_ranks = [](std::vector<PodVector<uint32_t>> &to,
+                             std::vector<PodVector<uint32_t>> const &from) {
     vec_resize(to, from.size());
     for (size_t r = 0; r < from.size(); ++r) {
       to[r].assign(from[r].begin(), from[r].end());
@@ -567,7 +569,7 @@ void minimize_crossings(Frame &f, uint32_t sweeps, FrameScratch &sc) {
     }
   }
   copy_ranks(f.ranks, best);
-  for (Vector<uint32_t> const &bucket : f.ranks) {
+  for (PodVector<uint32_t> const &bucket : f.ranks) {
     for (uint32_t i = 0; i < bucket.size(); ++i) { f.nodes[bucket[i]].pos = i; }
   }
 }
@@ -575,11 +577,11 @@ void minimize_crossings(Frame &f, uint32_t sweeps, FrameScratch &sc) {
 // Moves each cross-border port's mate toward the port's end of their rank, one swap at a
 // time while no crossing is added; an `extreme` node or an earlier mate stops it.
 void slide_to_ports(Frame &f,
-                    Vector<OrderEdge> const &flat,
-                    Vector<uint8_t> const &extreme,
+                    PodVector<OrderEdge> const &flat,
+                    PodVector<uint8_t> const &extreme,
                     FrameScratch &sc) {
   if (flat.empty()) { return; }
-  Vector<uint8_t> &held{ sc.marks };
+  PodVector<uint8_t> &held{ sc.marks };
   held.assign(f.nodes.size(), 0);
   auto const stops = [&](uint32_t v) {
     return (held[v] != 0) || ((v < extreme.size()) && (extreme[v] != 0));
@@ -592,7 +594,7 @@ void slide_to_ports(Frame &f,
     if (stops(mate) || (f.nodes[mate].rank != f.nodes[port].rank)) { continue; }
     held[mate] = 1;
     bool const last{ extreme[port] == 2 };
-    Vector<uint32_t> &bucket{ f.ranks[f.nodes[mate].rank] };
+    PodVector<uint32_t> &bucket{ f.ranks[f.nodes[mate].rank] };
     for (;;) {
       uint32_t const at{ f.nodes[mate].pos };
       if (last ? ((at + 1) >= bucket.size()) : (at == 0)) { break; }
@@ -616,8 +618,8 @@ void slide_to_ports(Frame &f,
 
 }  // namespace
 
-uint64_t rank_crossings(Vector<uint32_t> const &south_positions) {
-  Vector<uint32_t> tree;
+uint64_t rank_crossings(PodVector<uint32_t> const &south_positions) {
+  PodVector<uint32_t> tree;
   return inversions(south_positions, tree);
 }
 
@@ -663,7 +665,7 @@ void seat_initials(Chart const &c, Frame &f) {
 void squeeze_ranks(Frame &f, FrameScratch &sc) {
   uint32_t top{ 0 };
   for (OrderNode const &nd : f.nodes) { top = imax(top, nd.rank); }
-  Vector<uint32_t> &onto{ sc.renumber };
+  PodVector<uint32_t> &onto{ sc.renumber };
   onto.assign(static_cast<size_t>(top) + 1, INVALID);
   for (OrderNode const &nd : f.nodes) { onto[nd.rank] = 0; }
   uint32_t next{ 0 };
@@ -677,12 +679,12 @@ void squeeze_ranks(Frame &f, FrameScratch &sc) {
 // ports; of `f` it reads only `nodes[].rank` and `edges`. Not idempotent: chaining appends
 // bend nodes.
 void rank_derived(Frame &f,
-                  Vector<int32_t> &gaps,
-                  Vector<int32_t> &labels,
-                  Vector<int32_t> const &seg_label,
-                  Vector<uint8_t> const &cut,
-                  Vector<uint8_t> const &extreme,
-                  Vector<OrderEdge> const &flat,
+                  PodVector<int32_t> &gaps,
+                  PodVector<int32_t> &labels,
+                  PodVector<int32_t> const &seg_label,
+                  PodVector<uint8_t> const &cut,
+                  PodVector<uint8_t> const &extreme,
+                  PodVector<OrderEdge> const &flat,
                   scav_profile const &p,
                   FrameScratch &sc) {
   // Before chaining: an edge across one boundary charges its label there; longer edges
@@ -691,7 +693,7 @@ void rank_derived(Frame &f,
   for (OrderNode const &nd : f.nodes) { top = imax(top, nd.rank); }
   gaps.assign(top, 0);
   labels.assign(top, 0);
-  Vector<uint32_t> &spanning{ sc.spanning };
+  PodVector<uint32_t> &spanning{ sc.spanning };
   spanning.clear();
   for (uint32_t i = 0; i < f.edges.size(); ++i) {
     OrderEdge const &e{ f.edges[i] };
@@ -716,14 +718,14 @@ void rank_derived(Frame &f,
   part.reset(f.nodes.size());
   for (OrderEdge const &e : f.edges) { part.join(e.src, e.dst); }
   // Component ordinals; the column index of the `lanes` table.
-  Vector<uint32_t> &dense{ sc.dense };
+  PodVector<uint32_t> &dense{ sc.dense };
   dense.assign(f.nodes.size(), INVALID);
   uint32_t parts{ 0 };
   for (uint32_t i = 0; i < f.nodes.size(); ++i) {
     uint32_t const root{ part.root(i) };
     if (dense[root] == INVALID) { dense[root] = parts++; }
   }
-  Vector<uint32_t> &lanes{ sc.lanes };
+  PodVector<uint32_t> &lanes{ sc.lanes };
   lanes.assign(gaps.size() * parts, 0);
   int32_t const pitch{ label_line_height(p) };
   auto const turn = [&](uint32_t b, uint32_t of) {
@@ -845,17 +847,17 @@ void order_submachines(SubmachineOrders &o,
   CallScratch &cs{ scope.scratch() };
 
   // Segments grouped by frame: `frame_segs[seg_off[m]..seg_off[m+1]]` are frame `m`'s.
-  Vector<uint32_t> &seg_count{ cs.seg_count };
+  PodVector<uint32_t> &seg_count{ cs.seg_count };
   seg_count.assign(c.submachines.size(), 0);
   for (SplitSegment const &seg : g.segments) {
     if (seg.frame.v != INVALID) { ++seg_count[seg.frame.v]; }
   }
-  Vector<uint32_t> &seg_off{ cs.seg_off };
+  PodVector<uint32_t> &seg_off{ cs.seg_off };
   seg_off.assign(seg_count.size() + 1, 0);
   for (uint32_t i = 0; i < seg_count.size(); ++i) {
     seg_off[i + 1] = seg_off[i] + seg_count[i];
   }
-  Vector<uint32_t> &frame_segs{ cs.frame_segs };
+  PodVector<uint32_t> &frame_segs{ cs.frame_segs };
   frame_segs.assign(g.segments.size(), 0);
   cs.fill.assign(seg_off.begin(), seg_off.end() - 1);
   for (uint32_t i = 0; i < g.segments.size(); ++i) {
@@ -865,7 +867,7 @@ void order_submachines(SubmachineOrders &o,
 
   // A label is charged to one rank boundary in its `label_segment`'s frame, by its extent
   // along that frame's ranks: its width across the page, its height down it.
-  Vector<int32_t> &seg_label{ cs.seg_label };
+  PodVector<int32_t> &seg_label{ cs.seg_label };
   seg_label.assign(g.segments.size(), 0);
   for (uint32_t i = 0; i < s.n_path_box; ++i) {
     scav_path_box const &box{ s.path_box[i] };
@@ -877,7 +879,7 @@ void order_submachines(SubmachineOrders &o,
   }
 
   // Marks each pinned `{trans, leg}` in a table parallel to segments; empty for no pins.
-  auto const resolve_pins = [&g](auto const &rows, Vector<uint8_t> &table) {
+  auto const resolve_pins = [&g](auto const &rows, PodVector<uint8_t> &table) {
     table.clear();
     if (rows.empty()) { return; }
     table.assign(g.segments.size(), 0);
@@ -890,13 +892,13 @@ void order_submachines(SubmachineOrders &o,
       table[segs.off + row.leg] = 1;
     }
   };
-  Vector<uint8_t> &cut{ cs.cut };
-  Vector<uint8_t> &pre_reversed{ cs.pre_reversed };
+  PodVector<uint8_t> &cut{ cs.cut };
+  PodVector<uint8_t> &pre_reversed{ cs.pre_reversed };
   resolve_pins(pins.cuts, cut);
   resolve_pins(pins.reverses, pre_reversed);
   // Per segment, 1 + an end pin's side at a state-border port, 0 for none; set on the leg
   // inside the pinned port's border, whose boundary node stands for the port.
-  Vector<uint8_t> &sided{ cs.sided };
+  PodVector<uint8_t> &sided{ cs.sided };
   sided.clear();
   for (EndPin const &pin : pins.ends) {
     if ((pin.trans.v == INVALID) || (pin.trans.v >= g.trans_segments.size()) ||
@@ -946,7 +948,7 @@ void order_submachines(SubmachineOrders &o,
   auto const order_frame = [&](uint32_t m, FrameScratch &sc) {
     TraceFrame const traced{ SubmachineId{ m } };
     Frame &f{ frames[m].f };
-    Vector<SegPort> &seg_ports{ frames[m].seg_ports };
+    PodVector<SegPort> &seg_ports{ frames[m].seg_ports };
     f.nodes.clear();
     f.edges.clear();
     seg_ports.clear();
@@ -1024,8 +1026,8 @@ void order_submachines(SubmachineOrders &o,
     // Memo key: serial, profile, the frame as built, per edge its pins and label charge,
     // and its rank pins. A traced run skips the memo.
     bool const tracing{ trace_sink() != nullptr };
-    thread_local Vector<uint32_t> key;
-    thread_local Vector<int32_t> value;
+    thread_local PodVector<uint32_t> key;
+    thread_local PodVector<int32_t> value;
     key.clear();
     if (!tracing) {
       key.push_back(g.serial);
@@ -1085,7 +1087,7 @@ void order_submachines(SubmachineOrders &o,
         e = { .src = word(), .dst = word(), .segment = word(), .reversed = word() };
       }
       vec_resize(f.ranks, word());
-      for (Vector<uint32_t> &bucket : f.ranks) {
+      for (PodVector<uint32_t> &bucket : f.ranks) {
         bucket.resize(word());
         for (uint32_t &v : bucket) { v = word(); }
       }
@@ -1099,9 +1101,9 @@ void order_submachines(SubmachineOrders &o,
       cyclic_segments(f, frames[m].cyclic, sc);
       // An edge into a cross-border port is held out of ranking and takes its mate's rank;
       // one into a port pinned to a rank border is oriented and `fixed`.
-      Vector<OrderEdge> &flat{ sc.flat };
+      PodVector<OrderEdge> &flat{ sc.flat };
       flat.clear();
-      Vector<uint8_t> &fixed{ sc.fixed };
+      PodVector<uint8_t> &fixed{ sc.fixed };
       fixed.clear();
       if (!sided.empty()) {
         uint32_t kept{ 0 };
@@ -1129,7 +1131,7 @@ void order_submachines(SubmachineOrders &o,
       }
       // A reversal pin on an initial's edge takes no part in ranking; the dot moves after
       // its target once ranks settle.
-      Vector<uint32_t> &flips{ sc.flips };
+      PodVector<uint32_t> &flips{ sc.flips };
       flips.clear();
       for (uint32_t k = 0; !pre_reversed.empty() && (k < f.edges.size()); ++k) {
         OrderEdge const &e{ f.edges[k] };
@@ -1172,7 +1174,7 @@ void order_submachines(SubmachineOrders &o,
         seat_initials(c, f);
         squeeze_ranks(f, sc);
       }
-      Vector<uint8_t> &extreme{ sc.extreme };
+      PodVector<uint8_t> &extreme{ sc.extreme };
       extreme.clear();
       if (!flat.empty()) {
         extreme.assign(f.nodes.size(), 0);
@@ -1212,7 +1214,7 @@ void order_submachines(SubmachineOrders &o,
           put(e.reversed);
         }
         put(static_cast<uint32_t>(f.ranks.size()));
-        for (Vector<uint32_t> const &bucket : f.ranks) {
+        for (PodVector<uint32_t> const &bucket : f.ranks) {
           put(static_cast<uint32_t>(bucket.size()));
           for (uint32_t const v : bucket) { put(v); }
         }
@@ -1269,9 +1271,9 @@ void order_submachines(SubmachineOrders &o,
     bool const down{ o.sub_down[m] != 0 };
 
     // Nodes in (rank, pos) order.
-    Vector<uint32_t> &global{ cs.global };
+    PodVector<uint32_t> &global{ cs.global };
     global.assign(f.nodes.size(), INVALID);
-    for (Vector<uint32_t> const &bucket : f.ranks) {
+    for (PodVector<uint32_t> const &bucket : f.ranks) {
       for (uint32_t const v : bucket) {
         global[v] = static_cast<uint32_t>(o.nodes.size());
         o.nodes.push_back(f.nodes[v]);

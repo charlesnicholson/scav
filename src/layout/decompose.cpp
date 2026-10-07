@@ -7,7 +7,7 @@
 #include "layout/order.h"
 #include "scav/scav_core.h"
 #include "scav_cold.h"
-#include "scav_vector.h"
+#include "scav_pod_vector.h"
 
 #include <cstdint>
 #include <utility>
@@ -17,7 +17,7 @@ namespace scav {
 namespace {
 
 // `s` plus every enclosing state, innermost first; at most one entry per state.
-SCAV_COLD void chain_of(Chart const &c, StateId s, Vector<StateId> &out) {
+SCAV_COLD void chain_of(Chart const &c, StateId s, PodVector<StateId> &out) {
   out.clear();
   for (StateId x{ s }; (x.v != INVALID) && (out.size() < c.states.size());
        x = enclosing_state(c, x)) {
@@ -29,8 +29,8 @@ SCAV_COLD void chain_of(Chart const &c, StateId s, Vector<StateId> &out) {
 // prefix.
 CommonAncestor common_of(Chart const &c,
                          Transition const &tr,
-                         Vector<StateId> const &chain_src,
-                         Vector<StateId> const &chain_dst,
+                         PodVector<StateId> const &chain_src,
+                         PodVector<StateId> const &chain_dst,
                          size_t i,
                          size_t j) {
   if (tr.src == tr.dst) {
@@ -88,9 +88,9 @@ bool ancestor_or_self(Chart const &c, StateId ancestor, StateId of) {
 
 SCAV_COLD SplitGraph decompose(Chart const &c) {
   SplitGraph g;
-  Vector<StateId> chain_src;  // scratch, reused per state and transition
-  Vector<StateId> chain_dst;
-  Vector<Crossing> route;
+  PodVector<StateId> chain_src;  // scratch, reused per state and transition
+  PodVector<StateId> chain_dst;
+  PodVector<Crossing> route;
 
   g.state_depth.assign(c.states.size(), 0);
   for (uint32_t s = 0; s < c.states.size(); ++s) {
@@ -207,7 +207,7 @@ SCAV_COLD SplitGraph decompose(Chart const &c) {
         make_span(first_segment, static_cast<uint32_t>(g.segments.size()) - first_segment);
   }
   // `g.trans_label` stays empty until every `label_segment` call returns.
-  Vector<uint32_t> label;
+  PodVector<uint32_t> label;
   label.assign(c.transitions.size(), INVALID);
   for (uint32_t t = 0; t < label.size(); ++t) { label[t] = label_segment(c, g, t); }
   g.trans_label = std::move(label);

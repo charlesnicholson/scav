@@ -2,8 +2,8 @@
 
 #include "scav_cold.h"
 #include "scav_int.h"
+#include "scav_pod_vector.h"
 #include "scav_thread.h"
-#include "scav_vector.h"
 
 #include <array>
 #include <cstdint>
@@ -14,7 +14,7 @@ namespace scav {
 
 // Mixes eight-word blocks into four lanes, two words per lane, then folds the lanes and
 // the tail into one hash.
-uint64_t memo_hash(Vector<uint32_t> const &key) {
+uint64_t memo_hash(PodVector<uint32_t> const &key) {
   return memo_hash(key.data(), key.size());
 }
 
@@ -43,7 +43,7 @@ namespace {
 
 struct Registry {
   Mutex lock;
-  Vector<Memo *> memos;
+  PodVector<Memo *> memos;
   uint32_t open{ 0 };  // live `MemoRun`s
   uint32_t serial{ 0 };
 };
@@ -75,9 +75,9 @@ Memo::~Memo() {
 }
 
 void Memo::release() {
-  Vector<uint32_t>{}.swap(keys);
-  Vector<int32_t>{}.swap(values);
-  Vector<Slot>{}.swap(slots);
+  PodVector<uint32_t>{}.swap(keys);
+  PodVector<int32_t>{}.swap(values);
+  PodVector<Slot>{}.swap(slots);
   used = 0;
 }
 
@@ -120,7 +120,7 @@ MemoRun::~MemoRun() {
 }
 
 // The slot holding `key`, or the empty slot it goes in; the table is at most half full.
-Memo::Slot &Memo::slot_of(uint64_t hash, Vector<uint32_t> const &key) {
+Memo::Slot &Memo::slot_of(uint64_t hash, PodVector<uint32_t> const &key) {
   size_t const mask{ slots.size() - 1 };
   for (size_t at = static_cast<size_t>(hash) & mask;; at = (at + 1) & mask) {
     Slot &slot{ slots[at] };
@@ -136,7 +136,7 @@ Memo::Slot &Memo::slot_of(uint64_t hash, Vector<uint32_t> const &key) {
 
 // Doubles the slots (at least 1024) and reinserts every entry by its stored hash.
 void Memo::grow() {
-  Vector<Slot> old;
+  PodVector<Slot> old;
   old.swap(slots);
   slots.assign(imax(old.size() * 2, size_t{ 1024 }), Slot{});
   size_t const mask{ slots.size() - 1 };
@@ -148,7 +148,7 @@ void Memo::grow() {
   }
 }
 
-bool Memo::find(Vector<uint32_t> const &key, int32_t const *&at, uint32_t &len) {
+bool Memo::find(PodVector<uint32_t> const &key, int32_t const *&at, uint32_t &len) {
   if (slots.empty() || key.empty()) { return false; }
   Slot const &slot{ slot_of(hash_of(key), key) };
   if (slot.key_len == 0) { return false; }
@@ -187,7 +187,7 @@ uint32_t KeyIndex::find(uint32_t const *key, uint32_t len, uint64_t hash) const 
 
 // Doubles the slots (at least 64) and reinserts every slot at its check word.
 void KeyIndex::grow() {
-  Vector<Slot> old;
+  PodVector<Slot> old;
   old.swap(slots);
   slots.assign(imax(old.size() * 2, size_t{ 64 }), Slot{});
   size_t const mask{ slots.size() - 1 };
@@ -211,7 +211,7 @@ uint32_t KeyIndex::insert(uint32_t const *key, uint32_t len, uint64_t hash) {
   return n;
 }
 
-void Memo::insert(Vector<uint32_t> const &key, Vector<int32_t> const &value) {
+void Memo::insert(PodVector<uint32_t> const &key, PodVector<int32_t> const &value) {
   if (key.empty()) { return; }
   if ((keys.size() + key.size() + values.size() + value.size()) > budget) {
     keys.clear();

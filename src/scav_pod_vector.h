@@ -1,8 +1,8 @@
-#ifndef SCAV_VECTOR_H_INCLUDED
-#define SCAV_VECTOR_H_INCLUDED
+#ifndef SCAV_POD_VECTOR_H_INCLUDED
+#define SCAV_POD_VECTOR_H_INCLUDED
 
 // A growable array of trivially copyable elements, std::vector's members by name. Every
-// element type shares VectorBase's out-of-line growth, copy and free.
+// element type shares PodVectorBase's out-of-line growth, copy and free.
 
 #include <cstddef>
 #include <cstdint>
@@ -14,10 +14,10 @@ namespace scav {
 
 // `count` elements of `elem` bytes each. Appending past capacity takes max(2 * capacity,
 // new size); reserve, assign and copies take exactly; over UINT32_MAX elements aborts.
-class VectorBase {
+class PodVectorBase {
  public:
-  VectorBase(VectorBase const &) = delete;
-  VectorBase &operator=(VectorBase const &) = delete;
+  PodVectorBase(PodVectorBase const &) = delete;
+  PodVectorBase &operator=(PodVectorBase const &) = delete;
 
   [[nodiscard]] size_t size() const { return count; }
   [[nodiscard]] bool empty() const { return count == 0; }
@@ -25,16 +25,16 @@ class VectorBase {
   void clear() { count = 0; }
 
  protected:
-  VectorBase() = default;
-  ~VectorBase() = default;
+  PodVectorBase() = default;
+  ~PodVectorBase() = default;
 
   void reserve(size_t n, size_t elem);
   void *push_grow(void const *x, size_t elem);  // appends *x; x may name an element
   void append_fill(size_t n, void const *x, size_t elem);  // null x appends zero bytes
   void assign_fill(size_t n, void const *x, size_t elem);
   void assign_copy(void const *src, size_t n, size_t elem);
-  void copy_from(VectorBase const &o, size_t elem);
-  void move_from(VectorBase &o);  // frees this storage and takes o's, leaving o empty
+  void copy_from(PodVectorBase const &o, size_t elem);
+  void move_from(PodVectorBase &o);  // frees this storage and takes o's, leaving o empty
   void *insert_copy(size_t at, void const *src, size_t n, size_t elem);
   void erase(size_t at, size_t n, size_t elem);
   static void release(void *p);
@@ -45,7 +45,7 @@ class VectorBase {
 };
 
 template <typename T>
-class Vector : public VectorBase {
+class PodVector : public PodVectorBase {
   static_assert(std::is_trivially_copyable_v<T>);
   static_assert(alignof(T) <= alignof(std::max_align_t));
 
@@ -54,20 +54,20 @@ class Vector : public VectorBase {
   using iterator = T *;
   using const_iterator = T const *;
 
-  Vector() = default;
-  explicit Vector(size_t n) { resize(n); }
-  Vector(size_t n, T const &x) { assign(n, x); }
-  Vector(T const *first, T const *last) { assign(first, last); }
-  Vector(std::initializer_list<T> il) { assign(il); }
-  Vector(Vector const &o) : VectorBase() { copy_from(o, sizeof(T)); }
-  Vector(Vector &&o) noexcept : VectorBase() { swap(o); }
-  ~Vector() { release(ptr); }
+  PodVector() = default;
+  explicit PodVector(size_t n) { resize(n); }
+  PodVector(size_t n, T const &x) { assign(n, x); }
+  PodVector(T const *first, T const *last) { assign(first, last); }
+  PodVector(std::initializer_list<T> il) { assign(il); }
+  PodVector(PodVector const &o) : PodVectorBase() { copy_from(o, sizeof(T)); }
+  PodVector(PodVector &&o) noexcept : PodVectorBase() { swap(o); }
+  ~PodVector() { release(ptr); }
 
-  Vector &operator=(Vector const &o) {
+  PodVector &operator=(PodVector const &o) {
     copy_from(o, sizeof(T));
     return *this;
   }
-  Vector &operator=(Vector &&o) noexcept {
+  PodVector &operator=(PodVector &&o) noexcept {
     move_from(o);
     return *this;
   }
@@ -123,7 +123,7 @@ class Vector : public VectorBase {
     }
   }
 
-  void reserve(size_t n) { VectorBase::reserve(n, sizeof(T)); }
+  void reserve(size_t n) { PodVectorBase::reserve(n, sizeof(T)); }
 
   void assign(size_t n, T const &x) { assign_fill(n, &x, sizeof(T)); }
   void assign(T const *first, T const *last) {
@@ -147,17 +147,17 @@ class Vector : public VectorBase {
   T *erase(T const *pos) { return erase(pos, pos + 1); }
   T *erase(T const *first, T const *last) {
     auto const at{ static_cast<size_t>(first - data()) };
-    VectorBase::erase(at, static_cast<size_t>(last - first), sizeof(T));
+    PodVectorBase::erase(at, static_cast<size_t>(last - first), sizeof(T));
     return data() + at;
   }
 
-  void swap(Vector &o) noexcept {
+  void swap(PodVector &o) noexcept {
     std::swap(ptr, o.ptr);
     std::swap(count, o.count);
     std::swap(cap, o.cap);
   }
 
-  friend bool operator==(Vector const &a, Vector const &b) {
+  friend bool operator==(PodVector const &a, PodVector const &b) {
     if (a.count != b.count) { return false; }
     for (size_t i = 0; i < a.count; ++i) {
       if (!(a[i] == b[i])) { return false; }
@@ -168,4 +168,4 @@ class Vector : public VectorBase {
 
 }  // namespace scav
 
-#endif  // SCAV_VECTOR_H_INCLUDED
+#endif  // SCAV_POD_VECTOR_H_INCLUDED

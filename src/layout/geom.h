@@ -7,7 +7,7 @@
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"
 #include "scav_int.h"
-#include "scav_vector.h"
+#include "scav_pod_vector.h"
 
 #include <cstdint>
 
@@ -119,10 +119,10 @@ struct RectGrid {
   int32_t x0{ 0 }, y0{ 0 };
   Wide cw{ 1 }, ch{ 1 };
   uint32_t nx{ 1 }, ny{ 1 };
-  Vector<uint32_t> off;    // nx * ny + 1, into `item`
-  Vector<uint32_t> item;   // indices of the rects the grid was built over
-  Vector<uint32_t> stamp;  // per rect, the last query that visited it
-  uint32_t epoch{ 0 };     // the current query
+  PodVector<uint32_t> off;    // nx * ny + 1, into `item`
+  PodVector<uint32_t> item;   // indices of the rects the grid was built over
+  PodVector<uint32_t> stamp;  // per rect, the last query that visited it
+  uint32_t epoch{ 0 };        // the current query
 };
 
 // Maximum cells per grid side; cells grow past `cell_w` and `cell_h` to stay within it.
@@ -138,10 +138,10 @@ inline uint32_t grid_cell(Wide v, int32_t lo, Wide size, uint32_t n) {
 // caller-owned scratch.
 inline void grid_build(RectGrid &g,
                        scav_rect const &region,
-                       Vector<scav_rect> const &rects,
+                       PodVector<scav_rect> const &rects,
                        int32_t cell_w,
                        int32_t cell_h,
-                       Vector<uint32_t> &cursor) {
+                       PodVector<uint32_t> &cursor) {
   g.x0 = region.x;
   g.y0 = region.y;
   g.cw = imax(Wide{ imax(cell_w, 1) }, ceil_div(Wide{ region.w } + 1, Wide{ GRID_SIDE }));

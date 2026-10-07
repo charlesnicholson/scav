@@ -4,7 +4,7 @@
 // Disjoint sets over `[0, n)`.
 
 #include "scav_int.h"
-#include "scav_vector.h"
+#include "scav_pod_vector.h"
 
 #include <cstdint>
 
@@ -13,7 +13,7 @@ namespace scav {
 // Union-find: `root` halves paths and `join` unions onto the lower index, so a set's root
 // is its least member.
 struct Partition {
-  Vector<uint32_t> of;
+  PodVector<uint32_t> of;
 
   void reset(size_t n) {
     of.resize(n);

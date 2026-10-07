@@ -14,7 +14,7 @@
 #include "scav/scav_layout.h"
 #include "scav/scav_layout_c.h"
 #include "scav_int.h"
-#include "scav_vector.h"
+#include "scav_pod_vector.h"
 
 #include "doctest.h"
 
@@ -158,7 +158,7 @@ void lay(char const *name,
   out.lane_moves = static_cast<uint32_t>(std::ranges::count_if(
       routed.events(),
       [](TraceEvent const &e) { return e.kind == TraceKind::LaneAssigned; }));
-  Vector<scav_rect> boxes;
+  PodVector<scav_rect> boxes;
   out.unplaced =
       place_labels(out.c, out.g, out.z, s, out.r.route, out.r.points, knobs, boxes);
   column_holds(out.c, "scav.geom.state", out.z.state);

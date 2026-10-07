@@ -10,9 +10,9 @@
 #include "layout/size.h"
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
+#include "scav_pod_vector.h"
 #include "scav_thread.h"
 #include "scav_vec.h"
-#include "scav_vector.h"
 
 #include <array>
 #include <atomic>
@@ -23,8 +23,8 @@ namespace scav {
 
 // The facing pass's output.
 struct Facing {
-  Vector<ReversePin> reverses;  // legs whose in-frame edge reverses
-  Vector<EndPin> sides;         // legs whose port moves to a cross border
+  PodVector<ReversePin> reverses;  // legs whose in-frame edge reverses
+  PodVector<EndPin> sides;         // legs whose port moves to a cross border
 };
 
 // A candidate's outcome as the memo holds it.
@@ -61,15 +61,15 @@ class CandidateMemo {
   // An ordering or a drawing encoded frame block by frame block, and each block's number.
   struct Blocks {
     uint32_t serial{ 0 };  // the `memo_serial` the numbers belong to
-    Vector<uint32_t> words;
-    Vector<uint32_t> ends;  // block -> one past its last word
-    Vector<uint32_t> ids;
+    PodVector<uint32_t> words;
+    PodVector<uint32_t> ends;  // block -> one past its last word
+    PodVector<uint32_t> ids;
   };
 
   // Writes each frame's number in `o` to `ids`, interning new ones; false where one does
   // not fit. A frame matching `like`'s takes its number; `keep` gets the encoding.
   bool frame_ids(SubmachineOrders const &o,
-                 Vector<uint32_t> &ids,
+                 PodVector<uint32_t> &ids,
                  Blocks const *like = nullptr,
                  Blocks *keep = nullptr);
 
@@ -90,14 +90,14 @@ class CandidateMemo {
   // `drawing` with `o`'s bend nodes per segment, as `segment_bends` writes them.
   uint32_t drawing(SubmachineOrders const &o,
                    SizedLayout const &z,
-                   std::vector<Vector<uint32_t>> const &bends,
+                   std::vector<PodVector<uint32_t>> const &bends,
                    uint32_t profile,
                    Blocks const *like = nullptr,
                    Blocks *keep = nullptr);
 
   // The router's box-end faces under `pins`, as `route_transitions` reads them: the last
   // pin naming an end decides it; one word per end, sorted.
-  void box_faces(SearchPins const *pins, Vector<uint32_t> &faces) const;
+  void box_faces(SearchPins const *pins, PodVector<uint32_t> &faces) const;
 
   // The facing pass's turns for phase-1 ordering `o`, of arrangement `arranged`, in `row`:
   // `Failed` where its first sizing failed, `Turned` with `out` filled.
@@ -122,7 +122,7 @@ class CandidateMemo {
 
   // Finds or makes drawing `drawn`'s score entry under `faces`: a bound request reads the
   // unlabelled score if set, any other the labelled one; a retried entry reads INVALID.
-  Recalled find_score(uint32_t drawn, Vector<uint32_t> const &faces, bool labelled);
+  Recalled find_score(uint32_t drawn, PodVector<uint32_t> const &faces, bool labelled);
 
   // Entry `e` read as `find_score` reads it.
   Recalled recall(uint32_t e, bool labelled);
@@ -134,7 +134,7 @@ class CandidateMemo {
   };
 
   // Finds or makes the key for arrangement `arranged` laid in `row` under `faces`.
-  Linked find_ordering(uint32_t row, uint32_t arranged, Vector<uint32_t> const &faces);
+  Linked find_ordering(uint32_t row, uint32_t arranged, PodVector<uint32_t> const &faces);
 
   // Links ordering key `key` to score entry `e`.
   void link(uint32_t key, uint32_t e);
@@ -190,7 +190,7 @@ class CandidateMemo {
   static_assert(sizeof(FacingRecord) == 12);
 
   // Appends frame block `m`'s ordering to `w`; false where a field does not fit.
-  bool put_frame(SubmachineOrders const &o, uint32_t m, Vector<uint32_t> &w) const;
+  bool put_frame(SubmachineOrders const &o, uint32_t m, PodVector<uint32_t> &w) const;
 
   // The number of state `st`'s shape in `z`: its extent, loop placement, and its bands and
   // loop room relative to its corner; INVALID when the table is full.
@@ -200,9 +200,9 @@ class CandidateMemo {
   // block), to `w`; `bends` as `segment_bends` gives them. False where it does not fit.
   bool put_geometry(SubmachineOrders const &o,
                     SizedLayout const &z,
-                    std::vector<Vector<uint32_t>> const &bends,
+                    std::vector<PodVector<uint32_t>> const &bends,
                     uint32_t m,
-                    Vector<uint32_t> &w);
+                    PodVector<uint32_t> &w);
 
   // Tables are striped by key hash into shards under their own locks; a number is the
   // shard's `base` plus the key's index, shifted by `SHARD_BITS`, or'd with the shard.
@@ -218,21 +218,21 @@ class CandidateMemo {
   struct FacingShard {
     Mutex lock;
     KeyIndex keys;
-    uint32_t base{ 0 };            // numbers issued before the shard last emptied
-    Vector<FacingRecord> records;  // parallel to `keys`
-    Vector<uint32_t> turns;
+    uint32_t base{ 0 };               // numbers issued before the shard last emptied
+    PodVector<FacingRecord> records;  // parallel to `keys`
+    PodVector<uint32_t> turns;
   };
   struct ScoreShard {
     Mutex lock;
     KeyIndex keys;
-    uint32_t base{ 0 };           // numbers issued before the shard last emptied
-    Vector<ScoreRecord> records;  // parallel to `keys`
+    uint32_t base{ 0 };              // numbers issued before the shard last emptied
+    PodVector<ScoreRecord> records;  // parallel to `keys`
   };
   struct LinkShard {
     Mutex lock;
     KeyIndex keys;
-    uint32_t base{ 0 };      // numbers issued before the shard last emptied
-    Vector<uint32_t> links;  // parallel to `keys`: a score number or INVALID
+    uint32_t base{ 0 };         // numbers issued before the shard last emptied
+    PodVector<uint32_t> links;  // parallel to `keys`: a score number or INVALID
   };
 
   // The bytes a shard holds, as its vectors' capacities.
@@ -281,15 +281,15 @@ class CandidateMemo {
   std::atomic<uint64_t> peak{ 0 };     // the most `charged` reached
   std::atomic<bool> emptying{ false };
   // Frame blocks: one per submachine, then one for segments and states in none.
-  Vector<uint32_t> seg_off, seg_list;      // block -> its segments
-  Vector<uint32_t> state_off, state_list;  // block -> its states
+  PodVector<uint32_t> seg_off, seg_list;      // block -> its segments
+  PodVector<uint32_t> state_off, state_list;  // block -> its states
   // Block -> the submachines its states own, whose corners its geometry holds; those
   // owned by no state go in the last block.
-  Vector<uint32_t> owned_off, owned_list;
+  PodVector<uint32_t> owned_off, owned_list;
 
   Mutex row_lock;  // guards `rows` and `profiles`
-  Vector<Row> rows;
-  Vector<scav_profile> profiles;
+  PodVector<Row> rows;
+  PodVector<scav_profile> profiles;
   std::array<IndexShard, SHARDS> frames;
   std::array<IndexShard, SHARDS> arrangements;  // keys: every block's frame number
   std::array<IndexShard, SHARDS> shapes;

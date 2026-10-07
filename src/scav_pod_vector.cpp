@@ -1,4 +1,4 @@
-#include "scav_vector.h"
+#include "scav_pod_vector.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -77,13 +77,13 @@ size_t grown(size_t cap, size_t need) {
 
 }  // namespace
 
-void VectorBase::reserve(size_t n, size_t elem) {
+void PodVectorBase::reserve(size_t n, size_t elem) {
   if (n <= cap) { return; }
   ptr = checked(std::realloc(ptr, bytes_of(n, elem)));
   cap = static_cast<uint32_t>(n);
 }
 
-void *VectorBase::push_grow(void const *x, size_t elem) {
+void *PodVectorBase::push_grow(void const *x, size_t elem) {
   size_t const used{ size_t{ count } * elem };
   bool const inside{ within(x, ptr, used) };
   size_t const off{ inside ? static_cast<size_t>(static_cast<Byte const *>(x) -
@@ -97,7 +97,7 @@ void *VectorBase::push_grow(void const *x, size_t elem) {
   return dst;
 }
 
-void VectorBase::append_fill(size_t n, void const *x, size_t elem) {
+void PodVectorBase::append_fill(size_t n, void const *x, size_t elem) {
   if (n == 0) { return; }
   size_t const need{ size_t{ count } + n };
   size_t const used{ size_t{ count } * elem };
@@ -111,7 +111,7 @@ void VectorBase::append_fill(size_t n, void const *x, size_t elem) {
   count = static_cast<uint32_t>(need);
 }
 
-void VectorBase::assign_fill(size_t n, void const *x, size_t elem) {
+void PodVectorBase::assign_fill(size_t n, void const *x, size_t elem) {
   if (n > cap) {
     void *const fresh{ checked(std::malloc(bytes_of(n, elem))) };
     fill(fresh, n, x, elem);  // before the free, which may hold x
@@ -124,7 +124,7 @@ void VectorBase::assign_fill(size_t n, void const *x, size_t elem) {
   count = static_cast<uint32_t>(n);
 }
 
-void VectorBase::assign_copy(void const *src, size_t n, size_t elem) {
+void PodVectorBase::assign_copy(void const *src, size_t n, size_t elem) {
   if (n > cap) {
     void *const fresh{ checked(std::malloc(bytes_of(n, elem))) };
     std::memcpy(fresh, src, n * elem);
@@ -137,11 +137,11 @@ void VectorBase::assign_copy(void const *src, size_t n, size_t elem) {
   count = static_cast<uint32_t>(n);
 }
 
-void VectorBase::copy_from(VectorBase const &o, size_t elem) {
+void PodVectorBase::copy_from(PodVectorBase const &o, size_t elem) {
   if (&o != this) { assign_copy(o.ptr, o.count, elem); }
 }
 
-void VectorBase::move_from(VectorBase &o) {
+void PodVectorBase::move_from(PodVectorBase &o) {
   if (&o == this) { return; }
   if (ptr != nullptr) { std::free(ptr); }
   ptr = o.ptr;
@@ -152,7 +152,7 @@ void VectorBase::move_from(VectorBase &o) {
   o.cap = 0;
 }
 
-void *VectorBase::insert_copy(size_t at, void const *src, size_t n, size_t elem) {
+void *PodVectorBase::insert_copy(size_t at, void const *src, size_t n, size_t elem) {
   if (n == 0) { return static_cast<Byte *>(ptr) + (at * elem); }
   size_t const need{ size_t{ count } + n };
   void *held{ nullptr };
@@ -172,13 +172,13 @@ void *VectorBase::insert_copy(size_t at, void const *src, size_t n, size_t elem)
   return base + (at * elem);
 }
 
-void VectorBase::erase(size_t at, size_t n, size_t elem) {
+void PodVectorBase::erase(size_t at, size_t n, size_t elem) {
   if (n == 0) { return; }
   auto *const base{ static_cast<Byte *>(ptr) };
   std::memmove(base + (at * elem), base + ((at + n) * elem), (count - at - n) * elem);
   count -= static_cast<uint32_t>(n);
 }
 
-void VectorBase::release(void *p) { std::free(p); }
+void PodVectorBase::release(void *p) { std::free(p); }
 
 }  // namespace scav

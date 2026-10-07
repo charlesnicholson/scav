@@ -14,7 +14,7 @@
 #include "scav_int.h"
 
 #include "doctest.h"
-#include "scav_vector.h"
+#include "scav_pod_vector.h"
 
 #include <cstdint>
 #include <string>
@@ -44,7 +44,7 @@ scav_profile unfolded() {
 }
 
 // Only `state_depth` set: sizing finds no segments, hence no ports and no label boxes.
-SplitGraph depths(Vector<uint32_t> const &state_depth) {
+SplitGraph depths(PodVector<uint32_t> const &state_depth) {
   SplitGraph g;
   g.state_depth = state_depth;
   return g;
@@ -57,9 +57,9 @@ OrderNode state_node(uint32_t subject, uint32_t rank, uint32_t pos) {
 // One frame's worth of orders over `nodes`, everything else empty.
 SubmachineOrders one_frame(Chart const &c,
                            SubmachineId frame,
-                           Vector<OrderNode> nodes,
-                           Vector<OrderEdge> edges,
-                           Vector<int32_t> gaps) {
+                           PodVector<OrderNode> nodes,
+                           PodVector<OrderEdge> edges,
+                           PodVector<int32_t> gaps) {
   SubmachineOrders o;
   o.sub_nodes.assign(c.submachines.size(), Span{});
   o.sub_edges.assign(c.submachines.size(), Span{});
@@ -160,8 +160,8 @@ TEST_CASE("size: a rank run folds when folding scales larger") {
   // Six chained ranks, sized flat at 1024:1 and folded at the readable 16:10.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
-  Vector<OrderNode> nodes;
-  Vector<OrderEdge> edges;
+  PodVector<OrderNode> nodes;
+  PodVector<OrderEdge> edges;
   StateId prev{ INVALID };
   for (uint32_t i = 0; i < 6; ++i) {
     StateId const at{ build_state(c, root, "S", StateKind::Normal, {}) };
@@ -175,10 +175,12 @@ TEST_CASE("size: a rank run folds when folding scales larger") {
 
   SizedLayout flat;
   std::vector<Diagnostic> diags;
-  REQUIRE(size_layout(c, depths(Vector<uint32_t>(6, 0)), o, {}, unfolded(), flat, diags));
+  REQUIRE(
+      size_layout(c, depths(PodVector<uint32_t>(6, 0)), o, {}, unfolded(), flat, diags));
   SizedLayout folded;
   diags.clear();
-  REQUIRE(size_layout(c, depths(Vector<uint32_t>(6, 0)), o, {}, profile(), folded, diags));
+  REQUIRE(
+      size_layout(c, depths(PodVector<uint32_t>(6, 0)), o, {}, profile(), folded, diags));
 
   CHECK(flat.chart.h == flat.state[0].h);     // one row, six columns
   CHECK(folded.chart.h > folded.state[0].h);  // more than one row
@@ -889,8 +891,8 @@ TEST_CASE("size: a fold never cuts between an initial pseudostate and its target
     chain.push_back(build_state(c, root, "S" + std::to_string(i), StateKind::Normal, {}));
   }
   build_trans(c, start, chain[0], TransKind::Default, {});
-  Vector<OrderNode> nodes{ state_node(start.v, 0, 0) };
-  Vector<OrderEdge> edges{ { .src = 0, .dst = 1, .segment = 0, .reversed = 0 } };
+  PodVector<OrderNode> nodes{ state_node(start.v, 0, 0) };
+  PodVector<OrderEdge> edges{ { .src = 0, .dst = 1, .segment = 0, .reversed = 0 } };
   for (uint32_t i = 0; i < chain.size(); ++i) {
     nodes.push_back(state_node(chain[i].v, i + 1, 0));
     if (i + 1 < chain.size()) {
@@ -912,8 +914,8 @@ TEST_CASE("size: a fold never cuts between an initial pseudostate and its target
   TraceRecord t;
   trace_sink_set(&t);
   bool const sized{ size_layout(c,
-                                depths(Vector<uint32_t>(c.states.size(), 0)),
-                                one_frame(c, root, nodes, edges, Vector<int32_t>(7, 0)),
+                                depths(PodVector<uint32_t>(c.states.size(), 0)),
+                                one_frame(c, root, nodes, edges, PodVector<int32_t>(7, 0)),
                                 s,
                                 p,
                                 z,
@@ -1052,30 +1054,31 @@ TEST_CASE("size: a boundary holds a lane for each edge that turns in it, and no 
   }
   StateId const bar{ build_state(c, root, "F", StateKind::Fork, {}) };
   scav_profile const p{ unfolded() };
-  auto const x_of =
-      [&](Vector<OrderNode> const &nodes, Vector<OrderEdge> const &edges, uint32_t st) {
-        SizedLayout z;
-        std::vector<Diagnostic> diags;
-        REQUIRE(size_layout(c,
-                            depths(Vector<uint32_t>(6, 0)),
-                            one_frame(c, root, nodes, edges, { 0 }),
-                            {},
-                            p,
-                            z,
-                            diags));
-        return z.state[st].x - (z.state[ids[0].v].x + z.state[ids[0].v].w);
-      };
-  Vector<OrderNode> const pair{ state_node(ids[0].v, 0, 0),
-                                state_node(ids[1].v, 0, 1),
-                                state_node(bar.v, 1, 0) };
+  auto const x_of = [&](PodVector<OrderNode> const &nodes,
+                        PodVector<OrderEdge> const &edges,
+                        uint32_t st) {
+    SizedLayout z;
+    std::vector<Diagnostic> diags;
+    REQUIRE(size_layout(c,
+                        depths(PodVector<uint32_t>(6, 0)),
+                        one_frame(c, root, nodes, edges, { 0 }),
+                        {},
+                        p,
+                        z,
+                        diags));
+    return z.state[st].x - (z.state[ids[0].v].x + z.state[ids[0].v].w);
+  };
+  PodVector<OrderNode> const pair{ state_node(ids[0].v, 0, 0),
+                                   state_node(ids[1].v, 0, 1),
+                                   state_node(bar.v, 1, 0) };
   CHECK(x_of(pair,
              { { .src = 0, .dst = 2, .segment = 0, .reversed = 0 },
                { .src = 1, .dst = 2, .segment = 1, .reversed = 0 } },
              bar.v) == p.rank_sep);
-  Vector<OrderNode> const fan{ state_node(ids[0].v, 0, 0),
-                               state_node(ids[1].v, 0, 1),
-                               state_node(ids[4].v, 0, 2),
-                               state_node(ids[2].v, 1, 0) };
+  PodVector<OrderNode> const fan{ state_node(ids[0].v, 0, 0),
+                                  state_node(ids[1].v, 0, 1),
+                                  state_node(ids[4].v, 0, 2),
+                                  state_node(ids[2].v, 1, 0) };
   CHECK(x_of(fan,
              { { .src = 0, .dst = 3, .segment = 0, .reversed = 0 },
                { .src = 1, .dst = 3, .segment = 1, .reversed = 0 },
@@ -1136,7 +1139,7 @@ TEST_CASE("size: a port on a cross border sits on the frame's edge over its neig
   for (uint8_t const cross : { uint8_t{ 1 }, uint8_t{ 2 } }) {
     CAPTURE(static_cast<uint32_t>(cross));
     uint32_t const at{ (cross == 1) ? 1U : 2U };
-    Vector<OrderNode> nodes{ state_node(a.v, 0, 0), state_node(b.v, 1, 0) };
+    PodVector<OrderNode> nodes{ state_node(a.v, 0, 0), state_node(b.v, 1, 0) };
     nodes.insert(nodes.begin() + at,
                  { .kind = OrderKind::Boundary, .subject = 1, .rank = 1, .pos = 0 });
     nodes[2].pos = 1;
@@ -1222,8 +1225,8 @@ TEST_CASE("size: a rank past the domain is diagnosed rather than truncated") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const source{ build_state(c, root, "S", StateKind::Normal, {}) };
-  Vector<OrderNode> nodes{ state_node(source.v, 0, 0) };
-  Vector<OrderEdge> edges;
+  PodVector<OrderNode> nodes{ state_node(source.v, 0, 0) };
+  PodVector<OrderEdge> edges;
   for (uint32_t i = 0; i < 5; ++i) {
     StateId const target{ build_state(c, root, "T", StateKind::Normal, {}) };
     nodes.push_back(state_node(target.v, 1, i));
@@ -1238,7 +1241,7 @@ TEST_CASE("size: a rank past the domain is diagnosed rather than truncated") {
   SizedLayout z;
   std::vector<Diagnostic> diags;
   CHECK_FALSE(size_layout(c,
-                          depths(Vector<uint32_t>(c.states.size(), 0)),
+                          depths(PodVector<uint32_t>(c.states.size(), 0)),
                           one_frame(c, root, nodes, edges, { 0 }),
                           s,
                           profile(),
@@ -1310,8 +1313,8 @@ TEST_CASE("size: a boundary node sits on the frame's border, not on its piece's"
   for (uint32_t i = 0; i < 9; ++i) {
     chain.push_back(build_state(c, root, {}, StateKind::Normal, {}));
   }
-  Vector<OrderNode> nodes;
-  Vector<OrderEdge> edges;
+  PodVector<OrderNode> nodes;
+  PodVector<OrderEdge> edges;
   nodes.reserve(10);
   for (uint32_t i = 0; i < 7; ++i) { nodes.push_back(state_node(chain[i].v, i, 0)); }
   uint32_t const boundary{ static_cast<uint32_t>(nodes.size()) };
@@ -1334,7 +1337,7 @@ TEST_CASE("size: a boundary node sits on the frame's border, not on its piece's"
   SizedLayout z;
   std::vector<Diagnostic> diags;
   REQUIRE(size_layout(c,
-                      depths(Vector<uint32_t>(c.states.size(), 0)),
+                      depths(PodVector<uint32_t>(c.states.size(), 0)),
                       one_frame(c, root, nodes, edges, { 0, 0, 0, 0, 0, 0, 0, 0 }),
                       s,
                       pf,
@@ -1475,7 +1478,7 @@ TEST_CASE("size: orders that name nodes but no rank size nothing") {
   SizedLayout z;
   std::vector<Diagnostic> diags;
   REQUIRE(
-      size_layout(c, depths(Vector<uint32_t>(c.states.size(), 0)), o, {}, p, z, diags));
+      size_layout(c, depths(PodVector<uint32_t>(c.states.size(), 0)), o, {}, p, z, diags));
 
   CHECK(diags.empty());
   CHECK(z.sub[root.v].w == 0);
@@ -1506,20 +1509,21 @@ TEST_CASE("size: a fold whose pieces will not pack is dropped for the flat run")
   scav_spaces const s{ .box_state = boxes.data(),
                        .n_box_state = static_cast<uint32_t>(boxes.size()) };
 
-  Vector<OrderNode> const nodes{ state_node(ids[0].v, 0, 0), state_node(ids[1].v, 0, 1),
-                                 state_node(ids[2].v, 1, 0), state_node(ids[3].v, 2, 0),
-                                 state_node(ids[4].v, 2, 1), state_node(ids[5].v, 3, 0) };
-  Vector<OrderEdge> const edges{ { .src = 0, .dst = 2, .segment = 0, .reversed = 0 },
-                                 { .src = 1, .dst = 2, .segment = 1, .reversed = 0 },
-                                 { .src = 2, .dst = 3, .segment = 2, .reversed = 0 },
-                                 { .src = 2, .dst = 4, .segment = 3, .reversed = 0 },
-                                 { .src = 3, .dst = 5, .segment = 4, .reversed = 0 },
-                                 { .src = 4, .dst = 5, .segment = 5, .reversed = 0 } };
+  PodVector<OrderNode> const nodes{
+    state_node(ids[0].v, 0, 0), state_node(ids[1].v, 0, 1), state_node(ids[2].v, 1, 0),
+    state_node(ids[3].v, 2, 0), state_node(ids[4].v, 2, 1), state_node(ids[5].v, 3, 0)
+  };
+  PodVector<OrderEdge> const edges{ { .src = 0, .dst = 2, .segment = 0, .reversed = 0 },
+                                    { .src = 1, .dst = 2, .segment = 1, .reversed = 0 },
+                                    { .src = 2, .dst = 3, .segment = 2, .reversed = 0 },
+                                    { .src = 2, .dst = 4, .segment = 3, .reversed = 0 },
+                                    { .src = 3, .dst = 5, .segment = 4, .reversed = 0 },
+                                    { .src = 4, .dst = 5, .segment = 5, .reversed = 0 } };
 
   SizedLayout z;
   std::vector<Diagnostic> diags;
   REQUIRE(size_layout(c,
-                      depths(Vector<uint32_t>(c.states.size(), 0)),
+                      depths(PodVector<uint32_t>(c.states.size(), 0)),
                       one_frame(c, root, nodes, edges, {}),
                       s,
                       p,
@@ -1555,12 +1559,12 @@ TEST_CASE("size: a row that leaves the domain does not displace the column that 
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  Vector<OrderNode> const nodes{ state_node(a.v, 0, 0), state_node(b.v, 0, 1) };
+  PodVector<OrderNode> const nodes{ state_node(a.v, 0, 0), state_node(b.v, 0, 1) };
 
   SizedLayout z;
   std::vector<Diagnostic> diags;
   REQUIRE(size_layout(c,
-                      depths(Vector<uint32_t>(c.states.size(), 0)),
+                      depths(PodVector<uint32_t>(c.states.size(), 0)),
                       one_frame(c, root, nodes, {}, {}),
                       {},
                       p,
@@ -1577,7 +1581,7 @@ TEST_CASE("size: a row that leaves the domain does not displace the column that 
   SizedLayout column;
   diags.clear();
   REQUIRE(size_layout(c,
-                      depths(Vector<uint32_t>(c.states.size(), 0)),
+                      depths(PodVector<uint32_t>(c.states.size(), 0)),
                       one_frame(c, root, nodes, {}, {}),
                       {},
                       p,
@@ -1591,7 +1595,7 @@ namespace {
 
 // `n` unconnected states of one shape in rank 0: `n` equal components for the packers.
 struct EqualStates {
-  Vector<OrderNode> nodes;
+  PodVector<OrderNode> nodes;
   std::vector<scav_box_space> boxes;
 };
 
@@ -1631,7 +1635,7 @@ TEST_CASE("size: a column that leaves the domain gives way to the row that fits"
   SizedLayout z;
   std::vector<Diagnostic> diags;
   REQUIRE(size_layout(c,
-                      depths(Vector<uint32_t>(c.states.size(), 0)),
+                      depths(PodVector<uint32_t>(c.states.size(), 0)),
                       one_frame(c, root, five.nodes, {}, {}),
                       s,
                       p,
@@ -1652,7 +1656,7 @@ TEST_CASE("size: a column that leaves the domain gives way to the row that fits"
   SizedLayout stacked;
   diags.clear();
   CHECK_FALSE(size_layout(c,
-                          depths(Vector<uint32_t>(c.states.size(), 0)),
+                          depths(PodVector<uint32_t>(c.states.size(), 0)),
                           one_frame(c, root, five.nodes, {}, {}),
                           s,
                           p,
@@ -1676,7 +1680,7 @@ TEST_CASE("size: a frame no packing fits is diagnosed, not saturated") {
   SizedLayout z;
   std::vector<Diagnostic> diags;
   CHECK_FALSE(size_layout(c,
-                          depths(Vector<uint32_t>(c.states.size(), 0)),
+                          depths(PodVector<uint32_t>(c.states.size(), 0)),
                           one_frame(c, root, five.nodes, {}, {}),
                           s,
                           p,
@@ -1695,8 +1699,8 @@ namespace {
 
 // `n` chained states, one per rank: one component whose run the fold cuts into pieces.
 struct RankRun {
-  Vector<OrderNode> nodes;
-  Vector<OrderEdge> edges;
+  PodVector<OrderNode> nodes;
+  PodVector<OrderEdge> edges;
   std::vector<scav_box_space> boxes;
 };
 
@@ -1741,7 +1745,7 @@ TEST_CASE("size: a row of fold pieces that leaves the domain keeps the column") 
   SizedLayout z;
   std::vector<Diagnostic> diags;
   REQUIRE(size_layout(c,
-                      depths(Vector<uint32_t>(c.states.size(), 0)),
+                      depths(PodVector<uint32_t>(c.states.size(), 0)),
                       one_frame(c, root, run.nodes, run.edges, {}),
                       s,
                       p,
@@ -1758,7 +1762,7 @@ TEST_CASE("size: a row of fold pieces that leaves the domain keeps the column") 
   SizedLayout column;
   diags.clear();
   REQUIRE(size_layout(c,
-                      depths(Vector<uint32_t>(c.states.size(), 0)),
+                      depths(PodVector<uint32_t>(c.states.size(), 0)),
                       one_frame(c, root, run.nodes, run.edges, {}),
                       s,
                       p,
@@ -1785,7 +1789,7 @@ TEST_CASE("size: a fold whose pieces pack back into a row is the flat run") {
   SizedLayout z;
   std::vector<Diagnostic> diags;
   REQUIRE(size_layout(c,
-                      depths(Vector<uint32_t>(c.states.size(), 0)),
+                      depths(PodVector<uint32_t>(c.states.size(), 0)),
                       one_frame(c, root, run.nodes, run.edges, {}),
                       s,
                       p,
@@ -1801,7 +1805,7 @@ TEST_CASE("size: a fold whose pieces pack back into a row is the flat run") {
   SizedLayout flat;
   diags.clear();
   REQUIRE(size_layout(c,
-                      depths(Vector<uint32_t>(c.states.size(), 0)),
+                      depths(PodVector<uint32_t>(c.states.size(), 0)),
                       one_frame(c, root, run.nodes, run.edges, {}),
                       s,
                       p,
@@ -1833,7 +1837,7 @@ TEST_CASE("size: a fold no packing of the pieces fits is dropped for the flat ru
   SizedLayout z;
   std::vector<Diagnostic> diags;
   REQUIRE(size_layout(c,
-                      depths(Vector<uint32_t>(c.states.size(), 0)),
+                      depths(PodVector<uint32_t>(c.states.size(), 0)),
                       one_frame(c, root, run.nodes, run.edges, {}),
                       s,
                       p,
@@ -2008,14 +2012,14 @@ FrameDar size_hole_ratio(int32_t w, int32_t h);
 void size_owner_holes(Chart const &c,
                       SizedLayout const &z,
                       int32_t sep,
-                      Vector<FrameDar> &hole);
+                      PodVector<FrameDar> &hole);
 
 }  // namespace scav
 
 namespace {
 
-Vector<FrameDar> size_owner_holes(Chart const &c, SizedLayout const &z) {
-  Vector<FrameDar> hole;
+PodVector<FrameDar> size_owner_holes(Chart const &c, SizedLayout const &z) {
+  PodVector<FrameDar> hole;
   scav::size_owner_holes(c, z, 0, hole);
   return hole;
 }
@@ -2098,7 +2102,7 @@ TEST_CASE("size: only a state with a live frame in it leaves a hole") {
   std::vector<Diagnostic> diags;
   REQUIRE(size_layout(c, g, order_submachines(c, g, {}, p), {}, p, z, diags));
 
-  Vector<FrameDar> const hole{ size_owner_holes(c, z) };
+  PodVector<FrameDar> const hole{ size_owner_holes(c, z) };
   REQUIRE(hole.size() == c.states.size());
   // The 100000-tall owner around a short frame leaves a hole far taller than wide.
   CHECK(hole[owner.v].num < hole[owner.v].den);
@@ -2321,7 +2325,7 @@ Traced traced(Sample const &x, scav_profile const &p, Fold fold) {
 }
 
 bool same(Traced const &a, Traced const &b) {
-  auto const rects = [](Vector<scav_rect> const &u, Vector<scav_rect> const &v) {
+  auto const rects = [](PodVector<scav_rect> const &u, PodVector<scav_rect> const &v) {
     if (u.size() != v.size()) { return false; }
     for (uint32_t i = 0; i < u.size(); ++i) {
       if (!(u[i] == v[i])) { return false; }

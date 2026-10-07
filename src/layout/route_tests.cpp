@@ -16,7 +16,7 @@
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
 #include "scav_int.h"
-#include "scav_vector.h"
+#include "scav_pod_vector.h"
 
 #include "doctest.h"
 
@@ -269,7 +269,7 @@ TEST_CASE("route: a slot off its route moves to where the route crosses its bord
   SizedLayout z{ blank(c, empty_orders(c, g)) };
   z.state[comp.v] = { .x = 0, .y = 0, .w = 200, .h = 200 };
   z.sub[inner.v] = { .x = 10, .y = 10, .w = 180, .h = 180 };
-  auto const reseated = [&](Vector<scav_point> const &line) {
+  auto const reseated = [&](PodVector<scav_point> const &line) {
     Routes r;
     r.points = line;
     r.route = { { .off = 0, .len = static_cast<uint32_t>(line.size()) } };
@@ -693,7 +693,7 @@ TEST_CASE("route: a clear leaves the route's ends where the router put them") {
   SizedLayout z{ blank(c, o) };
   z.state[a.v] = { .x = 0, .y = 0, .w = 0, .h = 0 };
   z.state[b.v] = { .x = 1000, .y = 0, .w = 0, .h = 0 };
-  Vector<scav_path_clear> const clears{ { .src = 30, .dst = 700 } };
+  PodVector<scav_path_clear> const clears{ { .src = 30, .dst = 700 } };
   scav_spaces const s{ .path_clear = clears.data(), .n_path_clear = 1 };
 
   Routes const r{ route_transitions(c, g, o, z, s, profile(), STRAIGHT) };
@@ -776,7 +776,7 @@ TEST_CASE("route: a path box centres on its route's middle point") {
   SizedLayout z{ blank(c, o) };
   z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 40 };
   z.state[b.v] = { .x = 400, .y = 100, .w = 100, .h = 40 };
-  Vector<scav_path_box> const boxes{ { .subject = 0, .w = 20, .h = 8, .order = 0 } };
+  PodVector<scav_path_box> const boxes{ { .subject = 0, .w = 20, .h = 8, .order = 0 } };
   scav_spaces const s{ .path_box = boxes.data(), .n_path_box = 1 };
 
   Routes const r{ route_transitions(c, g, o, z, s, profile(), STRAIGHT) };
@@ -825,7 +825,7 @@ TEST_CASE("route: a transition to an enclosing state ends on that state's inner 
   z.node[1] = { .x = 390, .y = 80 };  // Outer's inner face, at the frame's trailing edge
 
   OrthogonalRouter const orthogonal;
-  Vector<Router const *> const routers{ &STRAIGHT, &orthogonal };
+  PodVector<Router const *> const routers{ &STRAIGHT, &orthogonal };
   for (Router const *router : routers) {
     CAPTURE(router->name().bytes);
     scav_profile ring{ profile() };
@@ -1055,13 +1055,13 @@ TEST_CASE("route: the boxes placed are the ones the strip matching places") {
   z.sub[root.v] = { .x = 0, .y = 0, .w = 500, .h = 40 };
   z.chart = { .x = 0, .y = 0, .w = 500, .h = 200 };
 
-  Vector<scav_path_box> const both{ { .subject = 0, .w = 20, .h = 8, .order = 0 },
-                                    { .subject = 1, .w = 20, .h = 8, .order = 0 } };
+  PodVector<scav_path_box> const both{ { .subject = 0, .w = 20, .h = 8, .order = 0 },
+                                       { .subject = 1, .w = 20, .h = 8, .order = 0 } };
   scav_spaces const s{ .path_box = both.data(), .n_path_box = 2 };
   Routes const r{ route_transitions(c, g, o, z, s, profile(), STRAIGHT) };
   REQUIRE(r.placed.size() == 2);
   // Every box finds a candidate; the loop's label sits in its loop room.
-  Vector<scav_rect> expected;
+  PodVector<scav_rect> expected;
   CHECK(place_labels(c, g, z, s, r.route, r.points, profile(), expected) == 0);
   CHECK(same_rows(r.placed, expected));
 }
@@ -1137,7 +1137,8 @@ TEST_CASE("route: a nudge in its own frame leaves a transition's last leg its cl
   z.state[q.v] = { .x = 200, .y = 200, .w = 40, .h = 40 };
   z.sub[root.v] = { .x = 0, .y = 0, .w = 240, .h = 240 };
   z.chart = { .x = -100, .y = -100, .w = 440, .h = 440 };
-  Vector<scav_path_clear> const clears{ { .src = 0, .dst = 60 }, { .src = 0, .dst = 0 } };
+  PodVector<scav_path_clear> const clears{ { .src = 0, .dst = 60 },
+                                           { .src = 0, .dst = 0 } };
   scav_spaces const s{ .path_clear = clears.data(), .n_path_clear = 2 };
 
   LaneRouter const asks{ 16 };
@@ -1410,7 +1411,7 @@ TEST_CASE("route: the turns a stop counts frame by frame never pass the routes'"
       std::vector<Diagnostic> diags;
       if (!size_layout(c, g, o, {}, p, z, diags)) { continue; }
       Routes const whole{ route_transitions(c, g, o, z, {}, p, *router, 1) };
-      Vector<int32_t> const none(c.transitions.size(), 0);
+      PodVector<int32_t> const none(c.transitions.size(), 0);
       RouteStop stop{ .bends = &none, .floor = 0, .per_bend = 1, .at = INT64_MAX };
       Routes counted;
       route_transitions(counted,
@@ -1455,7 +1456,7 @@ TEST_CASE("route: a stop ends routing once routed turns lift its bound to it") {
   int64_t turns{ 0 };
   for (uint32_t t = 0; t < c.transitions.size(); ++t) { turns += route_turns(whole, t); }
   REQUIRE(turns > 0);
-  Vector<int32_t> const none(c.transitions.size(), 0);
+  PodVector<int32_t> const none(c.transitions.size(), 0);
   int64_t const reach{ 100 + (7 * turns) };
   RouteStop at{ .bends = &none, .floor = 100, .per_bend = 7, .at = reach };
   Routes stopped;
@@ -1494,7 +1495,7 @@ TEST_CASE("route: a stop ends routing once routed turns lift its bound to it") {
   CHECK_FALSE(past.stopped);
   CHECK(same_routes(whole, all));
   // A bound above the routed turns stands in for them.
-  Vector<int32_t> const high(c.transitions.size(), 9);
+  PodVector<int32_t> const high(c.transitions.size(), 9);
   RouteStop held{ .bends = &high,
                   .floor = 0,
                   .per_bend = 1,
@@ -1655,9 +1656,9 @@ namespace {
 // A frame's obstacles as a walk over every state finds them: live, overlapping the region,
 // not the owner or enclosing it, and not inside an overlapping box that is neither.
 struct Gathered {
-  Vector<scav_rect> obstacles;
-  Vector<uint8_t> inscribed;
-  Vector<int32_t> corner;
+  PodVector<scav_rect> obstacles;
+  PodVector<uint8_t> inscribed;
+  PodVector<int32_t> corner;
 };
 
 Gathered gather_every_state(Chart const &c,
@@ -1834,13 +1835,15 @@ TEST_CASE("route: a route inside a state goes round its loop room, never across 
   };
   Drawn probe;
   draw_text(text, {}, {}, probe);
-  Vector<scav_box_space> rows(probe.c.states.size());
+  PodVector<scav_box_space> rows(probe.c.states.size());
   for (uint32_t st = 0; st < probe.c.states.size(); ++st) {
     if (probe.c.states[st].kind == StateKind::Normal) { rows[st].h_before = 397; }
   }
   rows[named(probe.c, "Child")].min_w = 832;
-  Vector<scav_path_box> const boxes{ { .subject = 2, .w = 474, .h = 269, .order = 0 },
-                                     { .subject = 3, .w = 1741, .h = 269, .order = 0 } };
+  PodVector<scav_path_box> const boxes{
+    { .subject = 2, .w = 474, .h = 269, .order = 0 },
+    { .subject = 3, .w = 1741, .h = 269, .order = 0 }
+  };
   scav_spaces const s{ .box_state = rows.data(),
                        .n_box_state = static_cast<uint32_t>(rows.size()),
                        .box_state_stride = static_cast<uint32_t>(sizeof(scav_box_space)),
@@ -1881,14 +1884,14 @@ TEST_CASE("route: a nudge leaves an outer loop's last leg its clear") {
     "}\n"
   };
   draw_text(text, {}, {}, probe);
-  Vector<scav_box_space> rows(probe.c.states.size());
+  PodVector<scav_box_space> rows(probe.c.states.size());
   for (uint32_t st = 0; st < probe.c.states.size(); ++st) {
     if (probe.c.states[st].kind == StateKind::Normal) { rows[st].h_before = 397; }
   }
-  Vector<scav_path_box> const boxes{ { .subject = 2, .w = 359, .h = 269, .order = 0 },
-                                     { .subject = 3, .w = 704, .h = 269, .order = 0 } };
-  Vector<scav_path_clear> const clears(probe.c.transitions.size(),
-                                       { .src = 0, .dst = head });
+  PodVector<scav_path_box> const boxes{ { .subject = 2, .w = 359, .h = 269, .order = 0 },
+                                        { .subject = 3, .w = 704, .h = 269, .order = 0 } };
+  PodVector<scav_path_clear> const clears(probe.c.transitions.size(),
+                                          { .src = 0, .dst = head });
   scav_spaces const s{ .box_state = rows.data(),
                        .n_box_state = static_cast<uint32_t>(rows.size()),
                        .box_state_stride = static_cast<uint32_t>(sizeof(scav_box_space)),
@@ -1927,9 +1930,9 @@ TEST_CASE("route: a state lined on its trailing face loops out of its leading on
   draw_text(text, {}, {}, probe);
   uint32_t const a{ named(probe.c, "A") };
   REQUIRE(a != INVALID);
-  Vector<scav_box_space> rows(probe.c.states.size());
+  PodVector<scav_box_space> rows(probe.c.states.size());
   rows[a].w_after = 3 * p.font_size_grid;
-  Vector<scav_path_box> const boxes{
+  PodVector<scav_path_box> const boxes{
     { .subject = 2, .w = 4 * p.font_size_grid, .h = p.font_size_grid, .order = 0 }
   };
   scav_spaces const s{ .box_state = rows.data(),

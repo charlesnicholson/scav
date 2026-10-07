@@ -8,7 +8,7 @@
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
 #include "scav/scav_layout_c.h"
-#include "scav_vector.h"
+#include "scav_pod_vector.h"
 
 #include "doctest.h"
 
@@ -77,8 +77,8 @@ struct Fixture {
   // A rank pin under which segment `seg` chains through two bends or more.
   [[nodiscard]] SearchPins chained_rank(uint32_t &seg) const {
     SubmachineOrders const plain{ order() };
-    Vector<uint32_t> reversed;
-    std::vector<Vector<uint32_t>> bends;
+    PodVector<uint32_t> reversed;
+    std::vector<PodVector<uint32_t>> bends;
     for (uint32_t st = 0; st < c.states.size(); ++st) {
       if ((c.states[st].live == 0) || (plain.state_node[st] == INVALID)) { continue; }
       for (uint32_t r = 0; r < plain.sub_ranks[c.states[st].parent.v]; ++r) {
@@ -129,9 +129,9 @@ TEST_CASE(
   CandidateMemo memo{ f.c, f.g };
   SubmachineOrders const plain{ f.order() };
   SubmachineOrders const moved{ f.order(f.moved_rank()) };
-  Vector<uint32_t> a;
-  Vector<uint32_t> again;
-  Vector<uint32_t> b;
+  PodVector<uint32_t> a;
+  PodVector<uint32_t> again;
+  PodVector<uint32_t> b;
   REQUIRE(memo.frame_ids(plain, a));
   REQUIRE(memo.frame_ids(moved, b));
   REQUIRE(memo.frame_ids(plain, again));
@@ -145,7 +145,7 @@ TEST_CASE(
   CHECK(kept < a.size());
   // A second memo numbers the same frames from scratch, consistently.
   CandidateMemo other{ f.c, f.g };
-  Vector<uint32_t> fresh;
+  PodVector<uint32_t> fresh;
   REQUIRE(other.frame_ids(plain, fresh));
   CHECK(fresh == a);
 
@@ -161,10 +161,10 @@ TEST_CASE(
   CHECK(fresh == a);
   CHECK(encoded.ids == a);
   REQUIRE(other.frame_ids(plain, fresh));
-  Vector<uint32_t> alone;
+  PodVector<uint32_t> alone;
   REQUIRE(memo.frame_ids(moved, alone));
   REQUIRE(other.frame_ids(plain, fresh));
-  Vector<uint32_t> like;
+  PodVector<uint32_t> like;
   REQUIRE(memo.frame_ids(moved, like, &encoded));
   CHECK(like == alone);
   CHECK(like == b);
@@ -196,7 +196,7 @@ TEST_CASE(
   auto const key = [&](uint32_t r, uint32_t arranged, std::vector<EndPin> const &ends) {
     SearchPins pins;
     pins.ends = ends;
-    Vector<uint32_t> faces;
+    PodVector<uint32_t> faces;
     memo.box_faces(&pins, faces);
     return memo.find_ordering(r, arranged, faces).key;
   };
@@ -324,8 +324,8 @@ TEST_CASE(
   REQUIRE(chained < f.g.segments.size());
   SizedLayout const lz{ f.size(longer) };
   uint32_t const long_drawn{ memo.drawing(longer, lz, profile) };
-  Vector<uint32_t> reversed;
-  std::vector<Vector<uint32_t>> bends;
+  PodVector<uint32_t> reversed;
+  std::vector<PodVector<uint32_t>> bends;
   segment_bends(longer, static_cast<uint32_t>(f.g.segments.size()), reversed, bends);
   REQUIRE(bends[chained].size() >= 2);
   auto const bent = [&](auto const &edit) {
@@ -350,7 +350,7 @@ TEST_CASE("candidate memo: a score comes back as stored, each of its two kinds a
   SubmachineOrders const plain{ f.order() };
   uint32_t const drawn{ memo.drawing(plain, f.size(plain), memo.profile_word(f.p)) };
   REQUIRE(drawn != INVALID);
-  Vector<uint32_t> const none;
+  PodVector<uint32_t> const none;
   CandidateMemo::Recalled const first{ memo.find_score(drawn, none, false) };
   REQUIRE(first.entry != INVALID);
   CHECK_FALSE(first.found);
@@ -389,7 +389,7 @@ TEST_CASE("candidate memo: a score comes back as stored, each of its two kinds a
   CHECK(by_entry.score.cost.t2 == labelled.cost.t2);
 
   // A bound request with only the labelled score set takes the labelled one.
-  Vector<uint32_t> const faced{ 1U };
+  PodVector<uint32_t> const faced{ 1U };
   uint32_t const e2{ memo.find_score(drawn, faced, true).entry };
   CHECK(e2 != e);
   memo.set_score(e2, true, { .viable = true, .inflated = true });
@@ -413,7 +413,7 @@ TEST_CASE("candidate memo: an ordering key reads the score entry linked to it") 
   uint32_t const drawn{ memo.drawing(plain, f.size(plain), memo.profile_word(f.p)) };
   REQUIRE(arranged != INVALID);
   REQUIRE(drawn != INVALID);
-  Vector<uint32_t> const none;
+  PodVector<uint32_t> const none;
   CandidateMemo::Linked const fresh{ memo.find_ordering(row, arranged, none) };
   REQUIRE(fresh.key != INVALID);
   CHECK(fresh.entry == INVALID);
@@ -438,7 +438,7 @@ TEST_CASE("candidate memo: one claim per score kind, until that score is set") {
   SubmachineOrders const plain{ f.order() };
   uint32_t const drawn{ memo.drawing(plain, f.size(plain), memo.profile_word(f.p)) };
   REQUIRE(drawn != INVALID);
-  Vector<uint32_t> const none;
+  PodVector<uint32_t> const none;
   uint32_t const e{ memo.find_score(drawn, none, false).entry };
   REQUIRE(e != INVALID);
   MemoScore got;
@@ -467,7 +467,7 @@ TEST_CASE("candidate memo: a released claim leaves the score unset and the bound
   SubmachineOrders const plain{ f.order() };
   uint32_t const drawn{ memo.drawing(plain, f.size(plain), memo.profile_word(f.p)) };
   REQUIRE(drawn != INVALID);
-  Vector<uint32_t> const none;
+  PodVector<uint32_t> const none;
   uint32_t const e{ memo.find_score(drawn, none, false).entry };
   REQUIRE(e != INVALID);
   memo.set_route_bound(e, 40);
@@ -487,7 +487,7 @@ TEST_CASE("candidate memo: a labelled release bounds only labelled requests") {
   SubmachineOrders const plain{ f.order() };
   uint32_t const drawn{ memo.drawing(plain, f.size(plain), memo.profile_word(f.p)) };
   REQUIRE(drawn != INVALID);
-  Vector<uint32_t> const none;
+  PodVector<uint32_t> const none;
   uint32_t const e{ memo.find_score(drawn, none, false).entry };
   REQUIRE(e != INVALID);
   MemoScore got;
@@ -517,7 +517,7 @@ TEST_CASE("candidate memo: a route bound comes back beside a score it does not a
   SubmachineOrders const plain{ f.order() };
   uint32_t const drawn{ memo.drawing(plain, f.size(plain), memo.profile_word(f.p)) };
   REQUIRE(drawn != INVALID);
-  Vector<uint32_t> const none;
+  PodVector<uint32_t> const none;
   CandidateMemo::Recalled const fresh{ memo.find_score(drawn, none, true) };
   REQUIRE(fresh.entry != INVALID);
   CHECK(fresh.route_bound == -1);
@@ -535,7 +535,7 @@ TEST_CASE("candidate memo: a retried entry never answers and takes no score") {
   SubmachineOrders const plain{ f.order() };
   uint32_t const drawn{ memo.drawing(plain, f.size(plain), memo.profile_word(f.p)) };
   REQUIRE(drawn != INVALID);
-  Vector<uint32_t> const none;
+  PodVector<uint32_t> const none;
   uint32_t const e{ memo.find_score(drawn, none, true).entry };
   REQUIRE(e != INVALID);
   MemoScore const s{ .cost = { .t0_violations = 0, .t1_hints = 0, .t2 = 4 },
@@ -602,7 +602,7 @@ TEST_CASE("candidate memo: past its budget it empties, and issues no number twic
   SubmachineOrders const plain{ f.order() };
   uint32_t const drawn{ memo.drawing(plain, f.size(plain), memo.profile_word(f.p)) };
   REQUIRE(drawn != INVALID);
-  Vector<uint32_t> const none;
+  PodVector<uint32_t> const none;
   uint32_t const e{ memo.find_score(drawn, none, true).entry };
   REQUIRE(e != INVALID);
   memo.set_score(
@@ -631,7 +631,7 @@ TEST_CASE("candidate memo: the tables never hold more than the budget") {
   constexpr uint64_t BUDGET{ uint64_t{ 64 } << 10U };
   CandidateMemo memo{ f.c, f.g, BUDGET };
   uint32_t const row{ memo.row_word(f.row) };
-  Vector<uint32_t> faces;
+  PodVector<uint32_t> faces;
   uint64_t most{ 0 };
   for (uint32_t i = 0; i < 20000; ++i) {
     faces.assign(1 + (i % 7), i);
@@ -654,7 +654,7 @@ TEST_CASE("candidate memo: a link to an entry since emptied away reads nothing")
   uint32_t const plain_at{ memo.arrangement(plain) };
   REQUIRE(drawn != INVALID);
   REQUIRE(plain_at != INVALID);
-  Vector<uint32_t> const none;
+  PodVector<uint32_t> const none;
   uint32_t const old{ memo.find_score(drawn, none, true).entry };
   REQUIRE(old != INVALID);
   memo.empty();

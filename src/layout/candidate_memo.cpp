@@ -3,8 +3,8 @@
 #include "layout/route.h"
 #include "scav_cold.h"
 #include "scav_int.h"
+#include "scav_pod_vector.h"
 #include "scav_stable_sort.h"
-#include "scav_vector.h"
 
 #include <algorithm>
 #include <cstring>
@@ -40,13 +40,13 @@ template <typename BlockOf>
 void group(uint32_t count,
            uint32_t blocks,
            BlockOf const &block_of,
-           Vector<uint32_t> &off,
-           Vector<uint32_t> &list) {
+           PodVector<uint32_t> &off,
+           PodVector<uint32_t> &list) {
   auto const at = [&](uint32_t i) { return imin(block_of(i), blocks - 1); };
   off.assign(size_t{ blocks } + 1, 0);
   for (uint32_t i = 0; i < count; ++i) { ++off[at(i) + 1]; }
   for (uint32_t b = 0; b < blocks; ++b) { off[b + 1] += off[b]; }
-  Vector<uint32_t> fill(off.begin(), off.end() - 1);
+  PodVector<uint32_t> fill(off.begin(), off.end() - 1);
   list.assign(count, 0);
   for (uint32_t i = 0; i < count; ++i) { list[fill[at(i)]++] = i; }
 }
@@ -73,7 +73,7 @@ bool number_blocks(uint32_t serial,
                    Blocks &last,
                    Blocks const *like,
                    Intern const &intern) {
-  thread_local Vector<uint32_t> fresh;
+  thread_local PodVector<uint32_t> fresh;
   auto const blocks{ static_cast<uint32_t>(now.ends.size()) };
   now.ids.resize(blocks);
   fresh.clear();
@@ -154,7 +154,7 @@ SCAV_COLD uint32_t CandidateMemo::profile_word(scav_profile const &knobs) {
 
 bool CandidateMemo::put_frame(SubmachineOrders const &o,
                               uint32_t m,
-                              Vector<uint32_t> &w) const {
+                              PodVector<uint32_t> &w) const {
   uint32_t node_off{ 0 };
   uint32_t node_len{ 0 };
   if (m < chart.submachines.size()) {
@@ -235,7 +235,7 @@ bool CandidateMemo::put_frame(SubmachineOrders const &o,
 
 uint32_t CandidateMemo::shape(SizedLayout const &z, uint32_t st) {
   // Per state, the thread's last shape in memo `cached`: its length, number and words.
-  thread_local Vector<uint32_t> cache;
+  thread_local PodVector<uint32_t> cache;
   thread_local uint32_t cached{ 0 };
   scav_rect const &r{ z.state[st] };
   std::array<scav_rect, 5> const rects{ z.before[st],
@@ -281,9 +281,9 @@ uint32_t CandidateMemo::shape(SizedLayout const &z, uint32_t st) {
 
 bool CandidateMemo::put_geometry(SubmachineOrders const &o,
                                  SizedLayout const &z,
-                                 std::vector<Vector<uint32_t>> const &bends,
+                                 std::vector<PodVector<uint32_t>> const &bends,
                                  uint32_t m,
-                                 Vector<uint32_t> &w) {
+                                 PodVector<uint32_t> &w) {
   int32_t ox{ 0 };
   int32_t oy{ 0 };
   if (m < chart.submachines.size()) {
@@ -311,7 +311,7 @@ bool CandidateMemo::put_geometry(SubmachineOrders const &o,
   for (uint32_t k = seg_off[m]; k < seg_off[m + 1]; ++k) {
     uint32_t const seg{ seg_list[k] };
     uint32_t const node{ o.seg_node[seg] };
-    Vector<uint32_t> const &chain{ bends[seg] };
+    PodVector<uint32_t> const &chain{ bends[seg] };
     bool const noded{ node != INVALID };
     if ((noded && (node >= z.node.size())) || (chain.size() >= CHAIN_LIMIT)) {
       return false;
@@ -331,7 +331,7 @@ bool CandidateMemo::put_geometry(SubmachineOrders const &o,
 }
 
 bool CandidateMemo::frame_ids(SubmachineOrders const &o,
-                              Vector<uint32_t> &ids,
+                              PodVector<uint32_t> &ids,
                               Blocks const *like,
                               Blocks *keep) {
   if (!usable) { return false; }
@@ -400,20 +400,20 @@ SCAV_COLD void CandidateMemo::empty() {
     ScopedLock const held{ f.lock };
     f.base += f.keys.size();
     f.keys = KeyIndex{};
-    Vector<FacingRecord>{}.swap(f.records);
-    Vector<uint32_t>{}.swap(f.turns);
+    PodVector<FacingRecord>{}.swap(f.records);
+    PodVector<uint32_t>{}.swap(f.turns);
   }
   for (ScoreShard &sh : scores) {
     ScopedLock const held{ sh.lock };
     sh.base += sh.keys.size();
     sh.keys = KeyIndex{};
-    Vector<ScoreRecord>{}.swap(sh.records);
+    PodVector<ScoreRecord>{}.swap(sh.records);
   }
   for (LinkShard &sh : orderings) {
     ScopedLock const held{ sh.lock };
     sh.base += sh.keys.size();
     sh.keys = KeyIndex{};
-    Vector<uint32_t>{}.swap(sh.links);
+    PodVector<uint32_t>{}.swap(sh.links);
   }
   emptying.store(false);
 }
@@ -422,8 +422,8 @@ SCAV_COLD uint32_t CandidateMemo::arrangement(SubmachineOrders const &o,
                                               Blocks const *like,
                                               Blocks *keep) {
   // The thread's last frame numbers and their arrangement, in memo `last_serial`.
-  thread_local Vector<uint32_t> ids;
-  thread_local Vector<uint32_t> last_ids;
+  thread_local PodVector<uint32_t> ids;
+  thread_local PodVector<uint32_t> last_ids;
   thread_local uint32_t last_serial{ 0 };
   thread_local uint32_t last{ INVALID };
   if (!frame_ids(o, ids, like, keep)) { return INVALID; }
@@ -439,15 +439,15 @@ uint32_t CandidateMemo::drawing(SubmachineOrders const &o,
                                 uint32_t profile,
                                 Blocks const *like,
                                 Blocks *keep) {
-  thread_local Vector<uint32_t> reversed;
-  thread_local std::vector<Vector<uint32_t>> bends;
+  thread_local PodVector<uint32_t> reversed;
+  thread_local std::vector<PodVector<uint32_t>> bends;
   segment_bends(o, static_cast<uint32_t>(graph.segments.size()), reversed, bends);
   return drawing(o, z, bends, profile, like, keep);
 }
 
 SCAV_COLD uint32_t CandidateMemo::drawing(SubmachineOrders const &o,
                                           SizedLayout const &z,
-                                          std::vector<Vector<uint32_t>> const &bends,
+                                          std::vector<PodVector<uint32_t>> const &bends,
                                           uint32_t profile,
                                           Blocks const *like,
                                           Blocks *keep) {
@@ -466,8 +466,8 @@ SCAV_COLD uint32_t CandidateMemo::drawing(SubmachineOrders const &o,
   // drawing's key, and `last_tuple` and `last` the thread's previous key and number.
   thread_local Blocks now;
   thread_local Blocks blocks;
-  thread_local Vector<uint32_t> tuple;
-  thread_local Vector<uint32_t> last_tuple;
+  thread_local PodVector<uint32_t> tuple;
+  thread_local PodVector<uint32_t> last_tuple;
   thread_local uint32_t last_serial{ 0 };
   thread_local uint32_t last{ INVALID };
   now.words.clear();
@@ -500,7 +500,7 @@ SCAV_COLD uint32_t CandidateMemo::drawing(SubmachineOrders const &o,
 }
 
 SCAV_COLD void CandidateMemo::box_faces(SearchPins const *pins,
-                                        Vector<uint32_t> &faces) const {
+                                        PodVector<uint32_t> &faces) const {
   faces.clear();
   static std::vector<EndPin> const NONE;
   for (EndPin const &fp : (pins != nullptr) ? pins->ends : NONE) {
@@ -533,7 +533,7 @@ namespace {
 void facing_key(uint32_t row,
                 uint32_t arranged,
                 SubmachineOrders const &o,
-                Vector<uint32_t> &key) {
+                PodVector<uint32_t> &key) {
   key.clear();
   key.insert(key.end(), { row, arranged });
   for (uint32_t seg = 0; seg < o.seg_sided.size(); ++seg) {
@@ -547,7 +547,7 @@ FacingFound CandidateMemo::find_facing(uint32_t row,
                                        uint32_t arranged,
                                        SubmachineOrders const &o,
                                        Facing &out) {
-  thread_local Vector<uint32_t> key;
+  thread_local PodVector<uint32_t> key;
   facing_key(row, arranged, o, key);
   uint64_t const hash{ memo_hash(key) };
   FacingShard &f{ facings[shard_of(hash)] };
@@ -577,7 +577,7 @@ SCAV_COLD void CandidateMemo::store_facing(uint32_t row,
                                            uint32_t arranged,
                                            SubmachineOrders const &o,
                                            Facing const *turned) {
-  thread_local Vector<uint32_t> key;
+  thread_local PodVector<uint32_t> key;
   facing_key(row, arranged, o, key);
   uint64_t const hash{ memo_hash(key) };
   // A side's end and face share one word.
@@ -625,10 +625,11 @@ SCAV_COLD void CandidateMemo::answer(ScoreRecord const &r, bool labelled, Recall
   out.route_bound = labelled ? imax(r.bound[0], r.bound[1]) : r.bound[0];
 }
 
-SCAV_COLD CandidateMemo::Recalled CandidateMemo::find_score(uint32_t drawn,
-                                                            Vector<uint32_t> const &faces,
-                                                            bool labelled) {
-  thread_local Vector<uint32_t> key;
+SCAV_COLD CandidateMemo::Recalled CandidateMemo::find_score(
+    uint32_t drawn,
+    PodVector<uint32_t> const &faces,
+    bool labelled) {
+  thread_local PodVector<uint32_t> key;
   key.clear();
   key.push_back(drawn);
   key.insert(key.end(), faces.begin(), faces.end());
@@ -673,8 +674,8 @@ CandidateMemo::Recalled CandidateMemo::recall(uint32_t e, bool labelled) {
 SCAV_COLD CandidateMemo::Linked CandidateMemo::find_ordering(
     uint32_t row,
     uint32_t arranged,
-    Vector<uint32_t> const &faces) {
-  thread_local Vector<uint32_t> key;
+    PodVector<uint32_t> const &faces) {
+  thread_local PodVector<uint32_t> key;
   key.clear();
   key.insert(key.end(), { row, arranged });
   key.insert(key.end(), faces.begin(), faces.end());

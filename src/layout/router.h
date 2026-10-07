@@ -9,7 +9,7 @@
 #include "scav/scav_layout_c.h"
 #include "scav/scav_types.h"
 #include "scav_int.h"
-#include "scav_vector.h"
+#include "scav_pod_vector.h"
 
 #include <cstdint>
 #include <vector>
@@ -72,17 +72,17 @@ bool occupied_free(std::vector<OccupiedSpan> const &spans,
                    int32_t &pos);
 
 struct RouteInput {
-  scav_rect region{};           // the frame's rect; a route stays inside it
-  Vector<scav_rect> obstacles;  // the boxes and walls routes keep out of
+  scav_rect region{};              // the frame's rect; a route stays inside it
+  PodVector<scav_rect> obstacles;  // the boxes and walls routes keep out of
   // Parallel to `obstacles`, or empty for none: nonzero for a disc or diamond inscribed
   // in its box, which a route meets only at a face midpoint.
-  Vector<uint8_t> inscribed;
+  PodVector<uint8_t> inscribed;
   // Parallel to `obstacles`, or empty for all zero: the corner arc radius of the shape
   // drawn in that box, which seats are held off.
-  Vector<int32_t> corner;
+  PodVector<int32_t> corner;
   uint32_t first_wall{ INVALID };  // obstacles from this index on are walls; INVALID: none
-  Vector<RouteNet> nets;           // in (transition, ordinal) order
-  Vector<scav_point> waypoints;
+  PodVector<RouteNet> nets;        // in (transition, ordinal) order
+  PodVector<scav_point> waypoints;
   scav_profile profile{};
   // The box the frame's routes are drawn inside, zero-sized for the root. Routes keep
   // out of its `border_band`; an end in that band leaves square to the border.
@@ -90,7 +90,7 @@ struct RouteInput {
   std::vector<OccupiedSpan> occupied;  // inner loops' legs on box faces
   // Walls a route meets only along its border or an end's stub: the gaps between the
   // frame's region and its sibling regions.
-  Vector<scav_rect> gaps;
+  PodVector<scav_rect> gaps;
 };
 
 enum class RouteFailure : int32_t {
@@ -108,9 +108,9 @@ struct RouteMetrics {
 };
 
 struct RouteOutput {
-  Vector<scav_point> points;
-  Vector<scav_span> net_points;  // parallel to RouteInput::nets
-  Vector<RouteMetrics> metrics;
+  PodVector<scav_point> points;
+  PodVector<scav_span> net_points;  // parallel to RouteInput::nets
+  PodVector<RouteMetrics> metrics;
 };
 
 struct RouterName {

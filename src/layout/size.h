@@ -10,7 +10,7 @@
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
 #include "scav/scav_layout_c.h"
-#include "scav_vector.h"
+#include "scav_pod_vector.h"
 
 #include <array>
 #include <cstdint>
@@ -28,16 +28,16 @@ struct SizedLayout {
   SizedLayout &operator=(SizedLayout &&) noexcept;
   ~SizedLayout();
 
-  Vector<scav_rect> state, before, after;  // parallel to states
-  Vector<scav_rect> lead, trail;           // parallel to states: the side bands
-  Vector<scav_rect> loop;                  // parallel to states: its inner loops' room
-  Vector<uint8_t> loop_place;  // parallel to states: the room's `face * 2 + end`
-  Vector<scav_rect> sub;       // parallel to submachines
-  Vector<scav_point> node;     // parallel to the orders' nodes
+  PodVector<scav_rect> state, before, after;  // parallel to states
+  PodVector<scav_rect> lead, trail;           // parallel to states: the side bands
+  PodVector<scav_rect> loop;                  // parallel to states: its inner loops' room
+  PodVector<uint8_t> loop_place;  // parallel to states: the room's `face * 2 + end`
+  PodVector<scav_rect> sub;       // parallel to submachines
+  PodVector<scav_point> node;     // parallel to the orders' nodes
   // Parallel to the segments, or empty: 1 where a straight leg seats at the leading end of
   // its ends' overlap, with its label's room on the trailing side.
-  Vector<uint8_t> lean;
-  Vector<uint8_t> folded;  // parallel to submachines: 1 where a frame's run wraps
+  PodVector<uint8_t> lean;
+  PodVector<uint8_t> folded;  // parallel to submachines: 1 where a frame's run wraps
   scav_rect chart{};
 };
 
@@ -101,16 +101,16 @@ struct LoopRow {
 LoopRow loop_row(scav_profile const &p, scav_extent label, bool vertical);
 
 // Per inner loop, the extent its path boxes stack to.
-void loop_labels(Chart const &c, scav_spaces const &s, Vector<scav_extent> &label);
+void loop_labels(Chart const &c, scav_spaces const &s, PodVector<scav_extent> &label);
 
 // Per state, the room its inner loops stack into for the placement `place[st]` gives
 // (`face * 2 + end`; the right face where `place` is short), and `label` as `loop_labels`.
 void loop_rooms(Chart const &c,
                 scav_spaces const &s,
                 scav_profile const &p,
-                Vector<uint8_t> const &place,
-                Vector<scav_extent> &label,
-                Vector<scav_extent> &room);
+                PodVector<uint8_t> const &place,
+                PodVector<scav_extent> &label,
+                PodVector<scav_extent> &room);
 
 // Per transition, its inner loop's row across its state's room, zero for any other; and
 // `label` as `loop_labels` gives it.
@@ -118,8 +118,8 @@ void loop_rows(Chart const &c,
                SizedLayout const &z,
                scav_spaces const &s,
                scav_profile const &p,
-               Vector<scav_extent> &label,
-               Vector<scav_rect> &row);
+               PodVector<scav_extent> &label,
+               PodVector<scav_rect> &row);
 
 // Which row knobs can change a sizing of `c` under some pins: `trybox` and compaction
 // where a packing may hold two rects, the owner's hole inside a composite, the fold rule.

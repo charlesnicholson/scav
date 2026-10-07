@@ -11,9 +11,9 @@
 #include "scav/scav_layout.h"
 #include "scav_int.h"
 #include "scav_internal.h"
+#include "scav_pod_vector.h"
 #include "scav_stable_sort.h"
 #include "scav_vec.h"
-#include "scav_vector.h"
 
 #include <array>
 #include <cstdint>
@@ -28,11 +28,11 @@ uint32_t place_labels_by(Chart const &c,
                          SplitGraph const &g,
                          SizedLayout const &z,
                          scav_spaces const &s,
-                         Vector<scav_span> const &route,
-                         Vector<scav_point> const &points,
+                         PodVector<scav_span> const &route,
+                         PodVector<scav_point> const &points,
                          scav_profile const &p,
                          LabelSearch search,
-                         Vector<scav_rect> &out);
+                         PodVector<scav_rect> &out);
 SCAV_INTERNAL_END
 
 namespace {
@@ -57,7 +57,7 @@ struct Legs {
 // `lca.child[0]` and trailing ones inside `lca.child[1]`; all legs if none remain.
 Legs legs_in(SizedLayout const &z,
              CommonAncestor const &lca,
-             Vector<scav_point> const &points,
+             PodVector<scav_point> const &points,
              scav_span r) {
   uint32_t const legs{ (r.len >= 2) ? (r.len - 1) : 0U };
   auto const inside = [&](uint32_t k, StateId st) {
@@ -138,7 +138,7 @@ constexpr Wide NO_LIMIT{ std::numeric_limits<Wide>::max() };
 // none is within `reach`); past `stop` the scan ends, returning a lower bound.
 Wide shortfall_of(scav_rect const &cand,
                   Wide reach,
-                  Vector<scav_rect> const &foreign,
+                  PodVector<scav_rect> const &foreign,
                   Wide stop,
                   uint32_t &at) {
   Wide nearest{ reach };
@@ -155,7 +155,7 @@ Wide shortfall_of(scav_rect const &cand,
 }
 
 // The midpoint of the longest horizontal leg, else of the longest leg.
-scav_point anchor_of(Vector<scav_point> const &points, scav_span route) {
+scav_point anchor_of(PodVector<scav_point> const &points, scav_span route) {
   scav_point mid{};
   Wide longest{ -1 };
   for (uint32_t pass = 0; (pass < 2) && (longest < 0); ++pass) {
@@ -192,10 +192,10 @@ struct Local {
   int32_t prior_mid{ 0 };
   uint32_t first{ 0 }, last{ 0 };  // the legs candidates sit on, from `legs_in`
   scav_rect holder{};
-  Vector<scav_point> route;
-  Vector<scav_rect> walls;    // states, bands and settled boxes
-  Vector<scav_rect> foreign;  // other transitions' legs
-  Vector<scav_rect> below;    // the states the route leaves and enters by
+  PodVector<scav_point> route;
+  PodVector<scav_rect> walls;    // states, bands and settled boxes
+  PodVector<scav_rect> foreign;  // other transitions' legs
+  PodVector<scav_rect> below;    // the states the route leaves and enters by
 };
 
 // The placed box and its leg and slide; a later box of its transition lies past them.
@@ -217,7 +217,7 @@ struct Group {
 // within reach of any of their candidates.
 struct Band {
   bool built{ false };
-  Vector<scav_rect> near;
+  PodVector<scav_rect> near;
 };
 
 // A leg's bands: across it a lead is back, none or forward, and an attachment
@@ -245,14 +245,14 @@ struct Leg {
 // Working vectors kept across one call's boxes; `bands` holds `BANDS` per leg. `gridded`
 // is set once `grid` is built over `blocked`.
 struct Scratch {
-  Vector<scav_rect> own;
-  Vector<scav_rect> blocked;
-  std::vector<Vector<scav_rect>> nearby;
-  Vector<Group> groups;
-  Vector<Leg> legs;
+  PodVector<scav_rect> own;
+  PodVector<scav_rect> blocked;
+  std::vector<PodVector<scav_rect>> nearby;
+  PodVector<Group> groups;
+  PodVector<Leg> legs;
   std::vector<Band> bands;
   RectGrid grid;
-  Vector<uint32_t> fill;
+  PodVector<uint32_t> fill;
   scav_rect region{};
   bool gridded{ false };
 };
@@ -268,7 +268,10 @@ RectGrid &grid_of(Scratch &s, int32_t cell_w, int32_t cell_h) {
 
 // The coordinate a slide along leg `k` is measured in: x on a horizontal leg,
 // y on any other.
-int32_t along(Vector<scav_point> const &points, scav_span r, uint32_t k, scav_point at) {
+int32_t along(PodVector<scav_point> const &points,
+              scav_span r,
+              uint32_t k,
+              scav_point at) {
   bool const flat{ ((k + 1) < r.len) && (points[r.off + k].y == points[r.off + k + 1].y) };
   return flat ? at.x : at.y;
 }
@@ -279,7 +282,7 @@ scav_rect relative_to(scav_rect const &r, scav_point origin) {
 
 // The route's bounds grown by the leader, the box and one more box height: the reach of
 // every candidate and its distance query.
-scav_rect region_of(Vector<scav_point> const &route,
+scav_rect region_of(PodVector<scav_point> const &route,
                     int32_t w,
                     int32_t h,
                     int32_t leader) {
@@ -316,8 +319,8 @@ void prepare(Local const &l, Scratch &s) {
 }
 
 // The foreign legs within `leader + w + h` of leg `k`, into `s.nearby[k]`.
-Vector<scav_rect> const &nearby_of(Local const &l, Scratch &s, uint32_t k) {
-  Vector<scav_rect> &out{ s.nearby[k] };
+PodVector<scav_rect> const &nearby_of(Local const &l, Scratch &s, uint32_t k) {
+  PodVector<scav_rect> &out{ s.nearby[k] };
   out.clear();
   for (scav_rect const &seg : l.foreign) {
     if (chebyshev_gap(s.own[k], seg) <= (l.leader + l.w + l.h)) { out.push_back(seg); }
@@ -355,7 +358,7 @@ Outcome exhaustive(Local const &l, Scratch &s) {
     bool const ascending{ flat ? (a.x < b.x) : (a.y < b.y) };
     int32_t const dir{ ascending ? 1 : -1 };
     bool const bounded{ chained && (k == l.prior_seg) };
-    Vector<scav_rect> const &nearby{ nearby_of(l, s, k) };
+    PodVector<scav_rect> const &nearby{ nearby_of(l, s, k) };
     // Slides step from `lo`; the last is clamped to `hi`, so both ends are anchors.
     int32_t const runs{ (hi - lo) / step };
     for (int32_t n = 0; n <= (runs + 1); ++n) {
@@ -583,7 +586,7 @@ void Walk::group(Group const &g) {
         return past(s.blocked[hit], n, sign);
       }
     }
-    Vector<scav_rect> const &nearby{ band_of(g).near };
+    PodVector<scav_rect> const &nearby{ band_of(g).near };
     if (!nearby.empty()) {
       uint32_t nearest{ INVALID };
       here.shortfall = shortfall_of(cand,
@@ -711,7 +714,7 @@ Outcome pruned(Local const &l, Scratch &s) {
 }
 
 // `memo_hash`'s round taken two words at a time.
-uint64_t label_hash(Vector<uint32_t> const &key) {
+uint64_t label_hash(PodVector<uint32_t> const &key) {
   uint64_t h{ 0 };
   size_t k{ 0 };
   for (; (k + 1) < key.size(); k += 2) {
@@ -733,7 +736,7 @@ Memo &memo() {
 }
 
 // Every field of `l`, counts before contents, so distinct problems get distinct keys.
-void key_of(Local const &l, Vector<uint32_t> &key) {
+void key_of(Local const &l, PodVector<uint32_t> &key) {
   key.resize(16 + (2 * l.route.size()) + (4 * l.walls.size()) + (4 * l.foreign.size()) +
              (4 * l.below.size()));
   uint32_t *at{ key.data() };
@@ -767,8 +770,8 @@ void key_of(Local const &l, Vector<uint32_t> &key) {
 }
 
 Outcome remembered(Local const &l, Scratch &s) {
-  thread_local Vector<uint32_t> key;
-  thread_local Vector<int32_t> value;
+  thread_local PodVector<uint32_t> key;
+  thread_local PodVector<int32_t> value;
   key_of(l, key);
   Memo &m{ memo() };
   int32_t const *hit{ nullptr };
@@ -788,11 +791,11 @@ Outcome remembered(Local const &l, Scratch &s) {
 
 // Per-thread buffers for one `place_labels_by` call; the call never waits on the pool.
 struct CallBuffers {
-  Vector<uint8_t> encloses;
-  Vector<scav_rect> pieces;
-  Vector<Pieces> by_route;
-  Vector<uint32_t> live, queue, merge, settled;
-  Vector<scav_extent> loop_label;
+  PodVector<uint8_t> encloses;
+  PodVector<scav_rect> pieces;
+  PodVector<Pieces> by_route;
+  PodVector<uint32_t> live, queue, merge, settled;
+  PodVector<scav_extent> loop_label;
   Local local;
 };
 
@@ -809,18 +812,18 @@ uint32_t place_labels_by(Chart const &c,
                          SplitGraph const &g,
                          SizedLayout const &z,
                          scav_spaces const &s,
-                         Vector<scav_span> const &route,
-                         Vector<scav_point> const &points,
+                         PodVector<scav_span> const &route,
+                         PodVector<scav_point> const &points,
                          scav_profile const &p,
                          LabelSearch search,
-                         Vector<scav_rect> &out) {
+                         PodVector<scav_rect> &out) {
   out.assign(s.n_path_box, {});
   if ((s.path_box == nullptr) || (s.n_path_box == 0)) { return 0; }
 
   CallBuffers &cb{ call_buffers() };
-  Vector<scav_rect> &pieces{ cb.pieces };
+  PodVector<scav_rect> &pieces{ cb.pieces };
   pieces.clear();
-  Vector<Pieces> &by_route{ cb.by_route };
+  PodVector<Pieces> &by_route{ cb.by_route };
   by_route.assign(route.size(), Pieces{});
   for (uint32_t t = 0; t < route.size(); ++t) {
     Pieces &of{ by_route[t] };
@@ -841,14 +844,14 @@ uint32_t place_labels_by(Chart const &c,
     }
     of.count = static_cast<uint32_t>(pieces.size()) - of.first;
   }
-  Vector<uint32_t> &live{ cb.live };
+  PodVector<uint32_t> &live{ cb.live };
   live.clear();
   for (uint32_t st = 0; st < c.states.size(); ++st) {
     if (c.states[st].live != 0) { live.push_back(st); }
   }
 
   // By transition, then `order`; a box sees its transition's earlier boxes as settled.
-  Vector<uint32_t> &queue{ cb.queue };
+  PodVector<uint32_t> &queue{ cb.queue };
   queue.resize(s.n_path_box);
   for (uint32_t i = 0; i < s.n_path_box; ++i) { queue[i] = i; }
   scav_stable_sort(queue, cb.merge, [&s](uint32_t a, uint32_t b) {
@@ -860,7 +863,7 @@ uint32_t place_labels_by(Chart const &c,
 
   // The states a label may lie inside: the owner of the lowest submachine holding both
   // ends, and every state enclosing it.
-  Vector<uint8_t> &encloses{ cb.encloses };
+  PodVector<uint8_t> &encloses{ cb.encloses };
   encloses.assign(c.states.size(), 0);
   auto const mark = [&](StateId from, uint8_t v) {
     StateId at{ from };
@@ -872,7 +875,7 @@ uint32_t place_labels_by(Chart const &c,
 
   Local &l{ cb.local };          // every field set per box before it is read
   thread_local Scratch scratch;  // every search resets what it reads first
-  Vector<uint32_t> &settled{ cb.settled };
+  PodVector<uint32_t> &settled{ cb.settled };
   settled.clear();
   uint32_t fallbacks{ 0 };
   uint32_t prior_subject{ INVALID };
@@ -1051,10 +1054,10 @@ uint32_t place_labels(Chart const &c,
                       SplitGraph const &g,
                       SizedLayout const &z,
                       scav_spaces const &s,
-                      Vector<scav_span> const &route,
-                      Vector<scav_point> const &points,
+                      PodVector<scav_span> const &route,
+                      PodVector<scav_point> const &points,
                       scav_profile const &p,
-                      Vector<scav_rect> &out) {
+                      PodVector<scav_rect> &out) {
   return place_labels_by(c, g, z, s, route, points, p, LabelSearch::Memoized, out);
 }
 

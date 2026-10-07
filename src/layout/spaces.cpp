@@ -5,9 +5,9 @@
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
 #include "scav/scav_types.h"
+#include "scav_pod_vector.h"
 #include "scav_stable_sort.h"
 #include "scav_vec.h"
-#include "scav_vector.h"
 #include "scav_xxhash.h"
 
 #include <cstdint>
@@ -102,7 +102,7 @@ bool spaces_validate(Chart const &c,
     }
 
     // Reports duplicate (subject, order) pairs by stably sorting row indices.
-    Vector<uint32_t> by_key(s.n_path_box);
+    PodVector<uint32_t> by_key(s.n_path_box);
     for (uint32_t i = 0; i < s.n_path_box; ++i) { by_key[i] = i; }
     scav_stable_sort(by_key, [&s](uint32_t a, uint32_t b) {
       if (s.path_box[a].subject != s.path_box[b].subject) {
@@ -137,7 +137,7 @@ bool spaces_validate(Chart const &c,
 
 uint32_t spaces_digest(scav_spaces const &s) {
   // Hashes each table field by field, prefixed with its row count.
-  Vector<scav_byte> bytes;
+  PodVector<scav_byte> bytes;
   bytes.reserve(16 + (24ULL * (s.n_box_state + s.n_box_sub)) + (8ULL * s.n_path_clear) +
                 (16ULL * s.n_path_box));
   append_u32(bytes, s.n_box_state);
