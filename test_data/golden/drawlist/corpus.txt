@@ -4,11 +4,11 @@ brew.scav 4c4c3d65 58
 dock.scav b534be52 48
 elevator.scav e35fb6eb 121
 estop.scav cfaba06f 18
-kiln.scav e752675e 115
+kiln.scav 164a31ff 115
 led.scav d83755f5 18
 mill.scav c7f8a3a0 477
 ota.scav 06b4d708 62
-printer.scav 4f03bab3 146
+printer.scav 9d08f2be 146
 tcp.scav 0813c69c 68
 toolchanger.scav b9c8f3e4 142
 vac.scav c70c11c7 108
