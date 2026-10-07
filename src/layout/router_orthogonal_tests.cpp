@@ -2280,29 +2280,59 @@ TEST_CASE("ortho: a box between two ends is routed around it") {
 }
 
 TEST_CASE("ortho: waypoints are threaded, in the order they were given") {
+  // The end lies past the second waypoint, so no part of the route doubles back.
   RouteInput in;
   in.profile = profile();
   in.region = rect(0, 0, 1000, 1000);
   in.waypoints.push_back(pt(300, 100));
   in.waypoints.push_back(pt(700, 900));
   in.nets.push_back(
-      { .src = pt(0, 500), .dst = pt(1000, 500), .waypoint_off = 0, .waypoint_len = 2 });
+      { .src = pt(0, 500), .dst = pt(1000, 900), .waypoint_off = 0, .waypoint_len = 2 });
   RouteOutput out;
   ORTHO.route(in, out);
 
   REQUIRE(out.net_points.size() == 1);
   CHECK(out.metrics[0].failed == RouteFailure::None);
   scav_span const at{ out.net_points[0] };
-  // Both waypoints appear, and the first one before the second.
-  uint32_t first{ INVALID };
-  uint32_t second{ INVALID };
-  for (uint32_t k = 0; k < at.len; ++k) {
-    if (out.points[at.off + k] == pt(300, 100)) { first = k; }
-    if (out.points[at.off + k] == pt(700, 900)) { second = k; }
-  }
+  // The route passes both waypoints, and the first one before the second.
+  auto const on = [&](scav_point w) {
+    for (uint32_t k = 0; (k + 1) < at.len; ++k) {
+      scav_point const a{ out.points[at.off + k] };
+      scav_point const b{ out.points[at.off + k + 1] };
+      bool const between{ (imin(a.x, b.x) <= w.x) && (w.x <= imax(a.x, b.x)) &&
+                          (imin(a.y, b.y) <= w.y) && (w.y <= imax(a.y, b.y)) };
+      if (between && ((a.x == b.x) || (a.y == b.y))) { return k; }
+    }
+    return INVALID;
+  };
+  uint32_t const first{ on(pt(300, 100)) };
+  uint32_t const second{ on(pt(700, 900)) };
   REQUIRE(first != INVALID);
   REQUIRE(second != INVALID);
   CHECK(first < second);
+}
+
+TEST_CASE("ortho: a route through a waypoint turns only where it must") {
+  // Out of the right face, down through the waypoint at x=600, into the top face below:
+  // one bend, where the run out meets the column.
+  RouteInput in;
+  in.profile = profile();
+  in.region = rect(-200, -200, 1200, 1700);
+  in.obstacles = { rect(0, 0, 400, 300), rect(300, 1000, 400, 300) };
+  in.waypoints.push_back(pt(600, 500));
+  in.nets.push_back({ .src = pt(200, 150),
+                      .dst = pt(500, 1150),
+                      .src_obstacle = 0,
+                      .dst_obstacle = 1,
+                      .waypoint_off = 0,
+                      .waypoint_len = 1,
+                      .src_face = 1,
+                      .dst_face = 2 });
+  RouteOutput out;
+  ORTHO.route(in, out);
+  REQUIRE(out.net_points.size() == 1);
+  CHECK(out.metrics[0].failed == RouteFailure::None);
+  CHECK(route_bends(out, 0) == 1);
 }
 
 TEST_CASE("ortho: an attached seat lies on the face its aim escapes by") {
@@ -2317,8 +2347,8 @@ TEST_CASE("ortho: an attached seat lies on the face its aim escapes by") {
   }
 }
 
-TEST_CASE("ortho: a waypoint a route doubles back from is dropped with its turns") {
-  // Up to the waypoint and back down the same line: the spike is simplified away.
+TEST_CASE("ortho: a route reaches a waypoint rather than doubling back from it") {
+  // Doubling back counts as two turns, so the route runs up to the waypoint and round.
   RouteInput in;
   in.profile = profile();
   in.region = rect(0, 0, 1000, 1000);
@@ -2331,8 +2361,12 @@ TEST_CASE("ortho: a waypoint a route doubles back from is dropped with its turns
   REQUIRE(out.net_points.size() == 1);
   CHECK(out.metrics[0].failed == RouteFailure::None);
   scav_span const at{ out.net_points[0] };
-  for (uint32_t k = 0; k < at.len; ++k) { CHECK(!(out.points[at.off + k] == pt(0, 100))); }
-  CHECK(route_bends(out, 0) == 0);
+  bool reached{ false };
+  for (uint32_t k = 0; k < at.len; ++k) {
+    reached = reached || (out.points[at.off + k] == pt(0, 100));
+  }
+  CHECK(reached);
+  CHECK(route_bends(out, 0) == 2);
   // A path through the waypoint turns once.
   CHECK(cost_path_turns(rect(0, 500, 0, 0), 4, { pt(0, 100) }, rect(600, 500, 0, 0), 4) ==
         1);

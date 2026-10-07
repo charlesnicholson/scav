@@ -1248,15 +1248,24 @@ bool ortho_grid(scav_rect const &region,
   return true;
 }
 
-bool ortho_search(OrthoGrid const &g,
-                  uint32_t from,
-                  uint32_t to,
-                  Wide bend,
-                  OrthoScratch &s,
-                  std::vector<uint32_t> &out,
-                  uint32_t from_plane,
-                  uint32_t to_plane) {
-  out.clear();
+namespace {
+
+// The search behind `ortho_search` and `ortho_search_planes`: stops at the first goal it
+// reaches unless `both`, when it runs on until each plane `to_plane` allows is reached.
+bool search_planes(OrthoGrid const &g,
+                   uint32_t from,
+                   uint32_t to,
+                   Wide bend,
+                   OrthoScratch &s,
+                   std::array<Wide, 2> const &seed,
+                   std::array<int32_t, 2> const &heading,
+                   uint32_t from_plane,
+                   uint32_t to_plane,
+                   uint32_t waypoints,
+                   bool both,
+                   std::vector<uint32_t> &hops,
+                   std::array<OrthoFinish, 2> &out) {
+  out = {};
   uint32_t const vertices{ g.nx() * g.ny() };
   if ((vertices == 0) || (from >= vertices) || (to >= vertices)) { return false; }
   if (g.pass_h.empty() && (g.nx() > 1)) { return false; }
@@ -1285,6 +1294,9 @@ bool ortho_search(OrthoGrid const &g,
   constexpr Wide QUARTERS{ 4 };
   Wide const turn_w{ QUARTERS * bend };
   Wide const end_turn_w{ (bend > 0) ? (turn_w - 1) : turn_w };
+  // A turn at a waypoint costs a quarter less again: ties go to turning where the corridor
+  // turns. `waypoints` bit 0 marks `from` as one, bit 1 `to`.
+  Wide const way_turn_w{ (bend > 0) ? (turn_w - 2) : turn_w };
 
   // Admissible: Manhattan distance, a turn when this plane cannot reach the goal alone,
   // and an end turn to finish in a fixed goal plane.
@@ -1301,17 +1313,48 @@ bool ortho_search(OrthoGrid const &g,
   {
     Wide const dx{ distance(xs[from % nx], goal.x) };
     Wide const dy{ distance(ys[from / nx], goal.y) };
-    // A fixed start seeds its lead's plane alone; the turn reaches the other.
+    // Each seeded plane starts at its seed; the turn reaches the other.
     for (uint32_t plane = 0; plane < 2; ++plane) {
-      if ((from_plane < 2) && (plane != from_plane)) { continue; }
+      if (seed[plane] < 0) { continue; }
       uint32_t const node{ (from * 2) + plane };
-      state[node] = { .stamp = gen, .parent = INVALID, .best = 0 };
-      ortho_open_push(open, { .f = heuristic(dx, dy, plane), .g = 0, .node = node });
+      state[node] = { .stamp = gen, .parent = INVALID, .best = seed[plane] };
+      ortho_open_push(
+          open,
+          { .f = seed[plane] + heuristic(dx, dy, plane), .g = seed[plane], .node = node });
     }
   }
 
+  // Appends the path to `node` from its seed to `hops` as `out[plane]`.
+  auto const finish = [&](uint32_t node, Wide cost) {
+    s.path.clear();
+    uint32_t root{ node };
+    for (uint32_t at = node; at != INVALID; at = state[at].parent) {
+      vec_push_back(s.path, at / 2);
+      root = at;
+    }
+    uint32_t const off{ static_cast<uint32_t>(hops.size()) };
+    for (auto i = static_cast<uint32_t>(s.path.size()); i-- > 0;) {
+      if ((hops.size() == off) || (hops.back() != s.path[i])) {
+        vec_push_back(hops, s.path[i]);
+      }
+    }
+    // The last move's direction along the goal's plane; 0 after a turn at the goal.
+    uint32_t const before{ state[node].parent };
+    int32_t way{ 0 };
+    if ((before != INVALID) && ((before / 2) != (node / 2))) {
+      scav_point const a{ g.point(before / 2) };
+      scav_point const b{ g.point(node / 2) };
+      way = ((node % 2) == 0) ? ((b.x > a.x) ? 1 : -1) : ((b.y > a.y) ? 1 : -1);
+    }
+    out[node % 2] = { .cost = cost,
+                      .start = root % 2,
+                      .heading = way,
+                      .hops = { .off = off,
+                                .len = static_cast<uint32_t>(hops.size()) - off } };
+  };
+
   uint32_t expansions{ 0 };
-  uint32_t reached{ INVALID };
+  bool reached{ false };
   while (!ortho_open_empty(open)) {
     OrthoFrontierEntry const top{ ortho_open_pop(open) };
     uint32_t const node{ top.node };
@@ -1319,11 +1362,12 @@ bool ortho_search(OrthoGrid const &g,
     if ((here.stamp != gen) || (top.g != here.best)) { continue; }
     uint32_t const v{ node / 2 };
     uint32_t const plane{ node % 2 };
-    if ((v == to) && (!fixed_goal || (plane == to_plane))) {
-      reached = node;
-      break;
+    if ((v == to) && (!fixed_goal || (plane == to_plane)) && (out[plane].cost < 0)) {
+      finish(node, top.g);
+      reached = true;
+      if (!both || fixed_goal || (out[plane ^ 1U].cost >= 0)) { break; }
     }
-    if (++expansions > ORTHO_EXPANSION_BUDGET) { return false; }
+    if (++expansions > ORTHO_EXPANSION_BUDGET) { return reached; }
 
     uint32_t const iy{ v / nx };
     uint32_t const ix{ v - (iy * nx) };
@@ -1343,43 +1387,101 @@ bool ortho_search(OrthoGrid const &g,
     // this plane's grid moves.
     bool const end_turn{ ((v == from) && (plane == from_plane)) ||
                          ((v == to) && fixed_goal) };
-    relax(node ^ 1U, end_turn ? end_turn_w : turn_w, heuristic(dx, dy, 1 - plane));
+    bool const way_turn{ ((v == from) && ((waypoints & 1U) != 0)) ||
+                         ((v == to) && ((waypoints & 2U) != 0)) };
+    Wide const switch_w{ way_turn ? way_turn_w : (end_turn ? end_turn_w : turn_w) };
+    relax(node ^ 1U, switch_w, heuristic(dx, dy, 1 - plane));
+    // A seed's first move back against its heading turns twice.
+    int32_t const back{ ((v == from) && (here.parent == INVALID)) ? -heading[plane] : 0 };
+    Wide const up_turn{ (back == 1) ? (2 * turn_w) : Wide{ 0 } };
+    Wide const down_turn{ (back == -1) ? (2 * turn_w) : Wide{ 0 } };
     if (plane == 0) {
       uint8_t const *const row{ pass_h + (static_cast<size_t>(iy) * (nx - 1)) };
       if (((ix + 1) < nx) && (row[ix] != 0)) {
         relax(node + 2,
-              QUARTERS * (Wide{ xs[ix + 1] } - xs[ix]),
+              up_turn + (QUARTERS * (Wide{ xs[ix + 1] } - xs[ix])),
               heuristic(distance(xs[ix + 1], goal.x), dy, 0));
       }
       if ((ix > 0) && (row[ix - 1] != 0)) {
         relax(node - 2,
-              QUARTERS * (Wide{ xs[ix] } - xs[ix - 1]),
+              down_turn + (QUARTERS * (Wide{ xs[ix] } - xs[ix - 1])),
               heuristic(distance(xs[ix - 1], goal.x), dy, 0));
       }
     } else {
       uint32_t const down{ 2 * nx };
       if (((iy + 1) < ny) && (pass_v[(static_cast<size_t>(iy) * nx) + ix] != 0)) {
         relax(node + down,
-              QUARTERS * (Wide{ ys[iy + 1] } - ys[iy]),
+              up_turn + (QUARTERS * (Wide{ ys[iy + 1] } - ys[iy])),
               heuristic(dx, distance(ys[iy + 1], goal.y), 1));
       }
       if ((iy > 0) && (pass_v[(static_cast<size_t>(iy - 1) * nx) + ix] != 0)) {
         relax(node - down,
-              QUARTERS * (Wide{ ys[iy] } - ys[iy - 1]),
+              down_turn + (QUARTERS * (Wide{ ys[iy] } - ys[iy - 1])),
               heuristic(dx, distance(ys[iy - 1], goal.y), 1));
       }
     }
   }
-  if (reached == INVALID) { return false; }
+  return reached;
+}
 
-  s.path.clear();
-  for (uint32_t node = reached; node != INVALID; node = state[node].parent) {
-    vec_push_back(s.path, node / 2);
-  }
-  for (auto i = static_cast<uint32_t>(s.path.size()); i-- > 0;) {
-    if (out.empty() || (out.back() != s.path[i])) { vec_push_back(out, s.path[i]); }
+}  // namespace
+
+bool ortho_search(OrthoGrid const &g,
+                  uint32_t from,
+                  uint32_t to,
+                  Wide bend,
+                  OrthoScratch &s,
+                  std::vector<uint32_t> &out,
+                  uint32_t from_plane,
+                  uint32_t to_plane) {
+  out.clear();
+  std::array<OrthoFinish, 2> finishes{};
+  std::array<Wide, 2> const seed{ (from_plane == 1) ? -1 : 0, (from_plane == 0) ? -1 : 0 };
+  std::array<int32_t, 2> const either{ 0, 0 };
+  if (!search_planes(g,
+                     from,
+                     to,
+                     bend,
+                     s,
+                     seed,
+                     either,
+                     from_plane,
+                     to_plane,
+                     0,
+                     false,
+                     out,
+                     finishes)) {
+    out.clear();
+    return false;
   }
   return true;
+}
+
+bool ortho_search_planes(OrthoGrid const &g,
+                         uint32_t from,
+                         uint32_t to,
+                         Wide bend,
+                         OrthoScratch &s,
+                         std::array<Wide, 2> const &seed,
+                         std::array<int32_t, 2> const &heading,
+                         uint32_t from_plane,
+                         uint32_t to_plane,
+                         uint32_t waypoints,
+                         std::vector<uint32_t> &hops,
+                         std::array<OrthoFinish, 2> &out) {
+  return search_planes(g,
+                       from,
+                       to,
+                       bend,
+                       s,
+                       seed,
+                       heading,
+                       from_plane,
+                       to_plane,
+                       waypoints,
+                       true,
+                       hops,
+                       out);
 }
 
 Wide ortho_bend_penalty(scav_profile const &p) { return route_bend_penalty(p); }
@@ -1404,6 +1506,8 @@ struct RouteScratch {
   std::vector<scav_rect> boxes;
   OrthoScratch search;
   std::vector<uint32_t> hop;
+  std::vector<std::array<OrthoFinish, 2>> finishes;
+  std::vector<uint32_t> chosen;
   std::vector<scav_point> piece, shape;
   std::vector<Seat> seats;
   std::vector<int32_t> stuck;
@@ -1927,6 +2031,8 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
 
   OrthoScratch &scratch{ sc.search };
   std::vector<uint32_t> &hop{ sc.hop };
+  std::vector<std::array<OrthoFinish, 2>> &finishes{ sc.finishes };  // per piece
+  std::vector<uint32_t> &chosen{ sc.chosen };  // per piece, the plane it arrives in
   std::vector<scav_point> &piece{ sc.piece };
   std::vector<scav_point> &shape{ sc.shape };
   for (uint32_t n = 0; n < in.nets.size(); ++n) {
@@ -1943,14 +2049,12 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
       if (!in_region(lead[net_tail[n].off + k])) { why = RouteFailure::OutsideRegion; }
     }
 
-    // A direct net (two anchors) leaves and arrives in its end leads' planes, and a
-    // stubbed end in its stub's plane; any other end is free.
-    bool const direct{ at.len == 2 };
-    uint32_t const src_plane{ ((direct || stubbed(net, 0)) && (net_lead[n].len > 0))
+    // A net leaves and arrives in its end leads' planes; an end with no lead is free.
+    uint32_t const src_plane{ (net_lead[n].len > 0)
                                   ? leg_plane(lead[net_lead[n].off + net_lead[n].len - 1],
                                               anchors[at.off])
                                   : INVALID };
-    uint32_t const dst_plane{ ((direct || stubbed(net, 1)) && (net_tail[n].len > 0))
+    uint32_t const dst_plane{ (net_tail[n].len > 0)
                                   ? leg_plane(anchors[at.off + at.len - 1],
                                               lead[net_tail[n].off + net_tail[n].len - 1])
                                   : INVALID };
@@ -1965,26 +2069,54 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
       }
       vec_push_back(piece, anchors[at.off]);
       ortho_simplify(piece, shape);
-      for (uint32_t k = 0; (k + 1) < at.len; ++k) {
+      // Each piece starts in each plane at the cheapest cost of arriving there, so a turn
+      // at a waypoint is paid; the cheapest finish is traced back piece by piece.
+      uint32_t const pieces{ at.len - 1 };
+      vec_resize(finishes, pieces);
+      hop.clear();
+      std::array<Wide, 2> seed{ (src_plane == 1) ? -1 : 0, (src_plane == 0) ? -1 : 0 };
+      std::array<int32_t, 2> heading{ 0, 0 };  // each plane's arrival at the piece's start
+      for (uint32_t k = 0; k < pieces; ++k) {
         scav_point const a{ anchors[at.off + k] };
         scav_point const b{ anchors[at.off + k + 1] };
         uint32_t const v_from{ use.vertex(ortho_index_of(use.xs, a.x),
                                           ortho_index_of(use.ys, a.y)) };
         uint32_t const v_to{ use.vertex(ortho_index_of(use.xs, b.x),
                                         ortho_index_of(use.ys, b.y)) };
-        if (!ortho_search(use,
-                          v_from,
-                          v_to,
-                          bend,
-                          scratch,
-                          hop,
-                          (k == 0) ? src_plane : INVALID,
-                          ((k + 2) == at.len) ? dst_plane : INVALID)) {
+        if (!ortho_search_planes(use,
+                                 v_from,
+                                 v_to,
+                                 bend,
+                                 scratch,
+                                 seed,
+                                 heading,
+                                 (k == 0) ? src_plane : INVALID,
+                                 ((k + 1) == pieces) ? dst_plane : INVALID,
+                                 ((k > 0) ? 1U : 0U) | (((k + 1) < pieces) ? 2U : 0U),
+                                 hop,
+                                 finishes[k])) {
           shape.clear();
           return false;
         }
+        seed = { finishes[k][0].cost, finishes[k][1].cost };
+        heading = { finishes[k][0].heading, finishes[k][1].heading };
+      }
+      std::array<OrthoFinish, 2> const &last{ finishes[pieces - 1] };
+      uint32_t plane{
+        ((last[1].cost >= 0) && ((last[0].cost < 0) || (last[1].cost < last[0].cost))) ? 1U
+                                                                                       : 0U
+      };
+      vec_resize(chosen, pieces);
+      for (uint32_t k = pieces; k-- > 0;) {
+        chosen[k] = plane;
+        plane = finishes[k][plane].start;
+      }
+      for (uint32_t k = 0; k < pieces; ++k) {
+        scav_span const run{ finishes[k][chosen[k]].hops };
         piece.clear();
-        for (uint32_t const v : hop) { vec_push_back(piece, use.point(v)); }
+        for (uint32_t i = 0; i < run.len; ++i) {
+          vec_push_back(piece, use.point(hop[run.off + i]));
+        }
         ortho_simplify(piece, shape);
       }
       // The tail is stored outward from the box; appended reversed.
