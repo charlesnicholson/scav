@@ -336,10 +336,10 @@ bool on_rect(scav_point at, scav_rect const &r) {
 
 // Whether `at` lies on state `st`'s border or on the inner edge of a band its request
 // rules.
-bool on_drawn_edge(SizedLayout const &z,
-                   scav_spaces const &s,
-                   uint32_t st,
-                   scav_point at) {
+SCAV_COLD bool on_drawn_edge(SizedLayout const &z,
+                             scav_spaces const &s,
+                             uint32_t st,
+                             scav_point at) {
   scav_rect const box{ z.state[st] };
   if (on_rect(at, box) && ((at.x == box.x) || (at.x == (box.x + box.w)) ||
                            (at.y == box.y) || (at.y == (box.y + box.h)))) {
@@ -664,9 +664,9 @@ Wide whitespace_of(Chart const &c, SizedLayout const &z, Wide chart) {
 }
 
 // A grid over the rects' bounds, about one cell per rect.
-void grid_over(RectGrid &g,
-               std::vector<scav_rect> const &rects,
-               std::vector<uint32_t> &cursor) {
+SCAV_COLD void grid_over(RectGrid &g,
+                         std::vector<scav_rect> const &rects,
+                         std::vector<uint32_t> &cursor) {
   Wide x0{ 0 };
   Wide y0{ 0 };
   Wide x1{ 0 };
@@ -1214,10 +1214,10 @@ bool cost_ancestor(Chart const &c, Ancestry const &an, StateId ancestor, StateId
   return g;
 }
 
-void cost_grid_query(ChildGrid const &g,
-                     uint32_t frame,
-                     scav_rect const &q,
-                     GridQuery &out) {
+SCAV_COLD void cost_grid_query(ChildGrid const &g,
+                               uint32_t frame,
+                               scav_rect const &q,
+                               GridQuery &out) {
   out.hit.clear();
   if (frame >= g.frame.size()) { return; }
   ChildGrid::Frame const &f{ g.frame[frame] };
@@ -1829,7 +1829,8 @@ Cost cost_of(CostTerms const &t, scav_profile const &p) {
   return out;
 }
 
-std::array<int64_t, TIER2_TERMS> cost_shares(CostTerms const &t, scav_profile const &p) {
+SCAV_COLD std::array<int64_t, TIER2_TERMS> cost_shares(CostTerms const &t,
+                                                       scav_profile const &p) {
   std::array<Wide, TIER2_TERMS> const part{ weighted_terms(t, p) };
   Wide whole{ 0 };
   for (Wide const term : part) { whole += term; }

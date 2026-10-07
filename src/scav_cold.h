@@ -1,7 +1,7 @@
 #ifndef SCAV_COLD_H_INCLUDED
 #define SCAV_COLD_H_INCLUDED
 
-// Marks a rarely run function: compiled for size, and calls to it treated as unlikely.
+// Compiles a function off the hot path for size; calls to it are treated as unlikely.
 // Empty under MSVC.
 #ifdef _MSC_VER
 #  define SCAV_COLD

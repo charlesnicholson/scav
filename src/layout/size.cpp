@@ -2560,7 +2560,10 @@ int32_t loop_boundary(SizedLayout const &z, uint32_t st, uint32_t face) {
   }
 }
 
-bool loop_room_unmoved(Chart const &c, SizedLayout const &z, uint32_t st, uint32_t place) {
+SCAV_COLD bool loop_room_unmoved(Chart const &c,
+                                 SizedLayout const &z,
+                                 uint32_t st,
+                                 uint32_t place) {
   if ((st >= c.states.size()) || (st >= z.loop.size()) || (st >= z.loop_place.size()) ||
       (st >= z.lead.size()) || (st >= z.trail.size()) ||
       ((place / 2U) != (z.loop_place[st] / 2U))) {

@@ -7,6 +7,7 @@
 #include "layout/router.h"
 #include "layout/trace.h"
 #include "scav/scav_layout.h"
+#include "scav_cold.h"
 #include "scav_int.h"
 #include "scav_stable_sort.h"
 #include "scav_vec.h"
@@ -684,13 +685,13 @@ void ortho_spread_attachments(std::vector<scav_rect> const &boxes,
   }
 }
 
-void ortho_order_arrivals(std::vector<RouteNet> const &nets,
-                          std::vector<scav_rect> const &boxes,
-                          int32_t clear,
-                          std::vector<uint32_t> const &groups,
-                          std::vector<scav_point> &points,
-                          std::vector<scav_span> const &spans,
-                          std::vector<scav_point> &at) {
+SCAV_COLD void ortho_order_arrivals(std::vector<RouteNet> const &nets,
+                                    std::vector<scav_rect> const &boxes,
+                                    int32_t clear,
+                                    std::vector<uint32_t> const &groups,
+                                    std::vector<scav_point> &points,
+                                    std::vector<scav_span> const &spans,
+                                    std::vector<scav_point> &at) {
   // A group's arrival whose last bend can slide along its leg: its route's last three
   // points, the side that leg comes from, and the bend's distance out from the face.
   struct Arrival {
@@ -798,13 +799,13 @@ void ortho_order_arrivals(std::vector<RouteNet> const &nets,
   }
 }
 
-void ortho_seat_loops(std::vector<RouteNet> const &nets,
-                      std::vector<scav_rect> const &boxes,
-                      std::vector<Seat> const &table,
-                      std::vector<OccupiedSpan> const &occupied,
-                      int32_t clear,
-                      int32_t pitch,
-                      std::vector<scav_point> &at) {
+SCAV_COLD void ortho_seat_loops(std::vector<RouteNet> const &nets,
+                                std::vector<scav_rect> const &boxes,
+                                std::vector<Seat> const &table,
+                                std::vector<OccupiedSpan> const &occupied,
+                                int32_t clear,
+                                int32_t pitch,
+                                std::vector<scav_point> &at) {
   thread_local std::vector<std::array<int32_t, 2>> taken;  // runs `[lo, hi]` seats avoid
   for (uint32_t n = 0; n < nets.size(); ++n) {
     RouteNet const &net{ nets[n] };
@@ -978,14 +979,14 @@ void ortho_separate_attachments(std::vector<RouteNet> const &nets,
   }
 }
 
-void ortho_clear_occupied(std::vector<RouteNet> const &nets,
-                          std::vector<scav_rect> const &boxes,
-                          std::vector<Seat> const &table,
-                          std::vector<scav_point> const &toward,
-                          std::vector<OccupiedSpan> const &occupied,
-                          int32_t clear,
-                          std::vector<scav_point> &at,
-                          std::vector<int32_t> &stuck) {
+SCAV_COLD void ortho_clear_occupied(std::vector<RouteNet> const &nets,
+                                    std::vector<scav_rect> const &boxes,
+                                    std::vector<Seat> const &table,
+                                    std::vector<scav_point> const &toward,
+                                    std::vector<OccupiedSpan> const &occupied,
+                                    int32_t clear,
+                                    std::vector<scav_point> &at,
+                                    std::vector<int32_t> &stuck) {
   vec_assign(stuck, nets.size(), 0);
   if (occupied.empty()) { return; }
   thread_local std::vector<uint32_t> cleared;  // slots moved off an occupied span
@@ -1135,10 +1136,10 @@ void ortho_simplify(std::vector<scav_point> const &from, std::vector<scav_point>
   }
 }
 
-void ortho_enclosure_walls(scav_rect const &region,
-                           scav_rect const &enclosure,
-                           int32_t inset,
-                           std::vector<scav_rect> &out) {
+SCAV_COLD void ortho_enclosure_walls(scav_rect const &region,
+                                     scav_rect const &enclosure,
+                                     int32_t inset,
+                                     std::vector<scav_rect> &out) {
   out.clear();
   if ((enclosure.w <= 0) || (enclosure.h <= 0)) { return; }
   Wide const rx0{ region.x };
@@ -1624,10 +1625,10 @@ void route_passes(OrthoGrid const &g, scav_point const *pts, uint32_t len, Visit
 
 // Clears each open pass `route_passes` names for the `len` points at `pts`, recorded in
 // `closed` as `2 * i`, or `2 * i + 1` in `pass_v`.
-void close_route(OrthoGrid &g,
-                 scav_point const *pts,
-                 uint32_t len,
-                 std::vector<uint32_t> &closed) {
+SCAV_COLD void close_route(OrthoGrid &g,
+                           scav_point const *pts,
+                           uint32_t len,
+                           std::vector<uint32_t> &closed) {
   route_passes(g, pts, len, [&](bool vertical, uint32_t i) {
     std::vector<uint8_t> &pass{ vertical ? g.pass_v : g.pass_h };
     if (pass[i] == 0) { return; }
@@ -1639,10 +1640,10 @@ void close_route(OrthoGrid &g,
 // Reopens the passes `close_route` recorded in `closed`.
 // Shuts the pass from grid point `stub` toward `exact` on their shared line, recording it
 // in `closed` as `close_route` does.
-void close_stub(OrthoGrid &g,
-                scav_point stub,
-                scav_point exact,
-                std::vector<uint32_t> &closed) {
+SCAV_COLD void close_stub(OrthoGrid &g,
+                          scav_point stub,
+                          scav_point exact,
+                          std::vector<uint32_t> &closed) {
   uint32_t const nx{ g.nx() };
   uint32_t const ix{ ortho_index_of(g.xs, stub.x) };
   uint32_t const iy{ ortho_index_of(g.ys, stub.y) };
@@ -1777,9 +1778,9 @@ uint32_t OrthogonalRouter::seat_face(scav_rect const &r, scav_point aim) const {
   return ortho_escape_face(aim, r);
 }
 
-uint32_t OrthogonalRouter::effective_faces(RouteInput const &in,
-                                           uint32_t net,
-                                           uint32_t end) const {
+SCAV_COLD uint32_t OrthogonalRouter::effective_faces(RouteInput const &in,
+                                                     uint32_t net,
+                                                     uint32_t end) const {
   RouteNet const &nt{ in.nets[net] };
   if (((end == 0) ? nt.src_obstacle : nt.dst_obstacle) >= in.obstacles.size()) {
     return 0;

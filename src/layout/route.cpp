@@ -15,6 +15,7 @@
 #include "layout/trace.h"
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
+#include "scav_cold.h"
 #include "scav_int.h"
 #include "scav_shard.h"
 #include "scav_stable_sort.h"
@@ -248,15 +249,15 @@ struct DividerSide {
 // The coordinate along `gap`'s divider for a new end: the first of `want` with its room on
 // `sides`, else the one with that room nearest `want[0]`, else `want[0]` held inside the
 // gap; appended to `taken`. `blocks` is scratch.
-int32_t on_divider(Chart const &c,
-                   SizedLayout const &z,
-                   Gap const &gap,
-                   std::array<int32_t, 3> const &want,
-                   uint32_t wanted,
-                   std::array<DividerSide, 2> const &sides,
-                   DividerRoom const &room,
-                   std::vector<OnDivider> &taken,
-                   std::vector<std::array<int32_t, 2>> &blocks) {
+SCAV_COLD int32_t on_divider(Chart const &c,
+                             SizedLayout const &z,
+                             Gap const &gap,
+                             std::array<int32_t, 3> const &want,
+                             uint32_t wanted,
+                             std::array<DividerSide, 2> const &sides,
+                             DividerRoom const &room,
+                             std::vector<OnDivider> &taken,
+                             std::vector<std::array<int32_t, 2>> &blocks) {
   int32_t const lo{ gap.vertical ? gap.rect.y : gap.rect.x };
   int32_t const len{ gap.vertical ? gap.rect.h : gap.rect.w };
   int32_t const inset{ imin(room.clear, len / 2) };

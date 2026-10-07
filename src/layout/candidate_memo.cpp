@@ -420,9 +420,9 @@ SCAV_COLD void CandidateMemo::empty() {
   emptying.store(false);
 }
 
-uint32_t CandidateMemo::arrangement(SubmachineOrders const &o,
-                                    Blocks const *like,
-                                    Blocks *keep) {
+SCAV_COLD uint32_t CandidateMemo::arrangement(SubmachineOrders const &o,
+                                              Blocks const *like,
+                                              Blocks *keep) {
   // The thread's last frame numbers and their arrangement, in memo `last_serial`.
   thread_local std::vector<uint32_t> ids;
   thread_local std::vector<uint32_t> last_ids;
@@ -447,12 +447,12 @@ uint32_t CandidateMemo::drawing(SubmachineOrders const &o,
   return drawing(o, z, bends, profile, like, keep);
 }
 
-uint32_t CandidateMemo::drawing(SubmachineOrders const &o,
-                                SizedLayout const &z,
-                                std::vector<std::vector<uint32_t>> const &bends,
-                                uint32_t profile,
-                                Blocks const *like,
-                                Blocks *keep) {
+SCAV_COLD uint32_t CandidateMemo::drawing(SubmachineOrders const &o,
+                                          SizedLayout const &z,
+                                          std::vector<std::vector<uint32_t>> const &bends,
+                                          uint32_t profile,
+                                          Blocks const *like,
+                                          Blocks *keep) {
   size_t const states{ chart.states.size() };
   size_t const segments{ graph.segments.size() };
   if (!usable || (z.state.size() != states) || (z.before.size() != states) ||
@@ -502,7 +502,8 @@ uint32_t CandidateMemo::drawing(SubmachineOrders const &o,
   return last;
 }
 
-void CandidateMemo::box_faces(SearchPins const *pins, std::vector<uint32_t> &faces) const {
+SCAV_COLD void CandidateMemo::box_faces(SearchPins const *pins,
+                                        std::vector<uint32_t> &faces) const {
   faces.clear();
   static std::vector<EndPin> const NONE;
   for (EndPin const &fp : (pins != nullptr) ? pins->ends : NONE) {
@@ -575,10 +576,10 @@ FacingFound CandidateMemo::find_facing(uint32_t row,
   return FacingFound::Turned;
 }
 
-void CandidateMemo::store_facing(uint32_t row,
-                                 uint32_t arranged,
-                                 SubmachineOrders const &o,
-                                 Facing const *turned) {
+SCAV_COLD void CandidateMemo::store_facing(uint32_t row,
+                                           uint32_t arranged,
+                                           SubmachineOrders const &o,
+                                           Facing const *turned) {
   thread_local std::vector<uint32_t> key;
   facing_key(row, arranged, o, key);
   uint64_t const hash{ memo_hash(key) };
@@ -618,7 +619,7 @@ void CandidateMemo::store_facing(uint32_t row,
   charge(added);
 }
 
-void CandidateMemo::answer(ScoreRecord const &r, bool labelled, Recalled &out) {
+SCAV_COLD void CandidateMemo::answer(ScoreRecord const &r, bool labelled, Recalled &out) {
   if (r.t0[0] == TAG_RETRIED) {
     out.entry = INVALID;
     return;
@@ -628,9 +629,10 @@ void CandidateMemo::answer(ScoreRecord const &r, bool labelled, Recalled &out) {
   out.route_bound = labelled ? imax(r.bound[0], r.bound[1]) : r.bound[0];
 }
 
-CandidateMemo::Recalled CandidateMemo::find_score(uint32_t drawn,
-                                                  std::vector<uint32_t> const &faces,
-                                                  bool labelled) {
+SCAV_COLD CandidateMemo::Recalled CandidateMemo::find_score(
+    uint32_t drawn,
+    std::vector<uint32_t> const &faces,
+    bool labelled) {
   thread_local std::vector<uint32_t> key;
   key.clear();
   vec_push_back(key, drawn);
@@ -673,9 +675,10 @@ CandidateMemo::Recalled CandidateMemo::recall(uint32_t e, bool labelled) {
   return out;
 }
 
-CandidateMemo::Linked CandidateMemo::find_ordering(uint32_t row,
-                                                   uint32_t arranged,
-                                                   std::vector<uint32_t> const &faces) {
+SCAV_COLD CandidateMemo::Linked CandidateMemo::find_ordering(
+    uint32_t row,
+    uint32_t arranged,
+    std::vector<uint32_t> const &faces) {
   thread_local std::vector<uint32_t> key;
   key.clear();
   vec_insert(key, key.end(), { row, arranged });
@@ -713,7 +716,7 @@ void CandidateMemo::link(uint32_t key, uint32_t e) {
   if (index != INVALID) { sh.links[index] = e; }
 }
 
-bool CandidateMemo::score(uint32_t e, bool labelled, MemoScore &out) {
+SCAV_COLD bool CandidateMemo::score(uint32_t e, bool labelled, MemoScore &out) {
   if (e == INVALID) { return false; }
   ScoreShard &sh{ scores[e & (SHARDS - 1)] };
   ScopedLock const held{ sh.lock };
@@ -768,7 +771,7 @@ void CandidateMemo::set_route_bound(uint32_t e, int64_t t2) {
   }
 }
 
-Claim CandidateMemo::claim(uint32_t e, bool labelled, MemoScore &out) {
+SCAV_COLD Claim CandidateMemo::claim(uint32_t e, bool labelled, MemoScore &out) {
   if (e == INVALID) { return Claim::Taken; }
   ScoreShard &sh{ scores[e & (SHARDS - 1)] };
   ScopedLock const held{ sh.lock };
