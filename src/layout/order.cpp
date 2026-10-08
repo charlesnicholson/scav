@@ -834,6 +834,12 @@ void order_submachines(SubmachineOrders &o,
       o.state_loop[pin.state.v] = static_cast<uint8_t>(1 + (pin.face * 2) + pin.end);
     }
   }
+  o.state_grow.assign(c.states.size(), FaceSeats{});
+  for (GrowPin const &pin : pins.grows) {
+    if ((pin.state.v < o.state_grow.size()) && (pin.w != INVALID) && (pin.h != INVALID)) {
+      o.state_grow[pin.state.v] = { .w = pin.w, .h = pin.h };
+    }
+  }
   o.sub_gaps.assign(c.submachines.size(), Span{});
   o.state_node.assign(c.states.size(), INVALID);
   o.seg_node.assign(g.segments.size(), INVALID);

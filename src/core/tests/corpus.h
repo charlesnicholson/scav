@@ -23,16 +23,16 @@ namespace scav::test {
 // Every chart in test_data/charts/gauntlet, by file name; test_gauntlet.py checks it
 // against the directory.
 inline constexpr std::array<char const *, 52> GAUNTLET{
-  "above.scav",     "between.scav",  "bypass.scav",    "carried.scav", "chain.scav",
-  "corner.scav",    "crossing.scav", "crowd.scav",     "detour.scav",  "divider.scav",
-  "enclosing.scav", "entered.scav",  "fanin.scav",     "fanwide.scav", "flank.scav",
-  "folded.scav",    "fork.scav",     "headed.scav",    "header.scav",  "hub.scav",
-  "inloop.scav",    "inside.scav",   "inward.scav",    "kicked.scav",  "lane.scav",
-  "level.scav",     "long.scav",     "loop.scav",      "marks.scav",   "mixed.scav",
-  "mutual.scav",    "outside.scav",  "ported.scav",    "pulled.scav",  "rebound.scav",
-  "reentry.scav",   "regions.scav",  "resumed.scav",   "ring.scav",    "room.scav",
-  "rooms.scav",     "roundtrip.scav", "seated.scav",   "separator.scav", "side.scav",
-  "stacked.scav",   "stretch.scav",  "through.scav",   "tight.scav",   "transit.scav",
+  "above.scav",     "between.scav",   "bypass.scav",  "carried.scav",   "chain.scav",
+  "corner.scav",    "crossing.scav",  "crowd.scav",   "detour.scav",    "divider.scav",
+  "enclosing.scav", "entered.scav",   "fanin.scav",   "fanwide.scav",   "flank.scav",
+  "folded.scav",    "fork.scav",      "headed.scav",  "header.scav",    "hub.scav",
+  "inloop.scav",    "inside.scav",    "inward.scav",  "kicked.scav",    "lane.scav",
+  "level.scav",     "long.scav",      "loop.scav",    "marks.scav",     "mixed.scav",
+  "mutual.scav",    "outside.scav",   "ported.scav",  "pulled.scav",    "rebound.scav",
+  "reentry.scav",   "regions.scav",   "resumed.scav", "ring.scav",      "room.scav",
+  "rooms.scav",     "roundtrip.scav", "seated.scav",  "separator.scav", "side.scav",
+  "stacked.scav",   "stretch.scav",   "through.scav", "tight.scav",     "transit.scav",
   "under.scav",     "unfolded.scav"
 };
 
@@ -161,6 +161,7 @@ inline std::string corpus_pins_line(std::string_view chart,
     }
   }
   for (LoopPin const &l : pins.loops) { flag("--loop", { l.state.v, l.face, l.end }); }
+  for (GrowPin const &k : pins.grows) { flag("--grow", { k.state.v, k.w, k.h }); }
   out += '\n';
   return out;
 }
@@ -217,6 +218,8 @@ inline bool corpus_pins_read(std::string_view flags, uint32_t &row, SearchPins &
       pins.folds.push_back({ .frame = SubmachineId{ f[0] }, .mode = f[1], .layer = f[2] });
     } else if (name == "--loop") {
       pins.loops.push_back({ .state = StateId{ f[0] }, .face = f[1], .end = f[2] });
+    } else if (name == "--grow") {
+      pins.grows.push_back({ .state = StateId{ f[0] }, .w = f[1], .h = f[2] });
     } else {
       return false;
     }

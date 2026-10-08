@@ -152,7 +152,7 @@ def print_outline(events):
 
 MOVES = ("rank", "cut", "reverse", "face", "side", "fold", "orient", "loop")
 VALUED = ("--profile", "--rank", "--cut", "--reverse", "--end", "--orient", "--fold",
-          "--loop", "--search", "--jitter-seed", "-j")  # scav layout flags that take a value
+          "--loop", "--grow", "--search", "--jitter-seed", "-j")  # scav layout flags that take a value
 
 
 def split_layout(argv):

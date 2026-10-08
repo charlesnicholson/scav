@@ -181,7 +181,7 @@ TEST_CASE("search memo: the key tells apart every input a search is a function o
   base.seed.ends.push_back({ .trans = TransId{ 2 }, .leg = 0, .end = 0, .face = 1 });
   base.scope.assign(4, 0);
 
-  std::vector<Inputs> variants(22, base);
+  std::vector<Inputs> variants(24, base);
   variants[0].objective.node_sep += 1;
   variants[1].row.knobs.node_sep += 1;
   variants[2].row.dar = DarSource::OwnerHole;
@@ -209,6 +209,8 @@ TEST_CASE("search memo: the key tells apart every input a search is a function o
   variants[20].seed.folds.push_back(
       { .frame = SubmachineId{ 2 }, .mode = FOLD_ALWAYS, .layer = 2 });
   variants[21].refold = true;
+  variants[22].seed.grows.push_back({ .state = StateId{ 3 }, .w = 4, .h = 4 });
+  variants[23].seed.grows.push_back({ .state = StateId{ 3 }, .w = 4, .h = 5 });
 
   std::vector<PodVector<uint32_t>> keys{ key_of(base) };
   for (Inputs const &v : variants) { keys.push_back(key_of(v)); }

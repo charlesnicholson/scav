@@ -107,6 +107,7 @@ PodVector<uint32_t> words_of(SearchPins const &p) {
     w.insert(w.end(), { 5, f.frame.v, f.mode, f.layer });
   }
   for (LoopPin const &l : p.loops) { w.insert(w.end(), { 6, l.state.v, l.face, l.end }); }
+  for (GrowPin const &k : p.grows) { w.insert(w.end(), { 7, k.state.v, k.w, k.h }); }
   return w;
 }
 

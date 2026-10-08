@@ -69,6 +69,8 @@ enum class ArgRead : uint32_t { NotOurs, Taken, Malformed };
 //                        the fold cuts before
 //   --loop S:F:E         state S's loop room on face F of its free interior (as
 //                        --end), at end E (0 top or left, 1 bottom or right)
+//   --grow S:W:H         state S's box holds W seats on its top and bottom faces
+//                        and H on its left and right, a line of text apart
 //   --search full|culled the full search, or the culled one
 //   --jitter-seed N      near-equal moves and kicks rank by a hash of N; 0 is none
 //   -j N                 N worker threads; 0 is the host's concurrency

@@ -978,6 +978,8 @@ void put_pins(SearchPins const &p, PodVector<uint32_t> &w) {
   for (FoldPin const &f : p.folds) { w.insert(w.end(), { f.frame.v, f.mode, f.layer }); }
   w.push_back(static_cast<uint32_t>(p.loops.size()));
   for (LoopPin const &l : p.loops) { w.insert(w.end(), { l.state.v, l.face, l.end }); }
+  w.push_back(static_cast<uint32_t>(p.grows.size()));
+  for (GrowPin const &k : p.grows) { w.insert(w.end(), { k.state.v, k.w, k.h }); }
 }
 
 bool same_pins(SearchPins const &a, SearchPins const &b) {
@@ -2767,6 +2769,10 @@ SearchPins get_pins(int32_t const *w, uint32_t &at) {
   for (LoopPin &l : p.loops) {
     l = { .state = StateId{ next() }, .face = next(), .end = next() };
   }
+  vec_resize(p.grows, next());
+  for (GrowPin &k : p.grows) {
+    k = { .state = StateId{ next() }, .w = next(), .h = next() };
+  }
   return p;
 }
 
@@ -3566,7 +3572,7 @@ bool layout_run(Chart &c,
     auto const count = [](SearchPins const &q) {
       return static_cast<uint32_t>(q.ranks.size() + q.cuts.size() + q.reverses.size() +
                                    q.ends.size() + q.orients.size() + q.folds.size() +
-                                   q.loops.size());
+                                   q.loops.size() + q.grows.size());
     };
     uint32_t const now{ count(held[best]) };
     uint32_t const had{ count(seed) };

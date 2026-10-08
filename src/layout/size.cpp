@@ -42,6 +42,9 @@ SCAV_INTERNAL_END
 
 namespace {
 
+// Clamps `v` to COORD_MAX + 1, which the box formula still rejects.
+int32_t saturate(Wide v) { return static_cast<int32_t>(imin(v, Wide{ COORD_MAX } + 1)); }
+
 scav_box_space box_of(scav_box_space const *rows, uint32_t count, uint32_t i) {
   return ((rows != nullptr) && (i < count)) ? rows[i] : scav_box_space{};
 }
@@ -176,6 +179,7 @@ struct SizeScratch {
   PodVector<Frame> work;
   PodVector<scav_extent> loop_label, loop_room;  // `loop_rooms`
   PodVector<uint8_t> looped;  // per state, 1 where an outer self-loop leaves it
+  PodVector<uint32_t> ends;   // `size_route_ends`
   // What an `OwnerHole` sizing's first pass sized.
   SizedLayout first;
   PodVector<FrameDar> hole;  // `size_owner_holes` of `first`
@@ -259,6 +263,7 @@ struct Sizer {
   PodVector<scav_extent> &loop_label{ sc.loop_label };
   PodVector<scav_extent> &loop_room{ sc.loop_room };
   PodVector<uint8_t> &looped{ sc.looped };
+  PodVector<uint32_t> &ends{ sc.ends };
   bool ok{ true };
 
   // The ratio packings inside `state` aim at: its hole's, else the profile's.
@@ -2222,10 +2227,32 @@ void Sizer::size_state(uint32_t i) {
                      gap[1] + b.w_after };
   Wide const body{ Wide{ packed.h } + room.h +
                    (((packed.h > 0) && (room.h > 0)) ? p.sub_sep : 0) };
-  Wide const w{ imax(imax(Wide{ b.min_w }, centre), Wide{ min_w }) + ring };
-  Wide const h{
+  Wide const natural_w{ imax(imax(Wide{ b.min_w }, centre), Wide{ min_w }) + ring };
+  Wide const natural_h{
     imax(Wide{ b.h_before } + gap[2] + body + gap[3] + b.h_after, Wide{ min_h }) + ring
   };
+  Wide w{ natural_w };
+  Wide h{ natural_h };
+  FaceSeats const seats{ (i < o.state_grow.size()) ? o.state_grow[i] : FaceSeats{} };
+  if (seats.w != INVALID) {
+    // The corner at its largest, so the grown box seats its pin whatever its arc.
+    scav_rect const wide{ .x = 0, .y = 0, .w = COORD_MAX, .h = COORD_MAX };
+    int32_t const arc{ state_corner_radius(sk, wide, (ring != 0) ? p.pad : 0) };
+    w = imax(w, face_length(seats.w, arc, p));
+    h = imax(h, face_length(seats.h, arc, p));
+  }
+  if ((w != natural_w) || (h != natural_h)) {
+    trace_emit({ .kind = TraceKind::StateGrown,
+                 .pass = 1,
+                 .grow = { .state = i,
+                           .ends = (i < ends.size()) ? ends[i] : 0U,
+                           .seats_w = seats.w,
+                           .seats_h = seats.h,
+                           .from_w = saturate(natural_w),
+                           .from_h = saturate(natural_h),
+                           .to_w = saturate(w),
+                           .to_h = saturate(h) } });
+  }
   if ((w > COORD_MAX) || (h > COORD_MAX)) {
     overflow(diags, ElemKind::State, i);
     ok = false;
@@ -2304,6 +2331,7 @@ bool size_pass(Chart const &c,
     x.seg_label_w[at] = imax(x.seg_label_w[at], down ? box.h : box.w);
   }
   loop_rooms(c, s, p, out.loop_place, x.loop_label, x.loop_room);
+  size_route_ends(c, g, x.ends);
   x.looped.assign(c.states.size(), 0);
   for (uint32_t t = 0; t < c.transitions.size(); ++t) {
     Transition const &tr{ c.transitions[t] };
@@ -2453,13 +2481,6 @@ void size_owner_holes(Chart const &c,
 
 SCAV_INTERNAL_END
 
-namespace {
-
-// Clamps `v` to COORD_MAX + 1, which the box formula still rejects.
-int32_t saturate(Wide v) { return static_cast<int32_t>(imin(v, Wide{ COORD_MAX } + 1)); }
-
-}  // namespace
-
 std::array<scav_rect, 5> state_walls(SizedLayout const &z, uint32_t st) {
   auto const row = [st](PodVector<scav_rect> const &v) {
     return (st < v.size()) ? v[st] : scav_rect{};
@@ -2582,6 +2603,25 @@ SCAV_COLD bool loop_room_unmoved(Chart const &c,
 bool face_lined(scav_spaces const &s, uint32_t state, uint32_t face) {
   scav_box_space const b{ box_of(s.box_state, s.n_box_state, state) };
   return (face < 4) && (bands_of(b)[face] > 0);
+}
+
+void size_route_ends(Chart const &c, SplitGraph const &g, PodVector<uint32_t> &ends) {
+  ends.assign(c.states.size(), 0U);
+  for (SplitSegment const &seg : g.segments) {
+    uint32_t const t{ seg.trans.v };
+    if ((t >= c.transitions.size()) || inner_loop(c, t)) { continue; }
+    for (uint32_t k = 0; k < 2; ++k) {
+      uint32_t const port{ (k == 0) ? seg.src_port : seg.dst_port };
+      uint32_t const inner{ (k == 0) ? seg.src_inner : seg.dst_inner };
+      uint32_t st{ INVALID };
+      if (port < g.ports.size()) {
+        st = g.ports[port].state.v;
+      } else if ((port == INVALID) && (inner == 0)) {
+        st = (k == 0) ? c.transitions[t].src.v : c.transitions[t].dst.v;
+      }
+      if ((st < c.states.size()) && (c.states[st].parent == seg.frame)) { ++ends[st]; }
+    }
+  }
 }
 
 int32_t loop_reach(scav_profile const &p) { return imax(p.pad, 1); }

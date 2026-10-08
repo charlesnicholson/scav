@@ -2056,6 +2056,52 @@ TEST_CASE("layout: a composite running down is entered through its top") {
   CHECK(slot.x == first.x + (first.w / 2));
 }
 
+TEST_CASE("layout: a grow pin is among the pins a run rests on, and lays it out again") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::Default, {});
+  scav_profile p{ readable() };
+  p.portfolio_k = 0;
+  SearchPins const seed{ .grows = { { .state = a, .w = 6, .h = 4 } } };
+  std::vector<scav_placed> placed;
+  std::vector<Diagnostic> diags;
+  uint32_t row{ INVALID };
+  SearchPins taken;
+  REQUIRE(layout_run(c,
+                     {},
+                     opts(p),
+                     placed,
+                     diags,
+                     nullptr,
+                     &row,
+                     INVALID,
+                     nullptr,
+                     &taken,
+                     &seed));
+  REQUIRE(taken.grows.size() == 1);
+  CHECK(taken.grows[0].state == a);
+  CHECK(taken.grows[0].w == 6);
+  CHECK(taken.grows[0].h == 4);
+  scav_rect const grown{ state_rect(c, a) };
+  CHECK(grown.w > (p.kind_min_w[0] + (2 * p.pad)));
+  CHECK(grown.h > (p.kind_min_h[0] + (2 * p.pad)));
+  uint32_t const coordinate{ layout_coordinate_hash(c) };
+  REQUIRE(layout_run(c,
+                     {},
+                     opts(p),
+                     placed,
+                     diags,
+                     nullptr,
+                     nullptr,
+                     row,
+                     nullptr,
+                     nullptr,
+                     &taken));
+  CHECK(layout_coordinate_hash(c) == coordinate);
+}
+
 TEST_CASE("layout: a channel a fork bar touches routes at its drawn size") {
   // The bar is flush against `P`; the route runs level from the bar's face to
   // `deep` with no inflation.

@@ -92,6 +92,10 @@ bool loop_room_unmoved(Chart const &c, SizedLayout const &z, uint32_t st, uint32
 // takes no port.
 bool face_lined(scav_spaces const &s, uint32_t state, uint32_t face);
 
+// Per state, its route ends in its parent frame: segment ends at its box and at ports on
+// its border. An inner loop has none.
+void size_route_ends(Chart const &c, SplitGraph const &g, PodVector<uint32_t> &ends);
+
 // One inner loop's row in its state's room: rows stack across the exit face in transition
 // order. The far leg runs `loop_reach` in from the exit face and spans the label stack
 // beyond it; `cross` runs along the exit face, `along` away from it.

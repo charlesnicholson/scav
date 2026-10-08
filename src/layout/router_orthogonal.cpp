@@ -155,7 +155,7 @@ FaceRun face_run(scav_rect const &r, uint32_t face, int32_t clear, int32_t arc) 
   int32_t const len{ (face < 2) ? r.h : r.w };
   return { .lo = (face < 2) ? r.y : r.x,
            .len = len,
-           .inset = imin(imax(clear, arc), len / 2) };
+           .inset = imin(seat_inset(clear, arc), len / 2) };
 }
 
 int32_t onto_face(int32_t v, FaceRun const &run) {

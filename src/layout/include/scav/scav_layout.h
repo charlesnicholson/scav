@@ -158,6 +158,14 @@ struct LoopPin {
   uint32_t end{ 0 };
 };
 
+// Floors `state`'s box to hold `w` seats on its top and bottom faces and `h` on its left
+// and right, a line of text apart inside their corner insets.
+struct GrowPin {
+  StateId state{ INVALID };
+  uint32_t w{ 0 };
+  uint32_t h{ 0 };
+};
+
 // Every input besides the tuple that a drawing depends on.
 struct SearchPins {
   std::vector<RankPin> ranks;
@@ -167,6 +175,7 @@ struct SearchPins {
   std::vector<OrientPin> orients;
   std::vector<FoldPin> folds;  // the last pin naming a frame decides it
   std::vector<LoopPin> loops;  // the last pin naming a state decides it
+  std::vector<GrowPin> grows;  // the last pin naming a state decides it
 };
 
 // Rows in the Level 2 table of phase-2 tuples, one per combination of box packer,

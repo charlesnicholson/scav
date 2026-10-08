@@ -2458,3 +2458,115 @@ TEST_CASE(
   CHECK(kept.pack == Compaction::On);
   CHECK(kept.fold == Fold::Always);
 }
+
+namespace {
+
+// `one_frame` over a lone state `a`, with a grow pin's `seats` on it.
+SubmachineOrders grown_one(Chart const &c, SubmachineId root, StateId a, FaceSeats seats) {
+  SubmachineOrders o{ one_frame(c, root, { state_node(a.v, 0, 0) }, {}, {}) };
+  o.state_grow.assign(c.states.size(), FaceSeats{});
+  o.state_grow[a.v] = seats;
+  return o;
+}
+
+}  // namespace
+
+TEST_CASE("size: a grow pin floors each face to hold its seats a line of text apart") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  scav_profile const p{ profile() };
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  REQUIRE(size_layout(c,
+                      depths({ 0 }),
+                      grown_one(c, root, a, { .w = 7, .h = 5 }),
+                      {},
+                      p,
+                      z,
+                      diags));
+  // The corner at its largest is `pad`, past the route clearance at `readable`.
+  int32_t const inset{ imax(route_clearance(p), p.pad) };
+  int32_t const pitch{ imax(route_clearance(p), label_line_height(p)) };
+  CHECK(z.state[a.v].w == ((6 * pitch) + (2 * inset)));
+  CHECK(z.state[a.v].h == ((4 * pitch) + (2 * inset)));
+  int32_t const arc{ state_corner_radius(StateKind::Normal, z.state[a.v], p.pad) };
+  CHECK(face_capacity(z.state[a.v].w, arc, p) == 7);
+  CHECK(face_capacity(z.state[a.v].h, arc, p) == 5);
+}
+
+TEST_CASE("size: a grow pin its natural box already holds leaves the box as it is") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  scav_profile const p{ profile() };
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  REQUIRE(size_layout(c,
+                      depths({ 0 }),
+                      grown_one(c, root, a, { .w = 2, .h = 0 }),
+                      {},
+                      p,
+                      z,
+                      diags));
+  CHECK(z.state[a.v].w == p.kind_min_w[0] + (2 * p.pad));
+  CHECK(z.state[a.v].h == p.kind_min_h[0] + (2 * p.pad));
+}
+
+TEST_CASE("size: the last grow pin naming a state decides its box") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::Default, {});
+  scav_profile const p{ profile() };
+  SplitGraph const g{ decompose(c) };
+  auto const sized = [&](SearchPins const &pins) {
+    SizedLayout z;
+    std::vector<Diagnostic> diags;
+    REQUIRE(size_layout(c, g, order_submachines(c, g, {}, p, 1, pins), {}, p, z, diags));
+    return z.state[a.v];
+  };
+  scav_rect const natural{ sized({}) };
+  SearchPins const wide{ .grows = { { .state = a, .w = 2, .h = 1 },
+                                    { .state = a, .w = 9, .h = 1 } } };
+  SearchPins const back{ .grows = { { .state = a, .w = 9, .h = 1 },
+                                    { .state = a, .w = 2, .h = 1 } } };
+  CHECK(sized(wide).w == face_length(9, p.pad, p));
+  CHECK(sized(wide).h == natural.h);
+  CHECK(sized(back).w == natural.w);
+}
+
+TEST_CASE("size: a box a grow pin raises is traced with its seats and both extents") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  scav_profile const p{ profile() };
+  auto const grown = [&](FaceSeats seats) {
+    TraceRecord t{ c };
+    trace_sink_set(&t);
+    SizedLayout z;
+    std::vector<Diagnostic> diags;
+    bool const ok{
+      size_layout(c, depths({ 0 }), grown_one(c, root, a, seats), {}, p, z, diags)
+    };
+    trace_sink_set(nullptr);
+    REQUIRE(ok);
+    std::vector<TraceEvent> out;
+    for (TraceEvent const &e : t.events()) {
+      if (e.kind == TraceKind::StateGrown) { out.push_back(e); }
+    }
+    return out;
+  };
+  CHECK(grown({ .w = 2, .h = 1 }).empty());
+  std::vector<TraceEvent> const up{ grown({ .w = 7, .h = 1 }) };
+  REQUIRE(up.size() == 1);
+  CHECK(up[0].pass == 1);  // pinned
+  CHECK(up[0].grow.state == a.v);
+  CHECK(up[0].grow.seats_w == 7);
+  CHECK(up[0].grow.seats_h == 1);
+  CHECK(up[0].grow.from_w == p.kind_min_w[0] + (2 * p.pad));
+  CHECK(up[0].grow.from_h == p.kind_min_h[0] + (2 * p.pad));
+  CHECK(up[0].grow.to_w == face_length(7, p.pad, p));
+  CHECK(up[0].grow.to_h == up[0].grow.from_h);
+}

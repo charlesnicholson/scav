@@ -50,9 +50,10 @@ enum class TraceKind : uint16_t {
   RowRepeated,    // a row drew an earlier row's drawing, so it is not kicked
   KickScored,     // a kick was searched to convergence; `pass` is its `KickVerdict`
   KickTaken,      // a row took a kick search's result; `pass` is its `KickHow`
+  StateGrown,     // seats per face raised a state's box; `pass` 1 for a pin, 0 the default
 };
 
-inline constexpr uint32_t TRACE_KINDS{ static_cast<uint32_t>(TraceKind::KickTaken) + 1U };
+inline constexpr uint32_t TRACE_KINDS{ static_cast<uint32_t>(TraceKind::StateGrown) + 1U };
 
 // The kind's name in the JSON and the stream header; "none" for any other value.
 char const *trace_kind_name(TraceKind k);
@@ -201,6 +202,12 @@ struct TraceSearch {
   int32_t t0, framed_t0;
   int64_t t2, framed;
 };
+// A state's route ends, the seats its box was raised to hold on its top and bottom faces
+// (`seats_w`) and its left and right (`seats_h`), and its extent before and after.
+struct TraceGrow {
+  uint32_t state, ends, seats_w, seats_h;
+  int32_t from_w, from_h, to_w, to_h;
+};
 
 struct TraceEvent {
   TraceKind kind{ TraceKind::None };
@@ -227,6 +234,7 @@ struct TraceEvent {
     TracePiece piece;
     TraceGap gap;
     TraceCarry carry;
+    TraceGrow grow;
   };
 };
 

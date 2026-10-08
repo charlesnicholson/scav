@@ -165,6 +165,16 @@ void each_field(Event &e, F &&f) {
       f("t2", e.search.t2);
       f("framed", e.search.framed);
       break;
+    case TraceKind::StateGrown:
+      f("state", e.grow.state);
+      f("ends", e.grow.ends);
+      f("seats_w", e.grow.seats_w);
+      f("seats_h", e.grow.seats_h);
+      f("from_w", e.grow.from_w);
+      f("from_h", e.grow.from_h);
+      f("to_w", e.grow.to_w);
+      f("to_h", e.grow.to_h);
+      break;
   }
 }
 

@@ -30,7 +30,7 @@ constexpr std::string_view USAGE{
   "and diff against the goldens\n"
   "\n"
   "  LAYOUT: --profile NAME, --portfolio-row N, --rank S:R, --cut T:L, "
-  "--reverse T:L, --end T:L:E:F, --orient F, --fold F:M[:L], --loop S:F:E, "
+  "--reverse T:L, --end T:L:E:F, --orient F, --fold F:M[:L], --loop S:F:E, --grow S:W:H, "
   "--search full|culled, --jitter-seed N, -j N, --no-search, "
   "--no-text\n"
 };
