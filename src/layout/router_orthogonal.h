@@ -146,8 +146,9 @@ void ortho_align_attachments(PodVector<RouteNet> const &nets,
                              PodVector<Seat> const &table,
                              PodVector<scav_point> &at);
 
-// Spreads seats sharing a point on one face `max(clear, pitch)` apart where the run fits;
-// each arrival takes its own seat, and a port leg level with `toward` stays.
+// Parts each face's seats nearer than `max(clear, pitch)` apart, or as evenly as the
+// face's run holds them; a port leg level with `toward`, or a straight leg to a glyph or a
+// busy face, keeps its point.
 void ortho_spread_attachments(PodVector<scav_rect> const &boxes,
                               PodVector<Seat> const &table,
                               PodVector<scav_point> const &toward,
