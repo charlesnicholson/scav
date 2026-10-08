@@ -3370,6 +3370,7 @@ namespace {
 // Pairs of route ends at one point on the border of a filled state both ends name.
 uint32_t shared_box_ends(Laid const &l) {
   std::vector<std::pair<uint32_t, scav_point>> ends;
+  ends.reserve(2 * l.c.transitions.size());
   for (uint32_t t = 0; t < l.c.transitions.size(); ++t) {
     scav_span const route{ l.r.route[t] };
     if (route.len < 2) { continue; }
