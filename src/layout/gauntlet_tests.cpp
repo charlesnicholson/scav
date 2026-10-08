@@ -2211,6 +2211,61 @@ TEST_CASE(
 
 namespace {
 
+// The seats a face `len` long holds a line of text apart, inside its corner insets.
+Wide seats_on(int32_t len, int32_t arc, scav_profile const &p) {
+  Wide const inset{ imin(imax(route_clearance(p), arc), len / 2) };
+  Wide const pitch{ imax(route_clearance(p), label_line_height(p)) };
+  return ((Wide{ len } - (2 * inset)) / pitch) + 1;
+}
+
+}  // namespace
+
+TEST_CASE("gauntlet: a hub's faces seat every end a line of text apart") {
+  // Seventeen route ends against a natural box whose faces seat ten.
+  for (scav_profile const &p : { readable(), compact() }) {
+    CAPTURE(p.profile_id);
+    Laid l;
+    lay("hub.scav", p, l);
+    uint32_t const hub{ state_named(l.c, "Hub") };
+    REQUIRE(hub != INVALID);
+    scav_rect const box{ l.z.state[hub] };
+    int32_t const arc{ state_corner_radius(StateKind::Normal, box, p.pad) };
+    Wide const pitch{ imax(route_clearance(p), label_line_height(p)) };
+    std::array<std::vector<int32_t>, 4> at;  // per face, each end's place along it
+    uint32_t ends{ 0 };
+    for (uint32_t t = 0; t < l.c.transitions.size(); ++t) {
+      scav_span const route{ l.r.route[t] };
+      REQUIRE(route.len >= 2);
+      Transition const &tr{ l.c.transitions[t] };
+      for (scav_point const end :
+           { (tr.src.v == hub) ? l.r.points[route.off] : scav_point{ INT32_MIN, 0 },
+             (tr.dst.v == hub) ? l.r.points[route.off + route.len - 1]
+                               : scav_point{ INT32_MIN, 0 } }) {
+        if (end.x == INT32_MIN) { continue; }
+        ++ends;
+        uint32_t const face{ face_of(end, box) };
+        REQUIRE(face < 4);
+        at[face].push_back((face < 2) ? end.y : end.x);
+      }
+    }
+    REQUIRE(ends == 17);
+    Wide const capacity{ (2 * seats_on(box.w, arc, p)) + (2 * seats_on(box.h, arc, p)) };
+    CAPTURE(box.w);
+    CAPTURE(box.h);
+    CHECK(capacity >= ends);
+    for (uint32_t face = 0; face < 4; ++face) {
+      std::ranges::sort(at[face]);
+      for (size_t k = 1; k < at[face].size(); ++k) {
+        CAPTURE(face);
+        CAPTURE(at[face][k - 1]);
+        CHECK((Wide{ at[face][k] } - at[face][k - 1]) >= pitch);
+      }
+    }
+  }
+}
+
+namespace {
+
 // The Chebyshev gap from `box` to the nearest leg of route `t`.
 Wide gap_to_route(Laid const &l, uint32_t t, scav_rect const &box) {
   scav_span const route{ l.r.route[t] };
