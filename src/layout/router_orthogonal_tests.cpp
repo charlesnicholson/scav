@@ -675,22 +675,21 @@ TEST_CASE("ortho: two ends wanting one seat are pushed apart along the face") {
   CHECK((at[3] == pt(100, 54)));  // net 1 arrives at box 0
 }
 
-TEST_CASE("ortho: a seat the spread lands on a third is separated in its turn") {
-  // The spread sweeps until no seat moves.
+TEST_CASE("ortho: a pair on one point and a seat beside it part as one run") {
+  // A mixed pair on the right face at 150 and a departure at 154: one block, a step
+  // apart about the three seats' mean, the pair's departure low.
   PodVector<scav_rect> const boxes{ rect(0, 0, 100, 300) };
   PodVector<RouteNet> const nets{
     { .src = pt(50, 150), .dst = pt(900, 10), .src_obstacle = 0 },
     { .src = pt(900, 20), .dst = pt(50, 150), .dst_obstacle = 0 },
     { .src = pt(50, 150), .dst = pt(900, 30), .src_obstacle = 0 },
   };
-  // A mixed pair on the right face at 150 and a departure at 154, where the first
-  // sweep moves the pair's arrival.
   PodVector<scav_point> at{ pt(100, 150), pt(900, 10),  pt(900, 20),
                             pt(100, 150), pt(100, 154), pt(900, 30) };
   ortho_spread_attachments(boxes, seats_of(nets), aims(nets), 8, 0, at);
-  CHECK((at[0] == pt(100, 146)));  // the pair's departure, one half-step down
-  CHECK((at[3] == pt(100, 158)));  // its arrival, moved on again by the second sweep
-  CHECK((at[4] == pt(100, 150)));  // and the third seat, moved down out of its way
+  CHECK((at[0] == pt(100, 143)));
+  CHECK((at[3] == pt(100, 151)));
+  CHECK((at[4] == pt(100, 159)));
 }
 
 TEST_CASE("ortho: an inscribed glyph's mixed midpoint is moved onto another face") {
@@ -1280,10 +1279,10 @@ TEST_CASE("ortho: a port's level seat keeps its point and a pseudostate's moves 
   CHECK((level[3] == pt(1000, 100)));  // a whole pitch off the port
   CHECK((level[2] == pt(600, 200)));
 
-  // A port not level with its seat parts from the pseudostate, the port's lower aim low.
+  // A port not level with its seat steps a pitch off the pseudostate's straight arrow.
   PodVector<scav_point> const off{ spread(50) };
-  CHECK((off[1] == pt(1000, 150)));
-  CHECK((off[3] == pt(1000, 250)));
+  CHECK((off[1] == pt(1000, 100)));
+  CHECK((off[3] == pt(1000, 200)));
 }
 
 TEST_CASE("ortho: a departure on a port's level seat takes the whole step") {
@@ -1427,10 +1426,10 @@ TEST_CASE("ortho: seats are spread a pitch apart where the face has room for one
   CHECK((run(600, 0) == std::pair<int32_t, int32_t>{ 296, 304 }));
   // Just room: a 208-unit face seats on 8 .. 200, one pitch.
   CHECK((run(208, 192) == std::pair<int32_t, int32_t>{ 8, 200 }));
-  // One unit short, and shorter still: the clearance, as with no pitch.
-  CHECK((run(207, 192) == std::pair<int32_t, int32_t>{ 99, 107 }));
-  CHECK((run(207, 192) == run(207, 0)));
-  CHECK((run(150, 192) == run(150, 0)));
+  // One unit short, and shorter still: as far apart as the run between the insets holds.
+  CHECK((run(207, 192) == std::pair<int32_t, int32_t>{ 8, 199 }));
+  CHECK((run(150, 192) == std::pair<int32_t, int32_t>{ 8, 142 }));
+  CHECK((run(207, 0) == std::pair<int32_t, int32_t>{ 99, 107 }));
   // A two-unit face has no step to take, whatever the pitch.
   CHECK((run(2, 192) == std::pair<int32_t, int32_t>{ 1, 1 }));
 }
@@ -1480,6 +1479,93 @@ TEST_CASE(
   CHECK(at[2].y == at[3].y);
   CHECK(at[0].y == 340);
   CHECK(at[3].y == 392);
+}
+
+TEST_CASE("ortho: seats on one face nearer than a pitch part to it, in their order") {
+  // Three departures 2 and 33 apart on a 1,000-long face part a pitch apart about their
+  // mean, the lowest staying lowest.
+  PodVector<scav_rect> const boxes{ rect(0, 0, 100, 1000) };
+  PodVector<RouteNet> const nets{
+    { .src = pt(50, 500), .dst = pt(900, 2000), .src_obstacle = 0 },
+    { .src = pt(50, 502), .dst = pt(900, 2100), .src_obstacle = 0 },
+    { .src = pt(50, 535), .dst = pt(900, 2200), .src_obstacle = 0 },
+  };
+  PodVector<scav_point> at{ pt(100, 500),  pt(900, 2000), pt(100, 502),
+                            pt(900, 2100), pt(100, 535),  pt(900, 2200) };
+  ortho_spread_attachments(boxes, seats_of(nets), aims(nets), 8, 100, at);
+  CHECK(at[0].y == 412);
+  CHECK(at[2].y == 512);
+  CHECK(at[4].y == 612);
+}
+
+TEST_CASE("ortho: a seat near a port's level seat steps a pitch off it") {
+  // A port's arrival level at 200 and a departure 30 below it on the same face.
+  PodVector<scav_rect> const boxes{ rect(1000, 0, 400, 400) };
+  PodVector<RouteNet> const nets{
+    { .src = pt(-500, 200), .dst = pt(1200, 200), .dst_obstacle = 0 },
+    { .src = pt(1200, 200), .dst = pt(-500, 900), .src_obstacle = 0 },
+  };
+  PodVector<scav_point> at{ pt(-500, 200), pt(1000, 200), pt(1000, 230), pt(-500, 900) };
+  ortho_spread_attachments(boxes, seats_of(nets), aims(nets), 8, 100, at);
+  CHECK(at[1].y == 200);
+  CHECK(at[2].y == 300);
+}
+
+TEST_CASE(
+    "ortho: an arrow straight from a glyph keeps its seat and a seat near it steps off") {
+  // An initial dot's arrow level with it at 200 and a box's arrival 50 below it.
+  PodVector<scav_rect> const boxes{ rect(1000, 0, 400, 400),
+                                    rect(500, 150, 100, 100),
+                                    rect(0, 600, 100, 100) };
+  PodVector<uint8_t> const glyph{ 0, 1, 0 };
+  PodVector<RouteNet> const nets{
+    { .src = pt(550, 200), .dst = pt(1200, 200), .src_obstacle = 1, .dst_obstacle = 0 },
+    { .src = pt(50, 650), .dst = pt(1200, 200), .src_obstacle = 2, .dst_obstacle = 0 },
+  };
+  PodVector<scav_point> at{ pt(600, 200), pt(1000, 200), pt(50, 600), pt(1000, 250) };
+  ortho_spread_attachments(boxes, seats_of(nets, glyph), aims(nets), 8, 100, at);
+  CHECK((at[1] == pt(1000, 200)));
+  CHECK((at[3] == pt(1000, 300)));
+}
+
+TEST_CASE("ortho: a straight pair between a crowded face and a sparse one parts a pitch") {
+  // Box 0's right face holds the pair and four more ends, 76 apart at most; box 1's left
+  // face holds only the pair. The pair parts a pitch about its point, both legs straight,
+  // and box 0's other ends part as evenly as the room either side of it holds them.
+  PodVector<scav_rect> const boxes{ rect(0, 0, 100, 400), rect(900, -300, 100, 1000) };
+  PodVector<RouteNet> const nets{
+    { .src = pt(50, 200), .dst = pt(950, 200), .src_obstacle = 0, .dst_obstacle = 1 },
+    { .src = pt(950, 200), .dst = pt(50, 200), .src_obstacle = 1, .dst_obstacle = 0 },
+    { .src = pt(50, 200), .dst = pt(900, -900), .src_obstacle = 0 },
+    { .src = pt(50, 200), .dst = pt(900, -800), .src_obstacle = 0 },
+    { .src = pt(50, 200), .dst = pt(900, 1800), .src_obstacle = 0 },
+    { .src = pt(50, 200), .dst = pt(900, 1900), .src_obstacle = 0 },
+  };
+  PodVector<scav_point> at{ pt(100, 200), pt(900, 200),  pt(900, 200), pt(100, 200),
+                            pt(100, 8),   pt(900, -900), pt(100, 8),   pt(900, -800),
+                            pt(100, 392), pt(900, 1800), pt(100, 392), pt(900, 1900) };
+  ortho_spread_attachments(boxes, seats_of(nets), aims(nets), 8, 100, at);
+  CHECK(at[0].y == at[1].y);
+  CHECK(at[2].y == at[3].y);
+  CHECK((at[3].y - at[0].y) == 100);
+  PodVector<int32_t> ys{ at[0].y, at[3].y, at[4].y, at[6].y, at[8].y, at[10].y };
+  std::ranges::sort(ys);
+  CHECK(ys == PodVector<int32_t>{ 8, 79, 150, 250, 321, 392 });
+}
+
+TEST_CASE("ortho: a lone seat the alignment put inside the clearance inset stays") {
+  // Aligned 5 from the corner on its arc; nothing near it on the face.
+  PodVector<scav_rect> const boxes{ rect(0, 0, 100, 400), rect(900, -500, 100, 1400) };
+  PodVector<int32_t> const arcs{ 5, 5 };
+  PodVector<RouteNet> const nets{
+    { .src = pt(50, 200), .dst = pt(950, 200), .src_obstacle = 0, .dst_obstacle = 1 },
+    { .src = pt(50, 200), .dst = pt(950, 600), .src_obstacle = 0, .dst_obstacle = 1 },
+  };
+  PodVector<scav_point> at{ pt(100, 5), pt(900, 5), pt(100, 300), pt(900, 300) };
+  ortho_spread_attachments(boxes, seats_of(nets, {}, arcs), aims(nets), 8, 100, at);
+  CHECK(at[0].y == 5);
+  CHECK(at[1].y == 5);
+  CHECK(at[2].y == 300);
 }
 
 TEST_CASE("ortho: seats do not depend on the order the nets arrive in") {

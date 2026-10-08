@@ -190,6 +190,16 @@ void each_field(TraceEvent &e, F &&f) {
       f(e.search.t2);
       f(e.search.framed);
       break;
+    case TraceKind::FaceSpread:
+      f(e.spread.box);
+      f(e.spread.face);
+      f(e.spread.round);
+      f(e.spread.seats);
+      f(e.spread.step);
+      f(e.spread.blocks);
+      f(e.spread.relaxed);
+      f(e.spread.frozen);
+      break;
   }
 }
 

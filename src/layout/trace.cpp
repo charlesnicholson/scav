@@ -175,6 +175,7 @@ char const *trace_kind_name(TraceKind k) {
     case TraceKind::RowRepeated: return "row_repeated";
     case TraceKind::KickScored: return "kick_scored";
     case TraceKind::KickTaken: return "kick_taken";
+    case TraceKind::FaceSpread: return "face_spread";
     case TraceKind::None: break;
   }
   return "none";
@@ -424,6 +425,16 @@ void trace_event_json(TraceEvent const &e,
       j.kv("row", e.search.row);
       j.kv("t0", e.search.t0);
       j.kv("t2", e.search.t2);
+      break;
+    case TraceKind::FaceSpread:
+      j.kv("box", e.spread.box);
+      j.kv("face", e.spread.face);
+      j.kv("round", e.spread.round);
+      j.kv("seats", e.spread.seats);
+      j.kv("step", e.spread.step);
+      j.kv("blocks", e.spread.blocks);
+      j.kv("relaxed", e.spread.relaxed);
+      j.kv("frozen", e.spread.frozen);
       break;
     case TraceKind::None: break;
   }
