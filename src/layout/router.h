@@ -56,6 +56,9 @@ int32_t seat_pitch(scav_profile const &p);
 // The seats a face `len` long holds `seat_pitch` apart inside its `seat_inset`s.
 uint32_t face_capacity(int32_t len, int32_t arc, scav_profile const &p);
 
+// The seats a `w` by `h` box's four faces hold, as `face_capacity`.
+uint32_t box_capacity(int32_t w, int32_t h, int32_t arc, scav_profile const &p);
+
 // The least face length holding `seats` seats `seat_pitch` apart inside its `seat_inset`s;
 // 0 for none.
 Wide face_length(uint32_t seats, int32_t arc, scav_profile const &p);

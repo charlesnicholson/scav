@@ -605,6 +605,32 @@ TEST_CASE(
   CHECK(faced > 0);
 }
 
+TEST_CASE("search: a search that grows a state is the one run with no memo" *
+          doctest::test_suite("full")) {
+  // `gauntlet/hub` takes grow kicks; every memo answer is checked against the run afresh.
+  MemoGuard const guard;
+  CandidateGuard const candidates;
+  char const *const hub{ "gauntlet/hub.scav" };
+  for (bool const labelled : { false, true }) {
+    CAPTURE(labelled);
+    layout_test_search_memo_verify(true);
+    layout_test_candidate_memo(true, true);
+    Laid const with{ lay_out(hub, labelled) };
+    REQUIRE(with.ok);
+    CHECK(layout_test_search_memo_mismatches() == 0);
+    CHECK(layout_test_candidate_memo_mismatches() == 0);
+    layout_test_search_memo_verify(false);
+    layout_test_search_memo(false);
+    layout_test_candidate_memo(false, false);
+    Laid const without{ lay_out(hub, labelled) };
+    layout_test_search_memo(true);
+    layout_test_candidate_memo(true, false);
+    REQUIRE(without.ok);
+    CHECK(with.structural == without.structural);
+    CHECK(with.coordinate == without.coordinate);
+  }
+}
+
 TEST_CASE(
     "search: every move the candidate memo answers on the corpus scores as laid out "
     "afresh" *

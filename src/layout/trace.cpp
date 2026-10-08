@@ -17,8 +17,9 @@ thread_local LayoutTrace *g_sink{ nullptr };
 thread_local LayoutTrace *g_outline{ nullptr };
 
 // Level 1 move kinds by `TRACE_MOVE_*`.
-constexpr std::array<char const *, TRACE_MOVES> MOVES{ "rank", "cut",  "reverse", "face",
-                                                       "side", "fold", "orient",  "loop" };
+constexpr std::array<char const *, TRACE_MOVES> MOVES{ "rank",   "cut",  "reverse",
+                                                       "face",   "side", "fold",
+                                                       "orient", "loop", "grow" };
 
 char const *seat_pass_name(uint16_t p) {
   switch (static_cast<SeatPass>(p)) {
@@ -407,12 +408,19 @@ void trace_event_json(TraceEvent const &e,
       char const *kick{ "orient" };
       if (m == TRACE_MOVE_REVERSE) { kick = "reverse"; }
       if (m == TRACE_MOVE_FOLD) { kick = "fold"; }
+      if (m == TRACE_MOVE_GROW) { kick = "grow"; }
       j.ks("verdict", kick_verdict_name(e.pass));
       j.kv("row", e.search.row);
       j.ks("move", kick);
       if (m == TRACE_MOVE_REVERSE) {
         j.kv("trans", e.search.trans);
         j.kv("leg", e.search.leg);
+      }
+      if (m == TRACE_MOVE_GROW) {
+        j.kstate(states, e.search.state);
+        j.kxy("seats",
+              static_cast<int32_t>(e.search.seats_w),
+              static_cast<int32_t>(e.search.seats_h));
       }
       j.kv("t0", e.search.t0);
       j.kv("t2", e.search.t2);

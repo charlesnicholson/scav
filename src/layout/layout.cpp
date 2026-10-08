@@ -903,8 +903,18 @@ Improved::~Improved() = default;
 static_assert(std::is_nothrow_move_constructible_v<Improved> &&
               std::is_nothrow_move_assignable_v<Improved>);
 
-// `Orient` is a kick only.
-enum class MoveKind : uint32_t { Rank, Cut, Reverse, Face, Side, Fold, Orient, Loop };
+// `Orient` and `Grow` are kicks only.
+enum class MoveKind : uint32_t {
+  Rank,
+  Cut,
+  Reverse,
+  Face,
+  Side,
+  Fold,
+  Orient,
+  Loop,
+  Grow
+};
 static_assert((static_cast<uint16_t>(MoveKind::Rank) == TRACE_MOVE_RANK) &&
                   (static_cast<uint16_t>(MoveKind::Cut) == TRACE_MOVE_CUT) &&
                   (static_cast<uint16_t>(MoveKind::Reverse) == TRACE_MOVE_REVERSE) &&
@@ -913,7 +923,8 @@ static_assert((static_cast<uint16_t>(MoveKind::Rank) == TRACE_MOVE_RANK) &&
                   (static_cast<uint16_t>(MoveKind::Fold) == TRACE_MOVE_FOLD) &&
                   (static_cast<uint16_t>(MoveKind::Orient) == TRACE_MOVE_ORIENT) &&
                   (static_cast<uint16_t>(MoveKind::Loop) == TRACE_MOVE_LOOP) &&
-                  ((static_cast<uint32_t>(MoveKind::Loop) + 1) == TRACE_MOVES),
+                  (static_cast<uint16_t>(MoveKind::Grow) == TRACE_MOVE_GROW) &&
+                  ((static_cast<uint32_t>(MoveKind::Grow) + 1) == TRACE_MOVES),
               "the trace names a move by this enum's ordinal");
 // One Level 1 move or kick; `kind` names which of its pins is set. `Face` is an end pin
 // at a box end, `Side` one at a port end.
@@ -924,12 +935,25 @@ struct Move {
   FoldPin fold{};
   OrientPin orient{};
   LoopPin loop{};
+  GrowPin grow{};
   MoveKind kind{ MoveKind::Rank };
 };
 
-// Appends `m`'s pin to `into`; a reversal already pinned is lifted instead.
+// Appends `m`'s pin to `into`; a reversal already pinned is lifted instead, and a growth
+// replaces the pin naming its state.
 void add_move(SearchPins &into, Move const &m) {
   switch (m.kind) {
+    case MoveKind::Grow: {
+      auto const had{ std::ranges::find_if(into.grows, [&m](GrowPin const &g) {
+        return g.state.v == m.grow.state.v;
+      }) };
+      if (had != into.grows.end()) {
+        *had = m.grow;
+      } else {
+        vec_push_back(into.grows, m.grow);
+      }
+      break;
+    }
     case MoveKind::Cut: vec_push_back(into.cuts, m.leg); break;
     case MoveKind::Reverse: {
       for (size_t k = 0; k < into.reverses.size(); ++k) {
@@ -1747,7 +1771,8 @@ bool may_win(Scored const &bound, Cost const &incumbent) {
 }
 
 // A move's identity across rounds: kind, subject and parameters. Exact while ranks, legs
-// and fold layers stay below 2^24.
+// and fold layers stay below 2^24. A growth, the one kind past three bits and the one
+// with no end or face, hashes its seats into its parameters.
 uint64_t move_key(Move const &m) {
   uint64_t subject{ 0 };
   uint64_t param{ 0 };
@@ -1776,6 +1801,10 @@ uint64_t move_key(Move const &m) {
     case MoveKind::Loop:
       subject = m.loop.state.v;
       end_face = (uint64_t{ m.loop.end } * 4U) + m.loop.face;
+      break;
+    case MoveKind::Grow:
+      subject = m.grow.state.v;
+      param = splitmix64((uint64_t{ m.grow.w } << 32U) | m.grow.h);
       break;
   }
   return static_cast<uint64_t>(m.kind) | ((end_face & 7U) << 3U) |
@@ -2365,7 +2394,8 @@ Improved run_search(Chart const &c,
       case MoveKind::Loop:
         return flagged(frame_changed, c.states[m.loop.state.v].parent.v) ||
                flagged(resized, m.loop.state.v);
-      case MoveKind::Orient: break;
+      case MoveKind::Orient:
+      case MoveKind::Grow: break;
     }
     return true;
   };
@@ -2914,6 +2944,9 @@ TraceEvent search_event(TraceKind kind, uint16_t pass, uint32_t row, Cost const 
                        .move = 0,
                        .trans = INVALID,
                        .leg = 0,
+                       .state = INVALID,
+                       .seats_w = 0,
+                       .seats_h = 0,
                        .t0 = cost.t0_violations,
                        .framed_t0 = 0,
                        .t2 = cost.t2,
@@ -3261,6 +3294,14 @@ bool layout_run(Chart &c,
   if (budget != 0) { search_rows(PodVector<uint8_t>(rows, 1), false); }
   PodVector<uint8_t> const &eligible{ viable };
 
+  // The grow kicks' gate: each state's route ends, and the objective with corridor and
+  // crowding unpriced.
+  PodVector<uint32_t> route_ends;
+  size_route_ends(c, g, route_ends);
+  scav_profile uncrowded{ p };
+  uncrowded.w_corridor = 0;
+  uncrowded.w_crowding = 0;
+
   // Iterated local search from row `best`: each kick restarts a search, kept where it
   // converges below the incumbent; winning kicks in distinct frames combine.
   auto const kick = [&](uint32_t best) {
@@ -3308,12 +3349,13 @@ bool layout_run(Chart &c,
     auto const outside = [&](uint32_t frame, PodVector<uint8_t> const &redo) {
       return (frame >= redo.size()) || (redo[frame] == 0);
     };
-    // `from` less every rank, cut, end, fold and loop pin in a `redo` frame; orientations
-    // and reversals stay.
+    // `from` less every rank, cut, end, fold and loop pin in a `redo` frame; orientations,
+    // reversals and growths stay.
     auto const warm = [&](SearchPins const &from, PodVector<uint8_t> const &redo) {
       SearchPins out;
       out.reverses = from.reverses;
       out.orients = from.orients;
+      out.grows = from.grows;
       for (EndPin const &e : from.ends) {
         if (outside(frame_of_leg(e.trans, e.leg), redo)) { vec_push_back(out.ends, e); }
       }
@@ -3399,7 +3441,69 @@ bool layout_run(Chart &c,
                           .kind = MoveKind::Fold });
         kick_frame.push_back(m);
       }
+      // Grow kicks: each live Normal state with more route ends than its box before seats
+      // holds, or an end whose transition corridor or crowding charges, asks twice the
+      // seats its box holds of its top and bottom faces, of its left and right, and of
+      // both.
+      Candidate const &drawn{ candidates[best] };
+      PodVector<Wide> priced;
+      PodVector<Wide> unpriced;
+      (void)cost_terms(scoring, c, g, drawn.sized, drawn.routes, s, p, nullptr, &priced);
+      (void)cost_terms(scoring,
+                       c,
+                       g,
+                       drawn.sized,
+                       drawn.routes,
+                       s,
+                       uncrowded,
+                       nullptr,
+                       &unpriced);
+      PodVector<uint8_t> crowded(c.states.size(), 0);
+      for (SplitSegment const &seg : g.segments) {
+        uint32_t const t{ seg.trans.v };
+        if ((t >= priced.size()) || (priced[t] <= unpriced[t])) { continue; }
+        for (uint32_t k = 0; k < 2; ++k) {
+          uint32_t const st{ size_end_state(c, g, seg, k) };
+          if (st != INVALID) { crowded[st] = 1; }
+        }
+      }
+      for (uint32_t st = 0; st < c.states.size(); ++st) {
+        if ((c.states[st].live == 0) || (c.states[st].kind != StateKind::Normal) ||
+            (st >= drawn.sized.natural.size())) {
+          continue;
+        }
+        scav_extent const was{ drawn.sized.natural[st] };
+        scav_rect const natural{ .x = 0, .y = 0, .w = was.w, .h = was.h };
+        bool const over{ route_ends[st] >
+                         box_capacity(
+                             was.w,
+                             was.h,
+                             state_corner_radius(StateKind::Normal, natural, p.pad),
+                             p) };
+        if (!over && (crowded[st] == 0)) { continue; }
+        scav_rect const &box{ drawn.sized.state[st] };
+        int32_t const arc{ state_corner_radius(StateKind::Normal, box, p.pad) };
+        uint32_t const w{ face_capacity(box.w, arc, p) };
+        uint32_t const h{ face_capacity(box.h, arc, p) };
+        for (FaceSeats const twice : { FaceSeats{ .w = 2 * w, .h = h },
+                                       FaceSeats{ .w = w, .h = 2 * h },
+                                       FaceSeats{ .w = 2 * w, .h = 2 * h } }) {
+          if (kick_scored >= budget) { break; }
+          ++kick_scored;
+          kicks.push_back({ .grow = { .state = StateId{ st }, .w = twice.w, .h = twice.h },
+                            .kind = MoveKind::Grow });
+          kick_frame.push_back(c.states[st].parent.v);
+        }
+      }
       if (kicks.empty()) { break; }
+      // Counts kick `j`, where it is a growth, as offered or as taken.
+      auto const count_grow = [&](uint32_t j, bool took) {
+        if (kicks[j].kind != MoveKind::Grow) { return; }
+        SearchStats grown;
+        (took ? grown.taken : grown.offered)[TRACE_MOVE_GROW] = 1;
+        stats_add(&counts, grown);
+      };
+      for (uint32_t j = 0; j < kicks.size(); ++j) { count_grow(j, false); }
 
       std::vector<Improved> tried(kicks.size());
       PodVector<Cost> framed(kicks.size());
@@ -3425,6 +3529,9 @@ bool layout_run(Chart &c,
         e.search.trans =
             (kicks[j].kind == MoveKind::Reverse) ? kicks[j].leg.trans.v : INVALID;
         e.search.leg = kicks[j].leg.leg;
+        e.search.state = kicks[j].grow.state.v;
+        e.search.seats_w = kicks[j].grow.w;
+        e.search.seats_h = kicks[j].grow.h;
         e.search.framed_t0 = framed[j].t0_violations;
         e.search.framed = framed[j].t2;
         trace_outline_emit(e);
@@ -3471,11 +3578,13 @@ bool layout_run(Chart &c,
         Cost together_framed;
         Improved together{ search_kicked(start, redo, together_framed) };
         if (together.viable && cost_less(together.cost, tried[single].cost)) {
+          for (uint32_t const j : winners) { count_grow(j, true); }
           take(std::move(together), KickHow::Together);
           kicked = true;
           continue;
         }
       }
+      count_grow(single, true);
       take(std::move(tried[single]), KickHow::Single);
       kicked = true;
       // The other frames' best kicks, cheapest first, each searched on top of the
@@ -3495,6 +3604,7 @@ bool layout_run(Chart &c,
         Cost more_framed;
         Improved more{ search_kicked(start, redo, more_framed) };
         if (more.viable && cost_less(more.cost, cost[best])) {
+          count_grow(j, true);
           take(std::move(more), KickHow::Stacked);
         }
       }

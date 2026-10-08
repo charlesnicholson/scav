@@ -2267,9 +2267,9 @@ void Sizer::size_state(uint32_t i) {
                              .w = static_cast<int32_t>(natural_w),
                              .h = static_cast<int32_t>(natural_h) };
     int32_t const arc{ state_corner_radius(sk, natural, pad) };
-    uint32_t const held{ 2 * (face_capacity(natural.w, arc, p) +
-                              face_capacity(natural.h, arc, p)) };
-    if (own > held) { seats = { .w = (own + 3) / 4, .h = (own + 3) / 4 }; }
+    if (own > box_capacity(natural.w, natural.h, arc, p)) {
+      seats = { .w = (own + 3) / 4, .h = (own + 3) / 4 };
+    }
   }
   if (seats.w != INVALID) {
     // The corner at its largest, so the grown box seats its pin whatever its arc.
@@ -2674,21 +2674,29 @@ void size_natural(Chart const &c,
   }
 }
 
+uint32_t size_end_state(Chart const &c,
+                        SplitGraph const &g,
+                        SplitSegment const &seg,
+                        uint32_t k) {
+  uint32_t const t{ seg.trans.v };
+  if ((t >= c.transitions.size()) || inner_loop(c, t)) { return INVALID; }
+  uint32_t const port{ (k == 0) ? seg.src_port : seg.dst_port };
+  uint32_t const inner{ (k == 0) ? seg.src_inner : seg.dst_inner };
+  uint32_t st{ INVALID };
+  if (port < g.ports.size()) {
+    st = g.ports[port].state.v;
+  } else if ((port == INVALID) && (inner == 0)) {
+    st = (k == 0) ? c.transitions[t].src.v : c.transitions[t].dst.v;
+  }
+  return ((st < c.states.size()) && (c.states[st].parent == seg.frame)) ? st : INVALID;
+}
+
 void size_route_ends(Chart const &c, SplitGraph const &g, PodVector<uint32_t> &ends) {
   ends.assign(c.states.size(), 0U);
   for (SplitSegment const &seg : g.segments) {
-    uint32_t const t{ seg.trans.v };
-    if ((t >= c.transitions.size()) || inner_loop(c, t)) { continue; }
     for (uint32_t k = 0; k < 2; ++k) {
-      uint32_t const port{ (k == 0) ? seg.src_port : seg.dst_port };
-      uint32_t const inner{ (k == 0) ? seg.src_inner : seg.dst_inner };
-      uint32_t st{ INVALID };
-      if (port < g.ports.size()) {
-        st = g.ports[port].state.v;
-      } else if ((port == INVALID) && (inner == 0)) {
-        st = (k == 0) ? c.transitions[t].src.v : c.transitions[t].dst.v;
-      }
-      if ((st < c.states.size()) && (c.states[st].parent == seg.frame)) { ++ends[st]; }
+      uint32_t const st{ size_end_state(c, g, seg, k) };
+      if (st != INVALID) { ++ends[st]; }
     }
   }
 }

@@ -188,17 +188,21 @@ inline constexpr uint16_t TRACE_MOVE_SIDE{ 4 };    // `face` holds the side
 inline constexpr uint16_t TRACE_MOVE_FOLD{ 5 };    // `rank` holds the cut's layer
 inline constexpr uint16_t TRACE_MOVE_ORIENT{ 6 };  // a kick only
 inline constexpr uint16_t TRACE_MOVE_LOOP{ 7 };    // `face` and `end` hold the placement
+inline constexpr uint16_t TRACE_MOVE_GROW{ 8 };    // a kick only
 // Each Tier-2 term's share of the scored sum in basis points, in CostTerms order.
 struct TraceTerms {
   std::array<int32_t, TIER2_TERMS> share;
 };
 // A whole search's result for Level 2 row `row`. A kick names its `TRACE_MOVE_*` in
-// `move`, a reversal its segment in `trans` and `leg`; `framed_t0` and `framed` are the
-// cost its frame's own search reached. `of` is the earlier row a repeated row draws.
+// `move`, a reversal its segment in `trans` and `leg`, a growth its state and the seats
+// it asks of the top and bottom faces (`seats_w`) and the left and right (`seats_h`);
+// `framed_t0` and `framed` are the cost its frame's own search reached. `of` is the
+// earlier row a repeated row draws.
 struct TraceSearch {
   uint32_t row, of;
   uint16_t move;
   uint32_t trans, leg;
+  uint32_t state, seats_w, seats_h;
   int32_t t0, framed_t0;
   int64_t t2, framed;
 };
@@ -300,10 +304,11 @@ void trace_event_json(TraceEvent const &e,
                       std::vector<uint32_t> const &name_end,
                       std::vector<char> &out);
 
-inline constexpr uint32_t TRACE_MOVES{ 8 };  // `TRACE_MOVE_*` values
+inline constexpr uint32_t TRACE_MOVES{ 9 };  // `TRACE_MOVE_*` values
 
 // Per `TRACE_MOVE_*`: moves offered, answered by the candidate memo, taken, culled
-// unoffered as changing nothing, and left unscored by don't-look bits in a taking round.
+// unoffered as changing nothing, and left unscored by don't-look bits in a taking round;
+// a growth's offered and taken count kicks.
 struct SearchStats {
   SearchStats();  // out of line in trace.cpp
 

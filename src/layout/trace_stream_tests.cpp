@@ -185,6 +185,9 @@ void each_field(TraceEvent &e, F &&f) {
       f(e.search.move);
       f(e.search.trans);
       f(e.search.leg);
+      f(e.search.state);
+      f(e.search.seats_w);
+      f(e.search.seats_h);
       f(e.search.t0);
       f(e.search.framed_t0);
       f(e.search.t2);

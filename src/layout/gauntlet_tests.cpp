@@ -2261,6 +2261,92 @@ TEST_CASE("gauntlet: a hub's faces seat every end a line of text apart") {
 
 namespace {
 
+// Every grow kick the search of gauntlet chart `name` at `p` scored, from its outline.
+std::vector<TraceEvent> grow_kicks(char const *name, scav_profile const &p, Chart &c) {
+  c = loaded(name);
+  std::vector<scav_placed> placed;
+  std::vector<Diagnostic> diags;
+  TraceRecord t;
+  trace_outline_set(&t);
+  bool const ran{
+    layout_run(c, {}, { .profile = p, .router = 0, .threads = 1 }, placed, diags)
+  };
+  trace_outline_set(nullptr);
+  REQUIRE(ran);
+  std::vector<TraceEvent> out;
+  for (TraceEvent const &e : t.events()) {
+    if ((e.kind == TraceKind::KickScored) && (e.search.move == TRACE_MOVE_GROW)) {
+      out.push_back(e);
+    }
+  }
+  return out;
+}
+
+}  // namespace
+
+TEST_CASE("gauntlet: a hub over its seats is offered twice them on a face pair or both") {
+  // The default seats five a face; a round's kicks ask ten of one pair and of both, and
+  // search the frame the hub sits in.
+  for (scav_profile const &p : { readable(), compact() }) {
+    CAPTURE(p.profile_id);
+    Chart c;
+    std::vector<TraceEvent> kicks{ grow_kicks("hub.scav", p, c) };
+    uint32_t const hub{ state_named(c, "Hub") };
+    std::erase_if(kicks, [hub](TraceEvent const &e) { return e.search.state != hub; });
+    REQUIRE(kicks.size() >= 3);
+    for (TraceEvent const &e : kicks) { CHECK(e.frame == c.states[hub].parent.v); }
+    CHECK(kicks[0].search.seats_w == 10);
+    CHECK(kicks[0].search.seats_h == 5);
+    CHECK(kicks[1].search.seats_w == 5);
+    CHECK(kicks[1].search.seats_h == 10);
+    CHECK(kicks[2].search.seats_w == 10);
+    CHECK(kicks[2].search.seats_h == 10);
+  }
+}
+
+TEST_CASE("gauntlet: a chart with no state over its seats and no crowded end grows none") {
+  for (scav_profile const &p : { readable(), compact() }) {
+    CAPTURE(p.profile_id);
+    Chart c;
+    CHECK(grow_kicks("roundtrip.scav", p, c).empty());
+  }
+}
+
+TEST_CASE("gauntlet: a grow pin the search starts from outlasts the kicks it takes") {
+  // `Closed` seeded six seats a side; every kick a row takes starts from the pin.
+  Chart c{ loaded("kicked.scav") };
+  REQUIRE(state_named(c, "Closed") == 0);
+  SearchPins const seed{ .grows = { { .state = StateId{ 0 }, .w = 1, .h = 6 } } };
+  std::vector<scav_placed> placed;
+  std::vector<Diagnostic> diags;
+  SearchPins taken;
+  TraceRecord t;
+  trace_outline_set(&t);
+  bool const ran{ layout_run(c,
+                             {},
+                             { .profile = readable(), .router = 0, .threads = 1 },
+                             placed,
+                             diags,
+                             nullptr,
+                             nullptr,
+                             INVALID,
+                             nullptr,
+                             &taken,
+                             &seed) };
+  trace_outline_set(nullptr);
+  REQUIRE(ran);
+  CHECK(std::ranges::any_of(t.events(), [](TraceEvent const &e) {
+    return e.kind == TraceKind::KickTaken;
+  }));
+  auto const kept{ std::ranges::find_if(taken.grows,
+                                        [](GrowPin const &g) { return g.state.v == 0; }) };
+  REQUIRE(kept != taken.grows.end());
+  CHECK(kept->w >= 1);
+  CHECK(kept->h >= 6);
+}
+
+namespace {
+
 // The Chebyshev gap from `box` to the nearest leg of route `t`.
 Wide gap_to_route(Laid const &l, uint32_t t, scav_rect const &box) {
   scav_span const route{ l.r.route[t] };

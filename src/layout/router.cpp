@@ -33,6 +33,10 @@ uint32_t face_capacity(int32_t len, int32_t arc, scav_profile const &p) {
   return static_cast<uint32_t>(((Wide{ len } - (2 * inset)) / seat_pitch(p)) + 1);
 }
 
+uint32_t box_capacity(int32_t w, int32_t h, int32_t arc, scav_profile const &p) {
+  return 2 * (face_capacity(w, arc, p) + face_capacity(h, arc, p));
+}
+
 Wide face_length(uint32_t seats, int32_t arc, scav_profile const &p) {
   if (seats == 0) { return 0; }
   return (Wide{ seats - 1 } * seat_pitch(p)) +

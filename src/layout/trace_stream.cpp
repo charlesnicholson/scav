@@ -160,6 +160,9 @@ void each_field(Event &e, F &&f) {
       f("move", e.search.move);
       f("trans", e.search.trans);
       f("leg", e.search.leg);
+      f("state", e.search.state);
+      f("seats_w", e.search.seats_w);
+      f("seats_h", e.search.seats_h);
       f("t0", e.search.t0);
       f("framed_t0", e.search.framed_t0);
       f("t2", e.search.t2);
