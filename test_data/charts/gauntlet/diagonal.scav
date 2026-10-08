@@ -1,0 +1,19 @@
+// A transition and its return between a composite and a state below and beside it,
+// clear of it on both axes. Each route bends between the two boxes, and the pair does
+// not cross itself whichever faces it leaves and enters by.
+chart diagonal "a round trip to a state offset on both axes" {
+  state Wide { state P, state Q, state R, trans P -> Q, trans Q -> R },
+  state C1,
+  state C2,
+  state C3,
+  state C4,
+  state Far,
+
+  trans * -> Wide,
+  trans Wide -> C1,
+  trans Wide -> C2,
+  trans Wide -> C3,
+  trans Wide -> C4,
+  trans Wide -> Far "go",
+  trans Far -> Wide "back",
+}

@@ -26,6 +26,7 @@
 #include <ostream>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace scav {
@@ -3362,4 +3363,191 @@ TEST_CASE("gauntlet: every crossing between two regions is square and on its slo
     }
   }
   CHECK(crossings >= 40U);
+}
+
+namespace {
+
+// Pairs of route ends at one point on the border of a filled state both ends name.
+uint32_t shared_box_ends(Laid const &l) {
+  std::vector<std::pair<uint32_t, scav_point>> ends;
+  for (uint32_t t = 0; t < l.c.transitions.size(); ++t) {
+    scav_span const route{ l.r.route[t] };
+    if (route.len < 2) { continue; }
+    Transition const &tr{ l.c.transitions[t] };
+    for (uint32_t end = 0; end < 2; ++end) {
+      uint32_t const st{ (end == 0) ? tr.src.v : tr.dst.v };
+      scav_point const at{
+        l.r.points[(end == 0) ? route.off : (route.off + route.len - 1)]
+      };
+      if (kind_inscribed(l.c.states[st].kind) || !on_border(at, l.z.state[st])) {
+        continue;
+      }
+      ends.emplace_back(st, at);
+    }
+  }
+  uint32_t shared{ 0 };
+  for (uint32_t i = 0; i < ends.size(); ++i) {
+    for (uint32_t j = i + 1; j < ends.size(); ++j) {
+      shared += ((ends[i].first == ends[j].first) && same(ends[i].second, ends[j].second))
+                    ? 1U
+                    : 0U;
+    }
+  }
+  return shared;
+}
+
+// The least gap between `n` seats on face `face` of state `st`: a line of text, or the
+// face's run between its insets split evenly where the run holds less.
+Wide least_seat_gap(Laid const &l,
+                    scav_profile const &p,
+                    uint32_t st,
+                    uint32_t face,
+                    uint32_t n) {
+  scav_rect const r{ l.z.state[st] };
+  int32_t const arc{ state_corner_radius(l.c.states[st].kind, r, l.z.before[st].x - r.x) };
+  int32_t const len{ (face < 2) ? r.h : r.w };
+  int32_t const inset{ imin(imax(route_clearance(p), arc), len / 2) };
+  Wide const room{ Wide{ len } - (Wide{ 2 } * inset) };
+  Wide const line{ imax(route_clearance(p), label_line_height(p)) };
+  return (n < 2) ? Wide{ 0 } : imin(line, room / (n - 1));
+}
+
+// Crossings between the segments of routes `t` and `u`.
+uint32_t crossings_between(Laid const &l, uint32_t t, uint32_t u) {
+  scav_span const a{ l.r.route[t] };
+  scav_span const b{ l.r.route[u] };
+  uint32_t n{ 0 };
+  for (uint32_t i = 0; (i + 1) < a.len; ++i) {
+    for (uint32_t j = 0; (j + 1) < b.len; ++j) {
+      n += crosses(l.r.points[a.off + i],
+                   l.r.points[a.off + i + 1],
+                   l.r.points[b.off + j],
+                   l.r.points[b.off + j + 1])
+               ? 1U
+               : 0U;
+    }
+  }
+  return n;
+}
+
+}  // namespace
+
+TEST_CASE("gauntlet: a wide fan-out's departures take their own seats, a line apart") {
+  // On each face of Reset the departures sit a line apart, or as evenly as the face holds
+  // them, and no leg out of a first bend crosses another departure's first leg.
+  for (scav_profile const &p : { readable(), compact() }) {
+    CAPTURE(p.profile_id);
+    Laid l;
+    lay("fanout.scav", one_row(p), l);
+    CHECK(shared_box_ends(l) == 0);
+    uint32_t const reset{ state_named(l.c, "Reset") };
+    REQUIRE(reset != INVALID);
+    scav_rect const box{ l.z.state[reset] };
+    std::vector<uint32_t> out;
+    for (uint32_t t = 0; t < l.c.transitions.size(); ++t) {
+      if ((l.r.route[t].len >= 2) && (l.c.transitions[t].src.v == reset)) {
+        out.push_back(t);
+      }
+    }
+    REQUIRE(out.size() == 8);
+    for (uint32_t face = 0; face < 4; ++face) {
+      std::vector<int32_t> seats;
+      for (uint32_t const t : out) {
+        scav_point const at{ l.r.points[l.r.route[t].off] };
+        if (face_of(at, box) == face) { seats.push_back((face < 2) ? at.y : at.x); }
+      }
+      std::ranges::sort(seats);
+      Wide const least{
+        least_seat_gap(l, p, reset, face, static_cast<uint32_t>(seats.size()))
+      };
+      for (uint32_t k = 1; k < seats.size(); ++k) {
+        CAPTURE(face);
+        CAPTURE(k);
+        CHECK((Wide{ seats[k] } - seats[k - 1]) >= least);
+      }
+    }
+    for (uint32_t const t : out) {
+      scav_span const a{ l.r.route[t] };
+      for (uint32_t const u : out) {
+        scav_span const b{ l.r.route[u] };
+        if ((u == t) || (a.len < 3) ||
+            (face_of(l.r.points[a.off], box) != face_of(l.r.points[b.off], box))) {
+          continue;
+        }
+        CAPTURE(t);
+        CAPTURE(u);
+        CHECK_FALSE(crosses(l.r.points[a.off + 1],
+                            l.r.points[a.off + 2],
+                            l.r.points[b.off],
+                            l.r.points[b.off + 1]));
+      }
+    }
+  }
+}
+
+TEST_CASE(
+    "gauntlet: a round trip seated at the end of a face parts as one, both straight") {
+  // Small's face holds the pair a line apart; both legs run straight to Tall.
+  for (scav_profile const &p : { readable(), compact() }) {
+    CAPTURE(p.profile_id);
+    Laid l;
+    lay("offset.scav", one_row(p), l);
+    uint32_t const there{ between(l.c, "Tall", "Small") };
+    uint32_t const back{ between(l.c, "Small", "Tall") };
+    uint32_t const small{ state_named(l.c, "Small") };
+    REQUIRE(there != INVALID);
+    REQUIRE(back != INVALID);
+    scav_span const a{ l.r.route[there] };
+    scav_span const b{ l.r.route[back] };
+    CHECK(a.len == 2);
+    CHECK(b.len == 2);
+    CHECK(crossings_between(l, there, back) == 0);
+    REQUIRE(a.len >= 2);
+    REQUIRE(b.len >= 2);
+    scav_point const a1{ l.r.points[a.off + a.len - 1] };
+    scav_point const b0{ l.r.points[b.off] };
+    uint32_t const face{ face_of(a1, l.z.state[small]) };
+    REQUIRE(face == face_of(b0, l.z.state[small]));
+    Wide const apart{ (face < 2) ? (Wide{ b0.y } - a1.y) : (Wide{ b0.x } - a1.x) };
+    CAPTURE(apart);
+    CHECK(((apart < 0) ? -apart : apart) >= least_seat_gap(l, p, small, face, 2));
+  }
+}
+
+TEST_CASE("gauntlet: a round trip to a state offset on both axes does not cross itself") {
+  // Unpinned the pair bends between the facing faces; pinned out of Wide's bottom and
+  // into Far's left it turns one corner each.
+  for (scav_profile const &p : { readable(), compact() }) {
+    CAPTURE(p.profile_id);
+    Laid l;
+    lay("diagonal.scav", one_row(p), l);
+    uint32_t const there{ between(l.c, "Wide", "Far") };
+    uint32_t const back{ between(l.c, "Far", "Wide") };
+    REQUIRE(there != INVALID);
+    REQUIRE(back != INVALID);
+    CHECK(crossings_between(l, there, back) == 0);
+  }
+  Chart const probe{ loaded("diagonal.scav") };
+  uint32_t const there{ between(probe, "Wide", "Far") };
+  uint32_t const back{ between(probe, "Far", "Wide") };
+  REQUIRE(there != INVALID);
+  REQUIRE(back != INVALID);
+  SearchPins seed;
+  seed.ends.push_back({ .trans = TransId{ there }, .leg = 0, .end = 0, .face = 3 });
+  seed.ends.push_back({ .trans = TransId{ there }, .leg = 0, .end = 1, .face = 0 });
+  seed.ends.push_back({ .trans = TransId{ back }, .leg = 0, .end = 0, .face = 0 });
+  seed.ends.push_back({ .trans = TransId{ back }, .leg = 0, .end = 1, .face = 3 });
+  Laid l;
+  lay("diagonal.scav", one_row(readable()), l, {}, &seed);
+  scav_rect const wide{ l.z.state[state_named(l.c, "Wide")] };
+  scav_rect const far{ l.z.state[state_named(l.c, "Far")] };
+  scav_span const a{ l.r.route[there] };
+  scav_span const b{ l.r.route[back] };
+  REQUIRE(a.len >= 2);
+  REQUIRE(b.len >= 2);
+  CHECK(face_of(l.r.points[a.off], wide) == 3);
+  CHECK(face_of(l.r.points[a.off + a.len - 1], far) == 0);
+  CHECK(face_of(l.r.points[b.off], far) == 0);
+  CHECK(face_of(l.r.points[b.off + b.len - 1], wide) == 3);
+  CHECK(crossings_between(l, there, back) == 0);
 }
