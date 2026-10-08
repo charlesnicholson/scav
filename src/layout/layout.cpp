@@ -1771,8 +1771,7 @@ bool may_win(Scored const &bound, Cost const &incumbent) {
 }
 
 // A move's identity across rounds: kind, subject and parameters. Exact while ranks, legs
-// and fold layers stay below 2^24. A growth, the one kind past three bits and the one
-// with no end or face, hashes its seats into its parameters.
+// and fold layers stay below 2^24; a growth hashes its seats into its parameters.
 uint64_t move_key(Move const &m) {
   uint64_t subject{ 0 };
   uint64_t param{ 0 };
@@ -3441,10 +3440,8 @@ bool layout_run(Chart &c,
                           .kind = MoveKind::Fold });
         kick_frame.push_back(m);
       }
-      // Grow kicks: each live Normal state with more route ends than its box before seats
-      // holds, or an end whose transition corridor or crowding charges, asks twice the
-      // seats its box holds of its top and bottom faces, of its left and right, and of
-      // both.
+      // Grow kicks: a Normal state over its natural seats, or at a corridor or crowding
+      // charged transition's end, asks twice its seats of each face pair, then of both.
       Candidate const &drawn{ candidates[best] };
       PodVector<Wide> priced;
       PodVector<Wide> unpriced;

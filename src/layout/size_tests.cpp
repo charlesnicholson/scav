@@ -2606,13 +2606,13 @@ Chart hub_chart(uint32_t trips, StateKind kind = StateKind::Normal) {
   StateId const hub{ build_state(c, root, "Hub", kind, {}) };
   for (uint32_t k = 0; k < trips; ++k) {
     StateId const s{
-      build_state(c, root, ("S" + std::to_string(k)).c_str(), StateKind::Normal, {})
+      build_state(c, root, "S" + std::to_string(k), StateKind::Normal, {})
     };
     build_trans(c, hub, s, TransKind::Default, {});
     build_trans(c, s, hub, TransKind::Default, {});
   }
-  StateId const dot{ build_state(c, root, {}, StateKind::Initial, {}) };
-  build_trans(c, dot, hub, TransKind::Default, {});
+  StateId const start{ build_state(c, root, {}, StateKind::Initial, {}) };
+  build_trans(c, start, hub, TransKind::Default, {});
   return c;
 }
 

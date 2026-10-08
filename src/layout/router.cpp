@@ -30,7 +30,7 @@ int32_t seat_pitch(scav_profile const &p) {
 
 uint32_t face_capacity(int32_t len, int32_t arc, scav_profile const &p) {
   int32_t const inset{ imin(seat_inset(route_clearance(p), arc), len / 2) };
-  return static_cast<uint32_t>(((Wide{ len } - (2 * inset)) / seat_pitch(p)) + 1);
+  return static_cast<uint32_t>(((Wide{ len } - (Wide{ 2 } * inset)) / seat_pitch(p)) + 1);
 }
 
 uint32_t box_capacity(int32_t w, int32_t h, int32_t arc, scav_profile const &p) {

@@ -194,10 +194,9 @@ struct TraceTerms {
   std::array<int32_t, TIER2_TERMS> share;
 };
 // A whole search's result for Level 2 row `row`. A kick names its `TRACE_MOVE_*` in
-// `move`, a reversal its segment in `trans` and `leg`, a growth its state and the seats
-// it asks of the top and bottom faces (`seats_w`) and the left and right (`seats_h`);
-// `framed_t0` and `framed` are the cost its frame's own search reached. `of` is the
-// earlier row a repeated row draws.
+// `move`, a reversal its segment in `trans` and `leg`, a growth its `state` and seats as
+// `TraceGrow`'s; `framed_t0` and `framed` are the cost its frame's own search reached.
+// `of` is the earlier row a repeated row draws.
 struct TraceSearch {
   uint32_t row, of;
   uint16_t move;

@@ -2272,7 +2272,7 @@ void Sizer::size_state(uint32_t i) {
     }
   }
   if (seats.w != INVALID) {
-    // The corner at its largest, so the grown box seats its pin whatever its arc.
+    // Seats inset from the corner arc at its largest.
     scav_rect const wide{ .x = 0, .y = 0, .w = COORD_MAX, .h = COORD_MAX };
     int32_t const arc{ state_corner_radius(sk, wide, pad) };
     w = imax(w, face_length(seats.w, arc, p));

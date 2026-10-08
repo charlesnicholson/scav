@@ -100,9 +100,8 @@ void size_natural(Chart const &c,
                   scav_profile const &p,
                   SizedLayout &z);
 
-// The state whose box, or whose border at a port, end `k` (0 src, 1 dst) of `seg` meets
-// in the state's parent frame; INVALID for an inner face, a frame inside it, or an inner
-// loop.
+// The state whose box, or border at a port, end `k` (0 src, 1 dst) of `seg` meets in that
+// state's parent frame; INVALID for an inner face, an inner loop, or a frame inside it.
 uint32_t size_end_state(Chart const &c,
                         SplitGraph const &g,
                         SplitSegment const &seg,
