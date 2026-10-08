@@ -186,15 +186,16 @@ void ortho_clear_occupied(PodVector<RouteNet> const &nets,
                           PodVector<scav_point> &at,
                           PodVector<int32_t> &stuck);
 
-// Reorders each INVALID-ended run of `groups` so no leg into a last bend crosses another's
-// run in; moves only last bends and ends, and leaves a run a move brings within `clear`.
-void ortho_order_arrivals(PodVector<RouteNet> const &nets,
-                          PodVector<scav_rect> const &boxes,
-                          int32_t clear,
-                          PodVector<uint32_t> const &groups,
-                          PodVector<scav_point> &points,
-                          PodVector<scav_span> const &spans,
-                          PodVector<scav_point> &at);
+// Reorders the ends of each INVALID-ended run of slots in `groups`, all on one face, so no
+// leg to an end's nearest bend crosses another end's leg; moves only those bends and ends,
+// and leaves a run a move brings within `clear` of a box.
+void ortho_order_attachments(PodVector<RouteNet> const &nets,
+                             PodVector<scav_rect> const &boxes,
+                             int32_t clear,
+                             PodVector<uint32_t> const &groups,
+                             PodVector<scav_point> &points,
+                             PodVector<scav_span> const &spans,
+                             PodVector<scav_point> &at);
 
 // `ortho_escape_box` off the smallest-area box strictly containing `at`, ties to the
 // lower index; `at` unchanged when inside none.

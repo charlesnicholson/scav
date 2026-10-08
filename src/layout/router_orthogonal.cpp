@@ -670,63 +670,44 @@ void ortho_spread_attachments(PodVector<scav_rect> const &boxes,
       uint32_t const count{ end - first };
       start = end;
       if (count < 2) { continue; }
-      uint32_t keep{ INVALID };  // the direction of the first level seat
-      for (uint32_t i = first; (i < end) && (keep == INVALID); ++i) {
-        if (level(seats[i])) { keep = seats[i].end; }
-      }
-      bool const alone{ (seats[end - 1].end == seats[first].end) && (keep == INVALID) };
-      if (alone && (seats[first].end == 0)) { continue; }
+      bool held{ false };  // a `level` seat is in the group
+      for (uint32_t i = first; i < end; ++i) { held = held || level(seats[i]); }
       FaceRun const run{ face_run(boxes[seats[first].box],
                                   seats[first].face,
                                   clear,
                                   table[seats[first].slot].arc) };
       Wide const room{ Wide{ run.len } - (Wide{ 2 } * run.inset) };
-      // Departures first, then arrivals in aim order.
+      // Departures first, then arrivals, each in aim order.
       scav_insertion_sort(seats.data() + first,
                           seats.data() + end,
                           [&](Spot const &a, Spot const &b) {
                             if (a.end != b.end) { return a.end < b.end; }
-                            return (a.end == 1) &&
-                                   lower_aim(
-                                       aim_offset(toward[a.slot], at[a.slot], a.face),
-                                       aim_offset(toward[b.slot], at[b.slot], b.face));
+                            return lower_aim(
+                                aim_offset(toward[a.slot], at[a.slot], a.face),
+                                aim_offset(toward[b.slot], at[b.slot], b.face));
                           });
-      if (alone) {
-        // Arrivals: `by` apart about the point, fitted to the face, low aims low.
+      std::array<int32_t, 2> ends{ 0, 0 };  // departures, arrivals
+      for (uint32_t i = first; i < end; ++i) { ++ends[seats[i].end]; }
+      bool const alone{ (ends[0] == 0) || (ends[1] == 0) };
+      // True when departures run + across this face; that side takes the lower seats.
+      bool const departures_low{ (seats[first].face == 1) || (seats[first].face == 3) };
+      if (!held) {
+        // One unit, a seat each a step apart: the side running + across the face low, each
+        // side in aim order, inside both faces of a straight net.
         Wide const gaps{ count - 1 };
-        Wide const by{ (room >= (gaps * apart)) ? apart : (room / gaps) };
+        Wide by{ (room >= apart) ? apart : imin(clear, run.len / 3) };
+        if (alone) { by = (room >= (gaps * apart)) ? apart : (room / gaps); }
         if (by <= 0) { continue; }
-        Wide const lo{ Wide{ run.lo } + run.inset };
-        Wide const from{
-          imax(lo, imin(seats[first].pos - ((gaps * by) / 2), lo + room - (gaps * by)))
-        };
-        for (uint32_t i = first; i < end; ++i) {
-          Wide const want{ from + (Wide{ i - first } * by) };
-          if (place(seats[i], onto_face(static_cast<int32_t>(want), run))) {
-            moved = true;
-          }
-        }
-        continue;
-      }
-      int32_t const step{ (room >= apart) ? apart : imin(clear, run.len / 3) };
-      if (step <= 0) { continue; }
-      if (keep == INVALID) {
-        // One unit: the side running + across the face low, its departures on one seat
-        // and its arrivals a step apart in aim order, inside both faces of a straight net.
-        bool const departures_low{ (seats[first].face == 1) || (seats[first].face == 3) };
-        int32_t arrivals{ 0 };
-        for (uint32_t i = first; i < end; ++i) { arrivals += (seats[i].end == 1) ? 1 : 0; }
+        int32_t const step{ static_cast<int32_t>(by) };
         int32_t const lo{ run.lo + run.inset };
         int32_t const hi{ (run.lo + run.len) - run.inset };
         members.clear();
-        int32_t rank{ 0 };
+        std::array<int32_t, 2> rank{ 0, 0 };
         for (uint32_t i = first; i < end; ++i) {
           Spot const &seat{ seats[i] };
-          int32_t k{ departures_low ? 0 : arrivals };
-          if (seat.end == 1) {
-            k = departures_low ? (1 + rank) : rank;
-            ++rank;
-          }
+          bool const low{ (seat.end == 0) == departures_low };
+          int32_t const k{ rank[seat.end] + (low ? 0 : ends[1U - seat.end]) };
+          ++rank[seat.end];
           std::array<int32_t, 2> const far{ tied(seat, lo, hi) };
           members.push_back({ .seat = i,
                               .k = k,
@@ -745,29 +726,22 @@ void ortho_spread_attachments(PodVector<scav_rect> const &boxes,
         }
         continue;
       }
-      // A `level` seat stays, as does a departure beside a level one, glyph-aimed aside.
-      auto const stays = [&](Spot const &seat) {
-        return level(seat) ||
-               ((seat.end == 0) && (keep == 0) && !table[seat.slot ^ 1U].inscribed);
-      };
-      int32_t movers{ 0 };  // arrivals that move
+      int32_t const step{ (room >= apart) ? apart : imin(clear, run.len / 3) };
+      if (step <= 0) { continue; }
+      // A `level` seat stays; the others step off it, each side a step apart in aim order.
+      std::array<int32_t, 2> movers{ 0, 0 };
       for (uint32_t i = first; i < end; ++i) {
-        if ((seats[i].end == 1) && !stays(seats[i])) { ++movers; }
+        if (!level(seats[i])) { ++movers[seats[i].end]; }
       }
-      int32_t rank{ 0 };  // of the next moving arrival, in aim order
+      std::array<int32_t, 2> rank{ 0, 0 };
       for (uint32_t i = first; i < end; ++i) {
         Spot const &seat{ seats[i] };
-        if (stays(seat)) { continue; }
-        // True when the net runs in + across this face; such a net takes the lower seat at
-        // both ends.
-        bool const forward{ (seat.end == 0) == ((seat.face == 1) || (seat.face == 3)) };
-        // Moving arrivals stack a step apart beyond the first, low aims low.
-        int32_t extra{ 0 };
-        if (seat.end == 1) {
-          extra = forward ? ((movers - 1) - rank) : rank;
-          ++rank;
-        }
-        int32_t const by{ (forward ? -1 : 1) * (step + (extra * step)) };
+        if (level(seat)) { continue; }
+        bool const low{ (seat.end == 0) == departures_low };
+        int32_t const extra{ low ? ((movers[seat.end] - 1) - rank[seat.end])
+                                 : rank[seat.end] };
+        ++rank[seat.end];
+        int32_t const by{ (low ? -1 : 1) * (step + (extra * step)) };
         int32_t got{ onto_face(seat.pos + by, run) };
         if (got == seat.pos) { got = onto_face(seat.pos - by, run); }  // clamped: reverse
         if (place(seat, got)) { moved = true; }
@@ -782,23 +756,25 @@ void ortho_spread_attachments(PodVector<scav_rect> const &boxes,
   }
 }
 
-SCAV_COLD void ortho_order_arrivals(PodVector<RouteNet> const &nets,
-                                    PodVector<scav_rect> const &boxes,
-                                    int32_t clear,
-                                    PodVector<uint32_t> const &groups,
-                                    PodVector<scav_point> &points,
-                                    PodVector<scav_span> const &spans,
-                                    PodVector<scav_point> &at) {
-  // A group's arrival whose last bend can slide along its leg: its route's last three
-  // points, the side that leg comes from, and the bend's distance out from the face.
-  struct Arrival {
-    uint32_t slot, end;  // `end` indexes the route's last point
+SCAV_COLD void ortho_order_attachments(PodVector<RouteNet> const &nets,
+                                       PodVector<scav_rect> const &boxes,
+                                       int32_t clear,
+                                       PodVector<uint32_t> const &groups,
+                                       PodVector<scav_point> &points,
+                                       PodVector<scav_span> const &spans,
+                                       PodVector<scav_point> &at) {
+  // A group's end whose bend nearest its box can slide along the leg out to it: the
+  // route's points from that end inward, the side that leg runs to, and the bend's
+  // distance out from the face.
+  struct Bent {
+    uint32_t slot;
+    std::array<uint32_t, 3> pt;  // the end, its bend, and the point past the bend
     int32_t side;
     Wide out;
-    int32_t from;  // the along-face coordinate of the point before the bend
-    bool inward;   // the leg into that point comes from nearer the face
+    int32_t from;  // the along-face coordinate of the point past the bend
+    bool inward;   // the leg on from that point runs back nearer the face
   };
-  thread_local PodVector<Arrival> moving;
+  thread_local PodVector<Bent> moving;
   thread_local PodVector<int32_t> seats;
   for (uint32_t start = 0; start < groups.size();) {
     uint32_t stop{ start };
@@ -808,15 +784,19 @@ SCAV_COLD void ortho_order_arrivals(PodVector<RouteNet> const &nets,
     moving.clear();
     seats.clear();
     uint32_t face{ INVALID };
-    bool whole{ true };  // every movable arrival sits on one face
+    bool whole{ true };  // every movable end sits on one face
     for (uint32_t i = first; i < stop; ++i) {
       uint32_t const slot{ groups[i] };
       scav_span const span{ spans[slot / 2] };
       if (span.len < 3) { continue; }
-      uint32_t const end{ (span.off + span.len) - 1 };
-      scav_point const a{ points[end - 2] };
-      scav_point const b{ points[end - 1] };
-      scav_point const e{ points[end] };
+      bool const head{ (slot % 2) == 0 };
+      // The route's `k`th point counted in from this end.
+      auto const in_from = [&](uint32_t k) {
+        return head ? (span.off + k) : ((span.off + span.len - 1) - k);
+      };
+      scav_point const e{ points[in_from(0)] };
+      scav_point const b{ points[in_from(1)] };
+      scav_point const a{ points[in_from(2)] };
       uint32_t const box{ ortho_box_at(e, boxes) };
       if (!same(e, at[slot]) || (box == INVALID)) { continue; }
       uint32_t const f{ face_of(e, boxes[box]) };
@@ -833,11 +813,11 @@ SCAV_COLD void ortho_order_arrivals(PodVector<RouteNet> const &nets,
       Wide const out{ along_y ? distance(b.x, e.x) : distance(b.y, e.y) };
       bool inward{ false };
       if (span.len >= 4) {
-        scav_point const lead{ points[end - 3] };
+        scav_point const lead{ points[in_from(3)] };
         inward = (along_y ? distance(lead.x, e.x) : distance(lead.y, e.y)) < out;
       }
       moving.push_back({ .slot = slot,
-                         .end = end,
+                         .pt = { in_from(0), in_from(1), in_from(2) },
                          .side = (a_along < b_along) ? -1 : 1,
                          .out = out,
                          .from = a_along,
@@ -849,7 +829,7 @@ SCAV_COLD void ortho_order_arrivals(PodVector<RouteNet> const &nets,
     // Low side first, nearest bend lowest; high side last, nearest bend highest. Of bends
     // on one line, the inward-led sit outermost, farther-off first if led outward.
     scav_stable_sort(seats, [](int32_t x, int32_t y) { return x < y; });
-    scav_stable_sort(moving, [](Arrival const &x, Arrival const &y) {
+    scav_stable_sort(moving, [](Bent const &x, Bent const &y) {
       if (x.side != y.side) { return x.side < y.side; }
       if (x.out != y.out) { return (x.side < 0) ? (x.out < y.out) : (x.out > y.out); }
       if (x.inward != y.inward) { return (x.side < 0) == x.inward; }
@@ -859,18 +839,22 @@ SCAV_COLD void ortho_order_arrivals(PodVector<RouteNet> const &nets,
     bool const along_y{ face < 2 };
     bool ok{ true };
     for (uint32_t k = 0; ok && (k < moving.size()); ++k) {
-      uint32_t const end{ moving[k].end };
-      RouteNet const &net{ nets[moving[k].slot / 2] };
-      scav_point const a{ points[end - 2] };
-      scav_point const b{ points[end - 1] };
-      scav_point const e{ points[end] };
+      Bent const &m{ moving[k] };
+      RouteNet const &net{ nets[m.slot / 2] };
+      scav_point const e{ points[m.pt[0]] };
+      scav_point const b{ points[m.pt[1]] };
+      scav_point const a{ points[m.pt[2]] };
       int32_t const to{ seats[k] };
       int32_t const a_along{ along_y ? a.y : a.x };
       ok = ((a_along < to) == (a_along < (along_y ? b.y : b.x))) && (a_along != to);
-      // A first leg out of a box keeps the ring the router seated it at.
-      if ((end - 2) == spans[moving[k].slot / 2].off) {
-        ok = ok && ((net.src_obstacle >= boxes.size()) ||
-                    (distance(a_along, to) >= imax(clear, net.src_clear)));
+      // A leg into the route's other end keeps the ring the router seated that end at.
+      scav_span const span{ spans[m.slot / 2] };
+      if (span.len == 3) {
+        bool const head{ (m.slot % 2) == 0 };
+        uint32_t const other{ head ? net.dst_obstacle : net.src_obstacle };
+        int32_t const keep{ head ? net.dst_clear : net.src_clear };
+        ok = ok &&
+             ((other >= boxes.size()) || (distance(a_along, to) >= imax(clear, keep)));
       }
       int32_t const lo{ imin(a_along, to) };
       int32_t const hi{ imax(a_along, to) };
@@ -888,9 +872,10 @@ SCAV_COLD void ortho_order_arrivals(PodVector<RouteNet> const &nets,
     if (!ok) { continue; }
     for (uint32_t k = 0; k < moving.size(); ++k) {
       int32_t const to{ seats[k] };
-      (along_y ? points[moving[k].end - 1].y : points[moving[k].end - 1].x) = to;
-      (along_y ? points[moving[k].end].y : points[moving[k].end].x) = to;
-      at[moving[k].slot] = points[moving[k].end];
+      for (uint32_t const i : { moving[k].pt[0], moving[k].pt[1] }) {
+        (along_y ? points[i].y : points[i].x) = to;
+      }
+      at[moving[k].slot] = points[moving[k].pt[0]];
     }
   }
 }
@@ -1606,8 +1591,8 @@ namespace {
 struct RouteScratch {
   PodVector<scav_rect> walls;
   PodVector<scav_point> lead, anchors, seat, toward, was, unspread;
-  PodVector<uint32_t> arrivals,
-      groups;  // `groups`: slots of each shared point, INVALID-ended
+  PodVector<uint32_t> ends,
+      groups;  // `groups`: slots of each face with a shared point, INVALID-ended
   PodVector<scav_span> net_anchors, net_lead, net_tail;
   OrthoGrid g, tight, open;  // `open` blocks boxes only
   PodVector<scav_rect> boxes;
@@ -2575,18 +2560,18 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
   }
   moved(SeatPass::Slide);
 
-  // The arrivals on each box face where two shared a point before the spread.
-  PodVector<uint32_t> &arrivals{ sc.arrivals };
-  arrivals.clear();
-  for (uint32_t slot = 1; slot < seats.size(); slot += 2) {
+  // The ends on each box face where two shared a point before the spread.
+  PodVector<uint32_t> &ends{ sc.ends };
+  ends.clear();
+  for (uint32_t slot = 0; slot < seats.size(); ++slot) {
     if ((seats[slot].box < in.obstacles.size()) && !seats[slot].inscribed) {
-      arrivals.push_back(slot);
+      ends.push_back(slot);
     }
   }
   auto const face_at_seat = [&](uint32_t slot) {
     return face_of(unspread[slot], in.obstacles[seats[slot].box]);
   };
-  scav_stable_sort(arrivals, [&](uint32_t x, uint32_t y) {
+  scav_stable_sort(ends, [&](uint32_t x, uint32_t y) {
     if (seats[x].box != seats[y].box) { return seats[x].box < seats[y].box; }
     if (face_at_seat(x) != face_at_seat(y)) { return face_at_seat(x) < face_at_seat(y); }
     if (unspread[x].x != unspread[y].x) { return unspread[x].x < unspread[y].x; }
@@ -2594,28 +2579,28 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
   });
   PodVector<uint32_t> &groups{ sc.groups };
   groups.clear();
-  for (uint32_t i = 0; i < arrivals.size();) {
+  for (uint32_t i = 0; i < ends.size();) {
     uint32_t j{ i + 1 };
     bool shared{ false };
-    while ((j < arrivals.size()) && (seats[arrivals[j]].box == seats[arrivals[i]].box) &&
-           (face_at_seat(arrivals[j]) == face_at_seat(arrivals[i]))) {
-      shared = shared || same(unspread[arrivals[j]], unspread[arrivals[j - 1]]);
+    while ((j < ends.size()) && (seats[ends[j]].box == seats[ends[i]].box) &&
+           (face_at_seat(ends[j]) == face_at_seat(ends[i]))) {
+      shared = shared || same(unspread[ends[j]], unspread[ends[j - 1]]);
       ++j;
     }
     if (shared) {
-      for (uint32_t k = i; k < j; ++k) { groups.push_back(arrivals[k]); }
+      for (uint32_t k = i; k < j; ++k) { groups.push_back(ends[k]); }
       groups.push_back(INVALID);
     }
     i = j;
   }
   was = seat;
-  ortho_order_arrivals(in.nets,
-                       in.obstacles,
-                       bumper,
-                       groups,
-                       out.points,
-                       out.net_points,
-                       seat);
+  ortho_order_attachments(in.nets,
+                          in.obstacles,
+                          bumper,
+                          groups,
+                          out.points,
+                          out.net_points,
+                          seat);
   moved(SeatPass::Order);
 }
 

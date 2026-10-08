@@ -1031,7 +1031,7 @@ TEST_CASE(
   Laid l{ laid_of({ { pt(800, 900), pt(800, 220), pt(1000, 220) },
                     { pt(900, 800), pt(900, 180), pt(1000, 180) } }) };
   PodVector<scav_point> at{ pt(800, 900), pt(1000, 220), pt(900, 800), pt(1000, 180) };
-  ortho_order_arrivals(into_box(2), boxes, 8, { 1, 3, INVALID }, l.points, l.spans, at);
+  ortho_order_attachments(into_box(2), boxes, 8, { 1, 3, INVALID }, l.points, l.spans, at);
   check_points(route_of(l, 0), { pt(800, 900), pt(800, 180), pt(1000, 180) });
   check_points(route_of(l, 1), { pt(900, 800), pt(900, 220), pt(1000, 220) });
   CHECK((at[1] == pt(1000, 180)));
@@ -1046,7 +1046,13 @@ TEST_CASE("ortho: arrivals from both sides part to their own sides, nearest oute
                     { pt(800, 900), pt(800, 140), pt(1000, 140) } }) };
   PodVector<scav_point> at{ pt(700, -500), pt(1000, 220), pt(900, -400),
                             pt(1000, 180), pt(800, 900),  pt(1000, 140) };
-  ortho_order_arrivals(into_box(3), boxes, 8, { 1, 3, 5, INVALID }, l.points, l.spans, at);
+  ortho_order_attachments(into_box(3),
+                          boxes,
+                          8,
+                          { 1, 3, 5, INVALID },
+                          l.points,
+                          l.spans,
+                          at);
   CHECK(at[3].y == 140);  // from above, nearest: the top seat
   CHECK(at[1].y == 180);
   CHECK(at[5].y == 220);  // from below: the bottom seat
@@ -1061,7 +1067,7 @@ TEST_CASE(
   Laid l{ laid_of({ { pt(500, -600), pt(900, -600), pt(900, 150), pt(1000, 150) },
                     { pt(980, -300), pt(900, -300), pt(900, 250), pt(1000, 250) } }) };
   PodVector<scav_point> at{ pt(500, -600), pt(1000, 150), pt(980, -300), pt(1000, 250) };
-  ortho_order_arrivals(into_box(2), boxes, 8, { 1, 3, INVALID }, l.points, l.spans, at);
+  ortho_order_attachments(into_box(2), boxes, 8, { 1, 3, INVALID }, l.points, l.spans, at);
   CHECK(at[3].y == 150);
   CHECK(at[1].y == 250);
 }
@@ -1073,7 +1079,13 @@ TEST_CASE("ortho: a straight arrival keeps its seat and the others order around 
                     { pt(800, 900), pt(800, 220), pt(1000, 220) } }) };
   PodVector<scav_point> at{ pt(900, 800),  pt(1000, 180), pt(200, 200),
                             pt(1000, 200), pt(800, 900),  pt(1000, 220) };
-  ortho_order_arrivals(into_box(3), boxes, 8, { 1, 3, 5, INVALID }, l.points, l.spans, at);
+  ortho_order_attachments(into_box(3),
+                          boxes,
+                          8,
+                          { 1, 3, 5, INVALID },
+                          l.points,
+                          l.spans,
+                          at);
   CHECK(at[3].y == 200);
   CHECK(at[1].y == 220);
   CHECK(at[5].y == 180);
@@ -1086,7 +1098,7 @@ TEST_CASE("ortho: a group is left whole when one reseated leg would enter a box"
                     { pt(900, 800), pt(900, 180), pt(1000, 180) } }) };
   Laid const before{ l };
   PodVector<scav_point> at{ pt(800, 900), pt(1000, 220), pt(900, 800), pt(1000, 180) };
-  ortho_order_arrivals(into_box(2), boxes, 8, { 1, 3, INVALID }, l.points, l.spans, at);
+  ortho_order_attachments(into_box(2), boxes, 8, { 1, 3, INVALID }, l.points, l.spans, at);
   check_points(l.points, before.points);
   CHECK((at[1] == pt(1000, 220)));
 }
@@ -1098,7 +1110,7 @@ TEST_CASE("ortho: a group is left whole when one reseated leg would run along a 
                     { pt(900, 800), pt(900, 180), pt(1000, 180) } }) };
   Laid const before{ l };
   PodVector<scav_point> at{ pt(800, 900), pt(1000, 220), pt(900, 800), pt(1000, 180) };
-  ortho_order_arrivals(into_box(2), boxes, 8, { 1, 3, INVALID }, l.points, l.spans, at);
+  ortho_order_attachments(into_box(2), boxes, 8, { 1, 3, INVALID }, l.points, l.spans, at);
   check_points(l.points, before.points);
 }
 
@@ -1111,8 +1123,50 @@ TEST_CASE("ortho: a group is left whole when a first leg would end inside its ri
                     { pt(900, 230), pt(900, 180), pt(1000, 180) } }) };
   Laid const before{ l };
   PodVector<scav_point> at{ pt(800, 900), pt(1000, 220), pt(900, 230), pt(1000, 180) };
-  ortho_order_arrivals(nets, boxes, 16, { 1, 3, INVALID }, l.points, l.spans, at);
+  ortho_order_attachments(nets, boxes, 16, { 1, 3, INVALID }, l.points, l.spans, at);
   check_points(l.points, before.points);
+}
+
+TEST_CASE(
+    "ortho: departures down from a face take seats outward in the order their bends "
+    "near") {
+  // Both leave the left face and go down; net 1's leg down, nearer the face, crosses net
+  // 0's run out until net 1 takes the seat further down.
+  PodVector<scav_rect> const boxes{ rect(1000, 0, 400, 400) };
+  PodVector<RouteNet> nets(2);
+  for (RouteNet &net : nets) { net.src_obstacle = 0; }
+  Laid l{ laid_of({ { pt(1000, 220), pt(800, 220), pt(800, 900) },
+                    { pt(1000, 180), pt(900, 180), pt(900, 800) } }) };
+  PodVector<scav_point> at{ pt(1000, 220), pt(800, 900), pt(1000, 180), pt(900, 800) };
+  ortho_order_attachments(nets, boxes, 8, { 0, 2, INVALID }, l.points, l.spans, at);
+  check_points(route_of(l, 0), { pt(1000, 180), pt(800, 180), pt(800, 900) });
+  check_points(route_of(l, 1), { pt(1000, 220), pt(900, 220), pt(900, 800) });
+  CHECK((at[0] == pt(1000, 180)));
+  CHECK((at[2] == pt(1000, 220)));
+}
+
+TEST_CASE("ortho: a round trip turning one corner each is seated so it does not cross") {
+  // Box 1 lies below and right of box 0: out of 0's right face, into 1's top, and back.
+  // Seated by direction alone the pair's legs cross; reseated, net 0 rounds net 1.
+  PodVector<scav_rect> const boxes{ rect(0, 0, 400, 400), rect(600, 600, 400, 400) };
+  PodVector<RouteNet> const nets{
+    { .src = pt(200, 200), .dst = pt(800, 800), .src_obstacle = 0, .dst_obstacle = 1 },
+    { .src = pt(800, 800), .dst = pt(200, 200), .src_obstacle = 1, .dst_obstacle = 0 },
+  };
+  Laid l{ laid_of({ { pt(400, 180), pt(780, 180), pt(780, 600) },
+                    { pt(820, 600), pt(820, 220), pt(400, 220) } }) };
+  PodVector<scav_point> at{ pt(400, 180), pt(780, 600), pt(820, 600), pt(400, 220) };
+  ortho_order_attachments(nets,
+                          boxes,
+                          8,
+                          { 0, 3, INVALID, 1, 2, INVALID },
+                          l.points,
+                          l.spans,
+                          at);
+  check_points(route_of(l, 0), { pt(400, 220), pt(780, 220), pt(780, 600) });
+  check_points(route_of(l, 1), { pt(820, 600), pt(820, 180), pt(400, 180) });
+  CHECK((at[0] == pt(400, 220)));
+  CHECK((at[3] == pt(400, 180)));
 }
 
 TEST_CASE("ortho: arrivals that crowd a short face part evenly between its insets") {
@@ -1143,16 +1197,37 @@ TEST_CASE("ortho: arrivals that crowd a short face part evenly between its inset
   }
 }
 
-TEST_CASE("ortho: departures sharing a seat keep it") {
+TEST_CASE(
+    "ortho: departures sharing a seat part in the order their aims lie along the face") {
+  // Three departures from one point of the left face take a seat each, a step apart.
   PodVector<scav_rect> const boxes{ rect(0, 0, 100, 100) };
   PodVector<RouteNet> const nets{
-    { .src = pt(50, 50), .dst = pt(-900, 10), .src_obstacle = 0 },
     { .src = pt(50, 50), .dst = pt(-900, 90), .src_obstacle = 0 },
+    { .src = pt(50, 50), .dst = pt(-900, 10), .src_obstacle = 0 },
+    { .src = pt(50, 50), .dst = pt(-900, 30), .src_obstacle = 0 },
   };
-  PodVector<scav_point> at{ pt(0, 50), pt(-900, 10), pt(0, 50), pt(-900, 90) };
+  PodVector<scav_point> at{ pt(0, 50),    pt(-900, 90), pt(0, 50),
+                            pt(-900, 10), pt(0, 50),    pt(-900, 30) };
   ortho_spread_attachments(boxes, seats_of(nets), aims(nets), 8, 0, at);
-  CHECK((at[0] == pt(0, 50)));
-  CHECK((at[2] == pt(0, 50)));
+  CHECK((at[2] == pt(0, 42)));
+  CHECK((at[4] == pt(0, 50)));
+  CHECK((at[0] == pt(0, 58)));
+}
+
+TEST_CASE("ortho: departures beside a port's level seat each take a step of their own") {
+  // A departure to a port level with the shared point stays; two more step off it.
+  PodVector<scav_rect> const boxes{ rect(1000, 0, 400, 500) };
+  PodVector<RouteNet> const nets{
+    { .src = pt(1200, 200), .dst = pt(-500, 200), .src_obstacle = 0 },
+    { .src = pt(1200, 200), .dst = pt(-500, 900), .src_obstacle = 0 },
+    { .src = pt(1200, 200), .dst = pt(-500, 950), .src_obstacle = 0 },
+  };
+  PodVector<scav_point> at{ pt(1000, 200), pt(-500, 200), pt(1000, 200),
+                            pt(-500, 900), pt(1000, 200), pt(-500, 950) };
+  ortho_spread_attachments(boxes, seats_of(nets), aims(nets), 8, 100, at);
+  CHECK(at[0].y == 200);
+  CHECK(at[2].y == 300);
+  CHECK(at[4].y == 400);
 }
 
 TEST_CASE("ortho: a leaning net seats its leg at the lower end of the shared run") {
@@ -1434,8 +1509,8 @@ TEST_CASE("ortho: seats do not depend on the order the nets arrive in") {
   PodVector<int32_t> const a{ run(false) };
   PodVector<int32_t> const b{ run(true) };
   CHECK(a == b);
-  // Both departures share one seat; the arrivals take one each above it, all about 50.
-  CHECK(a == PodVector<int32_t>{ 44, 52, 44, 60 });
+  // The departures take a seat each, the arrivals one each above them, all about 50.
+  CHECK(a == PodVector<int32_t>{ 38, 54, 46, 62 });
 }
 
 TEST_CASE("ortho: an equidistant escape is decided by the fixed side order") {
