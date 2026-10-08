@@ -884,7 +884,7 @@ namespace {
 // A Level 1 search's result: the best candidate reached, its cost, and its pins.
 struct Improved {
   SCAV_NOINLINE Improved();
-  SCAV_NOINLINE Improved(Improved const &);
+  Improved(Improved const &) = default;
   SCAV_NOINLINE Improved(Improved &&) noexcept;
   SCAV_NOINLINE Improved &operator=(Improved const &);
   SCAV_NOINLINE Improved &operator=(Improved &&) noexcept;
@@ -896,7 +896,6 @@ struct Improved {
   bool viable{ false };  // the start laid out
 };
 Improved::Improved() = default;
-Improved::Improved(Improved const &) = default;
 Improved::Improved(Improved &&) noexcept = default;
 Improved &Improved::operator=(Improved const &) = default;
 Improved &Improved::operator=(Improved &&) noexcept = default;
@@ -2998,7 +2997,7 @@ void search_key(scav_profile const &objective,
   key.clear();
   for (scav_profile const *const at : { &objective, &row.knobs }) {
     std::memcpy(words.data(), at, sizeof(scav_profile));
-    key.insert(key.end(), words.begin(), words.end());
+    key.insert(key.end(), words.data(), words.data() + words.size());
   }
   key.insert(key.end(),
              { static_cast<uint32_t>(row.dar),
