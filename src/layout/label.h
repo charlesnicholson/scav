@@ -10,9 +10,9 @@
 #include "scav/scav_core.h"
 #include "scav/scav_layout_c.h"
 #include "scav/scav_types.h"
+#include "scav_pod_vector.h"
 
 #include <cstdint>
-#include <vector>
 
 namespace scav {
 
@@ -32,10 +32,10 @@ uint32_t place_labels(Chart const &c,
                       SplitGraph const &g,
                       SizedLayout const &z,
                       scav_spaces const &s,
-                      std::vector<scav_span> const &route,
-                      std::vector<scav_point> const &points,
+                      PodVector<scav_span> const &route,
+                      PodVector<scav_point> const &points,
                       scav_profile const &p,
-                      std::vector<scav_rect> &out);
+                      PodVector<scav_rect> &out);
 
 }  // namespace scav
 

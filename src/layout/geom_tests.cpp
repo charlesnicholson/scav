@@ -3,6 +3,7 @@
 #include "layout/geom.h"
 #include "layout/partition.h"
 #include "layout/tests/pod_eq.h"
+#include "scav_pod_vector.h"
 
 #include "doctest.h"
 
@@ -114,14 +115,14 @@ namespace scav {
 
 namespace {
 
-bool scan_hits(std::vector<scav_rect> const &rects, scav_rect const &cand) {
+bool scan_hits(PodVector<scav_rect> const &rects, scav_rect const &cand) {
   for (scav_rect const &r : rects) {
     if (overlaps(cand, r)) { return true; }
   }
   return false;
 }
 
-bool grid_hits(RectGrid &g, std::vector<scav_rect> const &rects, scav_rect const &cand) {
+bool grid_hits(RectGrid &g, PodVector<scav_rect> const &rects, scav_rect const &cand) {
   return grid_visit(g, cand, 0, [&](uint32_t k) { return overlaps(cand, rects[k]); });
 }
 
@@ -132,8 +133,8 @@ uint32_t next(uint64_t &state) {
 }
 
 // Up to 60 rects inside `region`, a quarter of them zero-width and a quarter zero-height.
-std::vector<scav_rect> random_rects(uint64_t &seed, scav_rect const &region) {
-  std::vector<scav_rect> rects;
+PodVector<scav_rect> random_rects(uint64_t &seed, scav_rect const &region) {
+  PodVector<scav_rect> rects;
   uint32_t const n{ next(seed) % 60 };
   for (uint32_t i = 0; i < n; ++i) {
     int32_t const x{ region.x + static_cast<int32_t>(next(seed) % 12000) };
@@ -161,9 +162,9 @@ TEST_CASE("geom: a rect grid answers exactly what scanning every rect does") {
   // strictly inside the other's span.
   uint64_t seed{ 1 };
   scav_rect const region{ .x = -3000, .y = -2000, .w = 12000, .h = 7000 };
-  std::vector<uint32_t> cursor;
+  PodVector<uint32_t> cursor;
   for (uint32_t trial = 0; trial < 200; ++trial) {
-    std::vector<scav_rect> const rects{ random_rects(seed, region) };
+    PodVector<scav_rect> const rects{ random_rects(seed, region) };
     RectGrid g;
     int32_t const cw{ 1 + static_cast<int32_t>(next(seed) % 900) };
     int32_t const ch{ 1 + static_cast<int32_t>(next(seed) % 300) };
@@ -181,9 +182,9 @@ TEST_CASE("geom: a rect grid answers exactly what scanning every rect does") {
 TEST_CASE("geom: a rect grid visits each rect within the margin, and each once") {
   uint64_t seed{ 7 };
   scav_rect const region{ .x = -3000, .y = -2000, .w = 12000, .h = 7000 };
-  std::vector<uint32_t> cursor;
+  PodVector<uint32_t> cursor;
   for (uint32_t trial = 0; trial < 100; ++trial) {
-    std::vector<scav_rect> const rects{ random_rects(seed, region) };
+    PodVector<scav_rect> const rects{ random_rects(seed, region) };
     RectGrid g;
     int32_t const cw{ 1 + static_cast<int32_t>(next(seed) % 900) };
     int32_t const ch{ 1 + static_cast<int32_t>(next(seed) % 300) };
@@ -191,7 +192,7 @@ TEST_CASE("geom: a rect grid visits each rect within the margin, and each once")
     for (uint32_t q = 0; q < 100; ++q) {
       scav_rect const cand{ random_query(seed, region) };
       int32_t const margin{ static_cast<int32_t>(next(seed) % 600) };
-      std::vector<uint32_t> visits(rects.size(), 0);
+      PodVector<uint32_t> visits(rects.size(), 0);
       CHECK_FALSE(grid_visit(g, cand, margin, [&visits](uint32_t k) {
         ++visits[k];
         return false;
@@ -208,9 +209,9 @@ TEST_CASE("geom: a rect grid visits each rect within the margin, and each once")
 
 TEST_CASE("geom: a rect grid caps its cells, however small it is asked to make them") {
   RectGrid g;
-  std::vector<uint32_t> cursor;
+  PodVector<uint32_t> cursor;
   scav_rect const region{ .x = 0, .y = 0, .w = 1'000'000, .h = 1'000'000 };
-  std::vector<scav_rect> const one{ { .x = 10, .y = 10, .w = 5, .h = 5 } };
+  PodVector<scav_rect> const one{ { .x = 10, .y = 10, .w = 5, .h = 5 } };
   grid_build(g, region, one, 1, 1, cursor);
   CHECK(g.nx <= GRID_SIDE);
   CHECK(g.ny <= GRID_SIDE);

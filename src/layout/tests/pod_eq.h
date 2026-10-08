@@ -6,7 +6,6 @@
 #include "scav/scav_layout_c.h"
 
 #include <cstdint>
-#include <vector>
 
 namespace scav {
 
@@ -28,8 +27,8 @@ constexpr bool operator==(scav_port_slot const &a, scav_port_slot const &b) {
 }
 
 // Element-wise equality of two vectors of C structs, by the operators above.
-template <typename T>
-bool same_rows(std::vector<T> const &a, std::vector<T> const &b) {
+template <typename V>
+bool same_rows(V const &a, V const &b) {
   if (a.size() != b.size()) { return false; }
   for (uint32_t i = 0; i < a.size(); ++i) {
     if (!(a[i] == b[i])) { return false; }

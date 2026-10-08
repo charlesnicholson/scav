@@ -8,6 +8,7 @@
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
 #include "scav/scav_layout_c.h"
+#include "scav_pod_vector.h"
 
 #include "core/tests/corpus.h"
 #include "doctest.h"
@@ -24,19 +25,19 @@
 
 namespace scav {
 
-void search_table(scav_profile const &p, std::vector<uint32_t> &rows);
+void search_table(scav_profile const &p, PodVector<uint32_t> &rows);
 Row search_row(scav_profile const &p, uint32_t index);
-void kick_order(std::vector<uint32_t> &rest,
-                std::vector<Cost> const &cost,
-                std::vector<int64_t> const &jit);
+void kick_order(PodVector<uint32_t> &rest,
+                PodVector<Cost> const &cost,
+                PodVector<int64_t> const &jit);
 void search_changes(Chart const &c,
                     SizedLayout const &was,
                     Routes const &was_routes,
                     SizedLayout const &now,
                     Routes const &now_routes,
-                    std::vector<uint8_t> &frame,
-                    std::vector<uint8_t> &route,
-                    std::vector<uint8_t> &resized);
+                    PodVector<uint8_t> &frame,
+                    PodVector<uint8_t> &route,
+                    PodVector<uint8_t> &resized);
 void layout_test_dont_look_verify(bool on);
 uint64_t layout_test_dont_look_checked();
 uint64_t layout_test_dont_look_mismatches();
@@ -85,7 +86,7 @@ struct Laid {
   uint32_t structural{ 0 };
   uint32_t coordinate{ 0 };
   uint32_t tuple{ INVALID };
-  std::vector<uint32_t> pins;
+  PodVector<uint32_t> pins;
   uint64_t offered{ 0 };
   uint64_t taken{ 0 };
   uint64_t skipped{ 0 };
@@ -93,8 +94,8 @@ struct Laid {
 };
 
 // Every pin as words, in `SearchPins` order.
-std::vector<uint32_t> words_of(SearchPins const &p) {
-  std::vector<uint32_t> w;
+PodVector<uint32_t> words_of(SearchPins const &p) {
+  PodVector<uint32_t> w;
   for (RankPin const &r : p.ranks) { w.insert(w.end(), { 0, r.state.v, r.rank }); }
   for (ChainCut const &k : p.cuts) { w.insert(w.end(), { 1, k.trans.v, k.leg }); }
   for (ReversePin const &r : p.reverses) { w.insert(w.end(), { 2, r.trans.v, r.leg }); }
@@ -121,8 +122,8 @@ Chart loaded(char const *name) {
 }
 
 // A path box on every routed transition, so a layout places labels.
-std::vector<scav_path_box> label_boxes(Chart const &c) {
-  std::vector<scav_path_box> boxes;
+PodVector<scav_path_box> label_boxes(Chart const &c) {
+  PodVector<scav_path_box> boxes;
   for (uint32_t t = 0; t < c.transitions.size(); ++t) {
     Transition const &tr{ c.transitions[t] };
     if ((tr.live == 0) || ((tr.src == tr.dst) && (tr.kind != TransKind::Default))) {
@@ -135,7 +136,7 @@ std::vector<scav_path_box> label_boxes(Chart const &c) {
 
 Laid lay(char const *name, scav_profile const &p, bool labelled, uint32_t threads = 0) {
   Chart c{ loaded(name) };
-  std::vector<scav_path_box> boxes;
+  PodVector<scav_path_box> boxes;
   if (labelled) { boxes = label_boxes(c); }
   scav_spaces const s{ .box_state_stride = sizeof(scav_box_space),
                        .path_box = boxes.data(),
@@ -197,23 +198,23 @@ std::vector<TraceEvent> outline(char const *name, scav_profile const &p) {
 
 TEST_CASE("search: the culled table is the first portfolio_m rows less compaction") {
   scav_profile p{ readable() };
-  std::vector<uint32_t> rows;
+  PodVector<uint32_t> rows;
   search_table(p, rows);
   CHECK(rows ==
-        std::vector<uint32_t>{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 });
+        PodVector<uint32_t>{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 });
   p.portfolio_m = 4;
   search_table(p, rows);
-  CHECK(rows == std::vector<uint32_t>{ 0, 1, 2, 3 });
+  CHECK(rows == PodVector<uint32_t>{ 0, 1, 2, 3 });
 
   p.search_cull = 1;
   search_table(p, rows);
-  CHECK(rows == std::vector<uint32_t>{ 0, 1 });
+  CHECK(rows == PodVector<uint32_t>{ 0, 1 });
   p.portfolio_m = 1;
   search_table(p, rows);
-  CHECK(rows == std::vector<uint32_t>{ 0 });
+  CHECK(rows == PodVector<uint32_t>{ 0 });
   p.portfolio_m = 16;
   search_table(p, rows);
-  CHECK(rows == std::vector<uint32_t>{ 0, 1, 4, 5, 8, 9, 12, 13 });
+  CHECK(rows == PodVector<uint32_t>{ 0, 1, 4, 5, 8, 9, 12, 13 });
   for (uint32_t const r : rows) {
     CAPTURE(r);
     CHECK((search_row(p, r).pack == Compaction::Off));
@@ -243,7 +244,7 @@ TEST_CASE("search: the culled search kicks the kick_rows rows cheapest after the
     // Every compaction-free row searched once, and none of the others.
     CHECK(first.size() == 8);
     for (auto const &[row, cost] : first) { CHECK((row & 2U) == 0); }
-    std::vector<uint32_t> want;
+    PodVector<uint32_t> want;
     for (auto const &[row, cost] : first) {
       if (!repeated.contains(row)) { want.push_back(row); }
     }
@@ -302,17 +303,17 @@ TEST_CASE("search: search_changes flags the frames, routes and extents that move
                         { .x = 45, .y = 10 } };
   was_routes.route = { { .off = 0, .len = 2 }, { .off = 2, .len = 2 } };
 
-  std::vector<uint8_t> frame;
-  std::vector<uint8_t> route;
-  std::vector<uint8_t> resized;
+  PodVector<uint8_t> frame;
+  PodVector<uint8_t> route;
+  PodVector<uint8_t> resized;
   auto const changes = [&](SizedLayout const &now, Routes const &now_routes) {
     search_changes(c, was, was_routes, now, now_routes, frame, route, resized);
   };
 
   changes(was, was_routes);
-  CHECK(frame == std::vector<uint8_t>{ 0, 0 });
-  CHECK(route == std::vector<uint8_t>{ 0, 0 });
-  CHECK(resized == std::vector<uint8_t>{ 0, 0, 0, 0 });
+  CHECK(frame == PodVector<uint8_t>{ 0, 0 });
+  CHECK(route == PodVector<uint8_t>{ 0, 0 });
+  CHECK(resized == PodVector<uint8_t>{ 0, 0, 0, 0 });
 
   // D moves inside B: B's frame and nothing else.
   SizedLayout moved{ was };
@@ -485,7 +486,7 @@ TEST_CASE("search: the bounds laid out afresh for the bits are counted" *
 TEST_CASE("search: a traced culled search draws what the untraced one ships" *
           doctest::test_suite("full")) {
   Chart traced{ loaded("dock.scav") };
-  std::vector<scav_path_box> const boxes{ label_boxes(traced) };
+  PodVector<scav_path_box> const boxes{ label_boxes(traced) };
   scav_spaces const s{ .box_state_stride = sizeof(scav_box_space),
                        .path_box = boxes.data(),
                        .n_path_box = static_cast<uint32_t>(boxes.size()),
@@ -514,16 +515,16 @@ TEST_CASE("search: a traced culled search draws what the untraced one ships" *
 }
 
 TEST_CASE("search: kicks stacked after a round's pick rank by cost plus jitter") {
-  std::vector<Cost> const cost{ { .t0_violations = 0, .t1_hints = 0, .t2 = 100 },
-                                { .t0_violations = 0, .t1_hints = 0, .t2 = 101 },
-                                { .t0_violations = 0, .t1_hints = 0, .t2 = 102 },
-                                { .t0_violations = 0, .t1_hints = 0, .t2 = 101 } };
-  std::vector<uint32_t> rest{ 3, 0, 1, 2 };
+  PodVector<Cost> const cost{ { .t0_violations = 0, .t1_hints = 0, .t2 = 100 },
+                              { .t0_violations = 0, .t1_hints = 0, .t2 = 101 },
+                              { .t0_violations = 0, .t1_hints = 0, .t2 = 102 },
+                              { .t0_violations = 0, .t1_hints = 0, .t2 = 101 } };
+  PodVector<uint32_t> rest{ 3, 0, 1, 2 };
   kick_order(rest, cost, { 0, 0, 0, 0 });
-  CHECK(rest == std::vector<uint32_t>{ 0, 3, 1, 2 });  // ties keep their order
+  CHECK(rest == PodVector<uint32_t>{ 0, 3, 1, 2 });  // ties keep their order
   rest = { 0, 1, 2, 3 };
   kick_order(rest, cost, { 5, 0, 0, 3 });
-  CHECK(rest == std::vector<uint32_t>{ 1, 2, 3, 0 });
+  CHECK(rest == PodVector<uint32_t>{ 1, 2, 3, 0 });
 }
 
 TEST_CASE("search: a jitter seed draws one drawing at every thread count") {

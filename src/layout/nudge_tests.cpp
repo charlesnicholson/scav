@@ -5,6 +5,7 @@
 #include "layout/geom.h"
 #include "layout/tests/trace_record.h"
 #include "layout/trace.h"
+#include "scav_pod_vector.h"
 
 #include "scav_int.h"
 
@@ -26,8 +27,8 @@ scav_rect rect(int32_t x, int32_t y, int32_t w, int32_t h) {
 
 // Two nets sharing the interior segment (0,y)-(200,y), with a leg at either end.
 struct Lane {
-  std::vector<scav_point> points;
-  std::vector<scav_span> nets;
+  PodVector<scav_point> points;
+  PodVector<scav_span> nets;
 };
 
 Lane two_over(int32_t y) {
@@ -42,13 +43,13 @@ int32_t lane_y(Lane const &l, uint32_t net) { return l.points[l.nets[net].off + 
 
 // One net per polyline, laid end to end in one point list.
 struct Frame {
-  std::vector<scav_point> points;
-  std::vector<scav_span> nets;
+  PodVector<scav_point> points;
+  PodVector<scav_span> nets;
 };
 
-Frame frame_of(std::vector<std::vector<scav_point>> const &lines) {
+Frame frame_of(std::vector<PodVector<scav_point>> const &lines) {
   Frame f;
-  for (std::vector<scav_point> const &line : lines) {
+  for (PodVector<scav_point> const &line : lines) {
     f.nets.push_back({ .off = static_cast<uint32_t>(f.points.size()),
                        .len = static_cast<uint32_t>(line.size()) });
     for (scav_point const &at : line) { f.points.push_back(at); }
@@ -62,16 +63,15 @@ scav_point net_pt(Frame const &f, uint32_t net, uint32_t k) {
 
 // One frame's box repeated for every net it routes, which is what a per-frame
 // call passes; the chart-wide pass gives each net its own.
-std::vector<scav_rect> bounds_of(scav_rect const &box,
-                                 std::vector<scav_span> const &nets) {
-  std::vector<scav_rect> every(nets.size(), box);
+PodVector<scav_rect> bounds_of(scav_rect const &box, PodVector<scav_span> const &nets) {
+  PodVector<scav_rect> every(nets.size(), box);
   return every;
 }
 
 // Far enough out that only the obstacles bound a fixture.
 scav_rect const OPEN{ rect(-1000, -1000, 3000, 3000) };
 
-bool same(std::vector<scav_point> const &a, std::vector<scav_point> const &b) {
+bool same(PodVector<scav_point> const &a, PodVector<scav_point> const &b) {
   if (a.size() != b.size()) { return false; }
   for (size_t i = 0; i < a.size(); ++i) {
     if ((a[i].x != b[i].x) || (a[i].y != b[i].y)) { return false; }
@@ -91,12 +91,12 @@ struct Tally {
 
 // Runs `nudge_lanes` with a trace sink attached and counts its events.
 Tally nudge(scav_rect const &region,
-            std::vector<scav_rect> const &bounds,
-            std::vector<scav_rect> const &obstacles,
+            PodVector<scav_rect> const &bounds,
+            PodVector<scav_rect> const &obstacles,
             int32_t gap,
             int32_t clear,
-            std::vector<scav_span> const &nets,
-            std::vector<scav_point> &points) {
+            PodVector<scav_span> const &nets,
+            PodVector<scav_point> &points) {
   TraceRecord t;
   trace_sink_set(&t);
   nudge_lanes(region, bounds, obstacles, gap, clear, 0, nets, points);
@@ -213,7 +213,7 @@ TEST_CASE("nudge: a lane two coordinates wide spreads by the pitch, not past it"
 TEST_CASE("nudge: a lane with no room keeps its members stacked") {
   // Boxes on both sides touch the lane at y=100: no room either way.
   Lane l{ two_over(100) };
-  std::vector<scav_rect> const walls{ rect(0, 0, 200, 100), rect(0, 100, 200, 100) };
+  PodVector<scav_rect> const walls{ rect(0, 0, 200, 100), rect(0, 100, 200, 100) };
   Tally const s{ nudge(OPEN, bounds_of(OPEN, l.nets), walls, 48, 0, l.nets, l.points) };
 
   CHECK(s.lanes == 1);
@@ -226,7 +226,7 @@ TEST_CASE("nudge: a lane with no room keeps its members stacked") {
 TEST_CASE("nudge: a lane with room on one side only slides onto that side") {
   // A box touches the lane from above: the members spread downward from y=100.
   Lane l{ two_over(100) };
-  std::vector<scav_rect> const wall{ rect(0, 0, 200, 100) };
+  PodVector<scav_rect> const wall{ rect(0, 0, 200, 100) };
   Tally const s{ nudge(OPEN, bounds_of(OPEN, l.nets), wall, 48, 0, l.nets, l.points) };
 
   CHECK(s.spread == 1);
@@ -244,7 +244,7 @@ TEST_CASE("nudge: clearance is kept, so a displacement never ends up flush") {
   // `clear` 48 below a box ending at y=40 bounds the lane at y=88; a centred 48 step
   // would put the upper member at 76.
   Lane l{ two_over(100) };
-  std::vector<scav_rect> const wall{ rect(0, 0, 200, 40) };
+  PodVector<scav_rect> const wall{ rect(0, 0, 200, 40) };
   nudge_lanes(OPEN, bounds_of(OPEN, l.nets), wall, 48, 48, 0, l.nets, l.points);
   for (uint32_t net = 0; net < 2; ++net) { CHECK(lane_y(l, net) >= 88); }
 }
@@ -253,7 +253,7 @@ TEST_CASE("nudge: a displacement never drags a leg onto a box's border") {
   // The box's left side lies on x=200, the line of the lane's right legs; moving the upper
   // member up 48, half the pitch, runs its leg 18 units along that side.
   Lane l{ two_over(100) };
-  std::vector<scav_rect> const wall{ rect(200, 30, 100, 40) };
+  PodVector<scav_rect> const wall{ rect(200, 30, 100, 40) };
   nudge_lanes(OPEN, bounds_of(OPEN, l.nets), wall, 96, 0, 0, l.nets, l.points);
 
   CHECK(lane_y(l, 0) != lane_y(l, 1));
@@ -271,7 +271,7 @@ TEST_CASE("nudge: the step shrinks to the room rather than being refused") {
   // Room is 19 either side, one unit short of each box: the step is 38 of the 480
   // asked for.
   Lane l{ two_over(100) };
-  std::vector<scav_rect> const walls{ rect(0, 0, 200, 80), rect(0, 120, 200, 80) };
+  PodVector<scav_rect> const walls{ rect(0, 0, 200, 80), rect(0, 120, 200, 80) };
   Tally const s{ nudge(OPEN, bounds_of(OPEN, l.nets), walls, 480, 0, l.nets, l.points) };
 
   CHECK(s.spread == 1);
@@ -302,11 +302,11 @@ TEST_CASE("nudge: the region bounds a lane the obstacles do not") {
 
 TEST_CASE("nudge: an end segment is left alone, having a border to hold") {
   // Three points is one interior-free polyline: both segments touch an end.
-  std::vector<scav_point> points{ pt(0, 100), pt(200, 100), pt(200, 300),
-                                  pt(0, 100), pt(200, 100), pt(200, 500) };
-  std::vector<scav_span> const nets{ scav_span{ .off = 0, .len = 3 },
-                                     scav_span{ .off = 3, .len = 3 } };
-  std::vector<scav_point> const before{ points };
+  PodVector<scav_point> points{ pt(0, 100), pt(200, 100), pt(200, 300),
+                                pt(0, 100), pt(200, 100), pt(200, 500) };
+  PodVector<scav_span> const nets{ scav_span{ .off = 0, .len = 3 },
+                                   scav_span{ .off = 3, .len = 3 } };
+  PodVector<scav_point> const before{ points };
   Tally const s{ nudge(OPEN, bounds_of(OPEN, nets), {}, 48, 0, nets, points) };
   CHECK(s.lanes == 0);
   CHECK(s.moved == 0);
@@ -315,11 +315,11 @@ TEST_CASE("nudge: an end segment is left alone, having a border to hold") {
 
 TEST_CASE("nudge: nets that only touch at a point are not one lane") {
   // Collinear segments on y=100 over x [0,100] and [200,300], 100 apart.
-  std::vector<scav_point> points{ pt(0, 0),     pt(0, 100),   pt(100, 100), pt(100, 300),
-                                  pt(200, 400), pt(200, 100), pt(300, 100), pt(300, 500) };
-  std::vector<scav_span> const nets{ scav_span{ .off = 0, .len = 4 },
-                                     scav_span{ .off = 4, .len = 4 } };
-  std::vector<scav_point> const before{ points };
+  PodVector<scav_point> points{ pt(0, 0),     pt(0, 100),   pt(100, 100), pt(100, 300),
+                                pt(200, 400), pt(200, 100), pt(300, 100), pt(300, 500) };
+  PodVector<scav_span> const nets{ scav_span{ .off = 0, .len = 4 },
+                                   scav_span{ .off = 4, .len = 4 } };
+  PodVector<scav_point> const before{ points };
   Tally const s{ nudge(OPEN, bounds_of(OPEN, nets), {}, 48, 0, nets, points) };
   CHECK(s.lanes == 0);
   CHECK(same(points, before));
@@ -330,7 +330,7 @@ TEST_CASE("nudge: a displacement that would enter a box is dropped, not clamped"
   // its falling legs would then cross the box, so net 1 stays at y=150.
   Frame f{ frame_of({ { pt(0, 0), pt(0, 100), pt(200, 100), pt(200, 0) },
                       { pt(0, 300), pt(0, 150), pt(200, 150), pt(200, 300) } }) };
-  std::vector<scav_rect> const walls{ rect(-50, 120, 300, 10) };
+  PodVector<scav_rect> const walls{ rect(-50, 120, 300, 10) };
   nudge_lanes(OPEN, bounds_of(OPEN, f.nets), walls, 160, 0, 0, f.nets, f.points);
   CHECK(net_pt(f, 0, 1).y == 1);
   CHECK(net_pt(f, 1, 1).y == 150);
@@ -346,7 +346,7 @@ TEST_CASE("nudge: the same input twice is the same output") {
   Lane a{ two_over(100) };
   Lane b{ two_over(100) };
   // The same nets offered in the other order; the keys read points, not net order.
-  std::vector<scav_span> const swapped{ b.nets[1], b.nets[0] };
+  PodVector<scav_span> const swapped{ b.nets[1], b.nets[0] };
   Tally const sa{ nudge(OPEN, bounds_of(OPEN, a.nets), {}, 48, 0, a.nets, a.points) };
   Tally const sb{ nudge(OPEN, bounds_of(OPEN, swapped), {}, 48, 0, swapped, b.points) };
   CHECK(same(a.points, b.points));
@@ -355,7 +355,7 @@ TEST_CASE("nudge: the same input twice is the same output") {
 
 TEST_CASE("nudge: a gap of nothing is a stage that does nothing") {
   Lane l{ two_over(100) };
-  std::vector<scav_point> const before{ l.points };
+  PodVector<scav_point> const before{ l.points };
   Tally const s{ nudge(OPEN, bounds_of(OPEN, l.nets), {}, 0, 0, l.nets, l.points) };
   CHECK(same(l.points, before));
   CHECK(s.lanes == 0);
@@ -364,10 +364,10 @@ TEST_CASE("nudge: a gap of nothing is a stage that does nothing") {
 TEST_CASE("nudge: the lane sizes to the shortest leg it has to drag") {
   // Net 0 reaches the lane over a leg of 9, which caps its move up at 8; the lane
   // slides down to fit.
-  std::vector<scav_point> points{ pt(0, 91),  pt(0, 100), pt(200, 100), pt(200, 300),
-                                  pt(0, 300), pt(0, 100), pt(200, 100), pt(200, 500) };
-  std::vector<scav_span> const nets{ scav_span{ .off = 0, .len = 4 },
-                                     scav_span{ .off = 4, .len = 4 } };
+  PodVector<scav_point> points{ pt(0, 91),  pt(0, 100), pt(200, 100), pt(200, 300),
+                                pt(0, 300), pt(0, 100), pt(200, 100), pt(200, 500) };
+  PodVector<scav_span> const nets{ scav_span{ .off = 0, .len = 4 },
+                                   scav_span{ .off = 4, .len = 4 } };
   Tally const s{ nudge(OPEN, bounds_of(OPEN, nets), {}, 48, 0, nets, points) };
 
   CHECK(s.moved == 2);
@@ -394,11 +394,11 @@ TEST_CASE("nudge: the frame's own box bounds a lane the obstacles do not") {
 
 TEST_CASE("nudge: a lane inside a box's bumper may not close on the box") {
   // The lane sits 40 above a box, 8 inside its 48 bumper: no room towards the box.
-  std::vector<scav_point> points{ pt(0, -400), pt(0, 100), pt(200, 100), pt(200, -300),
-                                  pt(0, -600), pt(0, 100), pt(200, 100), pt(200, -500) };
-  std::vector<scav_span> const nets{ scav_span{ .off = 0, .len = 4 },
-                                     scav_span{ .off = 4, .len = 4 } };
-  std::vector<scav_rect> const wall{ rect(0, 140, 200, 100) };
+  PodVector<scav_point> points{ pt(0, -400), pt(0, 100), pt(200, 100), pt(200, -300),
+                                pt(0, -600), pt(0, 100), pt(200, 100), pt(200, -500) };
+  PodVector<scav_span> const nets{ scav_span{ .off = 0, .len = 4 },
+                                   scav_span{ .off = 4, .len = 4 } };
+  PodVector<scav_rect> const wall{ rect(0, 140, 200, 100) };
   Tally const s{ nudge(OPEN, bounds_of(OPEN, nets), wall, 200, 48, nets, points) };
 
   CHECK(s.moved == 1);
@@ -409,13 +409,13 @@ TEST_CASE("nudge: a lane inside a box's bumper may not close on the box") {
 TEST_CASE("nudge: a vertical lane is measured after the horizontal one has moved") {
   // The y=100 move extends net 1's leg at x=300 down to y=124; the box at y 105..120 is
   // beside the vertical lane only over that new extent.
-  std::vector<scav_point> points{ pt(0, 0),      pt(0, 100),    pt(300, 100),
-                                  pt(300, -400), pt(500, -400), pt(500, -900),
-                                  pt(0, 900),    pt(0, 100),    pt(300, 100),
-                                  pt(300, -500), pt(500, -500), pt(500, -1000) };
-  std::vector<scav_span> const nets{ scav_span{ .off = 0, .len = 6 },
-                                     scav_span{ .off = 6, .len = 6 } };
-  std::vector<scav_rect> const wall{ rect(320, 105, 80, 15) };
+  PodVector<scav_point> points{
+    pt(0, 0),   pt(0, 100), pt(300, 100), pt(300, -400), pt(500, -400), pt(500, -900),
+    pt(0, 900), pt(0, 100), pt(300, 100), pt(300, -500), pt(500, -500), pt(500, -1000)
+  };
+  PodVector<scav_span> const nets{ scav_span{ .off = 0, .len = 6 },
+                                   scav_span{ .off = 6, .len = 6 } };
+  PodVector<scav_rect> const wall{ rect(320, 105, 80, 15) };
   Tally const s{ nudge(OPEN, bounds_of(OPEN, nets), wall, 48, 0, nets, points) };
 
   CHECK(s.lanes == 2);
@@ -445,12 +445,12 @@ TEST_CASE("nudge: a segment an earlier lane moved blocks a later lane from its l
 
 TEST_CASE("nudge: a displacement onto another net's segment is refused") {
   // Net 1's move down 24 would lay its segment on net 2 at y=124, so net 1 stays.
-  std::vector<scav_point> points{ pt(0, 0),   pt(0, 100),  pt(200, 100), pt(200, 300),
-                                  pt(0, 400), pt(0, 100),  pt(200, 100), pt(200, 500),
-                                  pt(0, 124), pt(200, 124) };
-  std::vector<scav_span> const nets{ scav_span{ .off = 0, .len = 4 },
-                                     scav_span{ .off = 4, .len = 4 },
-                                     scav_span{ .off = 8, .len = 2 } };
+  PodVector<scav_point> points{ pt(0, 0),   pt(0, 100),  pt(200, 100), pt(200, 300),
+                                pt(0, 400), pt(0, 100),  pt(200, 100), pt(200, 500),
+                                pt(0, 124), pt(200, 124) };
+  PodVector<scav_span> const nets{ scav_span{ .off = 0, .len = 4 },
+                                   scav_span{ .off = 4, .len = 4 },
+                                   scav_span{ .off = 8, .len = 2 } };
   Tally const s{ nudge(OPEN, bounds_of(OPEN, nets), {}, 48, 0, nets, points) };
 
   CHECK(s.lanes == 1);
@@ -652,7 +652,7 @@ TEST_CASE("nudge: a bundle a box leaves no room for stays where it is") {
   Frame f{ frame_of({ { pt(0, 0), pt(0, 100), pt(200, 100), pt(200, 300) },
                       { pt(0, 50), pt(0, 100), pt(200, 100), pt(200, 300) },
                       { pt(0, 400), pt(0, 100), pt(200, 100), pt(200, 500) } }) };
-  std::vector<scav_rect> const walls{ rect(0, 0, 200, 100), rect(0, 100, 200, 100) };
+  PodVector<scav_rect> const walls{ rect(0, 0, 200, 100), rect(0, 100, 200, 100) };
   Tally const s{ nudge(OPEN, bounds_of(OPEN, f.nets), walls, 48, 0, f.nets, f.points) };
 
   CHECK(s.bundles == 1);
@@ -666,7 +666,7 @@ TEST_CASE("nudge: bundles do not depend on the order the nets arrive in") {
                       { pt(0, 50), pt(0, 100), pt(200, 100), pt(200, 300) },
                       { pt(0, 400), pt(0, 100), pt(200, 100), pt(200, 500) } }) };
   Frame b{ a };
-  std::vector<scav_span> const shuffled{ b.nets[2], b.nets[0], b.nets[1] };
+  PodVector<scav_span> const shuffled{ b.nets[2], b.nets[0], b.nets[1] };
   Tally const sa{ nudge(OPEN, bounds_of(OPEN, a.nets), {}, 48, 0, a.nets, a.points) };
   Tally const sb{ nudge(OPEN, bounds_of(OPEN, shuffled), {}, 48, 0, shuffled, b.points) };
   CHECK(same(a.points, b.points));
@@ -759,7 +759,7 @@ TEST_CASE("nudge: a lane the votes reorder counts as one whatever the room says"
   // `reordered` counts it and `spread` does not.
   Frame f{ frame_of({ { pt(0, 0), pt(0, 100), pt(200, 100), pt(200, 300) },
                       { pt(100, 50), pt(100, 100), pt(300, 100), pt(300, 400) } }) };
-  std::vector<scav_rect> const walls{ rect(0, 0, 300, 100), rect(0, 100, 300, 100) };
+  PodVector<scav_rect> const walls{ rect(0, 0, 300, 100), rect(0, 100, 300, 100) };
   Tally const s{ nudge(OPEN, bounds_of(OPEN, f.nets), walls, 48, 0, f.nets, f.points) };
 
   CHECK(s.lanes == 1);
@@ -772,7 +772,7 @@ namespace {
 
 // Three members on y=100 whose crossing votes form a cycle; the first net carries two
 // of them, both with legs at x=200.
-std::vector<std::vector<scav_point>> cyclic_lane() {
+std::vector<PodVector<scav_point>> cyclic_lane() {
   return { { pt(100, 400),
              pt(100, 100),
              pt(200, 100),
@@ -811,7 +811,7 @@ TEST_CASE("nudge: votes that run in a circle are settled by fewest contradiction
 
   // The same nets offered in the other order.
   Frame g{ frame_of(cyclic_lane()) };
-  std::vector<scav_span> const swapped{ g.nets[1], g.nets[0] };
+  PodVector<scav_span> const swapped{ g.nets[1], g.nets[0] };
   Tally const t{ nudge(OPEN, bounds_of(OPEN, swapped), {}, 48, 0, swapped, g.points) };
   CHECK(same(f.points, g.points));
   CHECK(t.reordered == s.reordered);
@@ -821,7 +821,7 @@ TEST_CASE("nudge: votes that run in a circle are settled by fewest contradiction
 TEST_CASE("nudge: a box the lane already runs through does not bound it") {
   // A box straddling the lane bounds nothing; a box below it bounds the room down.
   Lane through{ two_over(100) };
-  std::vector<scav_rect> const across{ rect(50, 60, 100, 80) };
+  PodVector<scav_rect> const across{ rect(50, 60, 100, 80) };
   Tally const s{
     nudge(OPEN, bounds_of(OPEN, through.nets), across, 48, 0, through.nets, through.points)
   };
@@ -830,7 +830,7 @@ TEST_CASE("nudge: a box the lane already runs through does not bound it") {
   CHECK(lane_y(through, 1) == 124);
 
   Lane beside{ two_over(100) };
-  std::vector<scav_rect> const under{ rect(50, 110, 100, 80) };
+  PodVector<scav_rect> const under{ rect(50, 110, 100, 80) };
   Tally const t{
     nudge(OPEN, bounds_of(OPEN, beside.nets), under, 48, 0, beside.nets, beside.points)
   };
@@ -843,11 +843,11 @@ TEST_CASE("nudge: a box the lane already runs through does not bound it") {
 TEST_CASE("nudge: a leg outside the region is refused before a box is consulted") {
   // Net 0's leg at x=-50 lies left of the region, so its move is refused; the box at
   // x 400..500 is clear of the lane.
-  std::vector<scav_point> points{ pt(-50, 0), pt(-50, 100), pt(200, 100), pt(200, 300),
-                                  pt(0, 400), pt(0, 100),   pt(200, 100), pt(200, 500) };
-  std::vector<scav_span> const nets{ scav_span{ .off = 0, .len = 4 },
-                                     scav_span{ .off = 4, .len = 4 } };
-  std::vector<scav_rect> const away{ rect(400, 0, 100, 100) };
+  PodVector<scav_point> points{ pt(-50, 0), pt(-50, 100), pt(200, 100), pt(200, 300),
+                                pt(0, 400), pt(0, 100),   pt(200, 100), pt(200, 500) };
+  PodVector<scav_span> const nets{ scav_span{ .off = 0, .len = 4 },
+                                   scav_span{ .off = 4, .len = 4 } };
+  PodVector<scav_rect> const away{ rect(400, 0, 100, 100) };
   Tally const s{
     nudge(rect(0, -1000, 3000, 3000), bounds_of(OPEN, nets), away, 48, 0, nets, points)
   };
@@ -864,7 +864,7 @@ TEST_CASE("nudge: three bundles and one unit of room stay stacked") {
   Frame f{ frame_of({ { pt(0, 99), pt(0, 100), pt(200, 100), pt(200, 300) },
                       { pt(0, 0), pt(0, 100), pt(200, 100), pt(200, 102) },
                       { pt(0, 50), pt(0, 100), pt(200, 100), pt(200, 400) } }) };
-  std::vector<scav_point> const before{ f.points };
+  PodVector<scav_point> const before{ f.points };
   Tally const s{ nudge(OPEN, bounds_of(OPEN, f.nets), {}, 48, 0, f.nets, f.points) };
 
   CHECK(s.lanes == 1);

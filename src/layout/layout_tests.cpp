@@ -16,6 +16,7 @@
 #include "scav/scav_layout.h"
 #include "scav/scav_layout_c.h"
 #include "scav_c_handles.h"
+#include "scav_pod_vector.h"
 
 #include "doctest.h"
 
@@ -205,7 +206,7 @@ TEST_CASE("layout: each arm of the box formula can dominate") {
   build_state(c, inner, "K", StateKind::Normal, {});
 
   scav_profile const p{ readable() };
-  std::vector<scav_box_space> boxes(c.states.size());
+  PodVector<scav_box_space> boxes(c.states.size());
   boxes[by_min_w.v] = { .min_w = 9000, .h_before = 100, .h_after = 50 };
   scav_spaces const s{ .box_state = boxes.data(),
                        .n_box_state = static_cast<uint32_t>(boxes.size()) };
@@ -236,7 +237,7 @@ TEST_CASE("layout: interior bands and submachines stack from the top") {
   build_state(c, m2, "B", StateKind::Normal, {});
 
   scav_profile const p{ readable() };
-  std::vector<scav_box_space> boxes(c.states.size());
+  PodVector<scav_box_space> boxes(c.states.size());
   boxes[comp.v] = { .min_w = 0, .h_before = 40, .h_after = 24 };
   scav_spaces const s{ .box_state = boxes.data(),
                        .n_box_state = static_cast<uint32_t>(boxes.size()) };
@@ -285,7 +286,7 @@ TEST_CASE("layout: unconnected siblings are packed, each its own component") {
 TEST_CASE("layout: components pack to the aspect-ratio target") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
-  std::vector<StateId> kids;
+  PodVector<StateId> kids;
   kids.reserve(9);
   for (uint32_t i = 0; i < 9; ++i) {
     kids.push_back(build_state(c, root, {}, StateKind::Normal, {}));
@@ -329,7 +330,7 @@ TEST_CASE("layout: routes are orthogonal, meet borders, and loop on either side"
 
   scav_span const r0{ row_of<scav_span>(c, "scav.geom.route", 0) };
   REQUIRE(r0.len >= 2);
-  std::vector<scav_point> route;
+  PodVector<scav_point> route;
   route.reserve(r0.len);
   for (uint32_t k = 0; k < r0.len; ++k) {
     route.push_back(row_of<scav_point>(c, "scav.geom.point", r0.off + k));
@@ -372,7 +373,7 @@ TEST_CASE("layout: routes are orthogonal, meet borders, and loop on either side"
     scav_span const r{ row_of<scav_span>(c, "scav.geom.route", t) };
     REQUIRE(r.len >= 4);
     CHECK(row_of<scav_span>(c, "scav.geom.port", t).len == 0);
-    std::vector<scav_point> loop;
+    PodVector<scav_point> loop;
     loop.reserve(r.len);
     for (uint32_t k = 0; k < r.len; ++k) {
       loop.push_back(row_of<scav_point>(c, "scav.geom.point", r.off + k));
@@ -402,7 +403,7 @@ TEST_CASE("layout: route ends sit on the borders they attach to, clears or none"
   build_trans(c, a, b, TransKind::Default, {});
   scav_profile const p{ readable() };
 
-  std::vector<scav_path_clear> const clears{ { .src = 10, .dst = 6 } };
+  PodVector<scav_path_clear> const clears{ { .src = 10, .dst = 6 } };
   scav_spaces const s{ .path_clear = clears.data(), .n_path_clear = 1 };
   run(c, s, p);
 
@@ -432,7 +433,7 @@ TEST_CASE("layout: the chart rect bounds every point and every placed box") {
   build_trans(c, z, a, TransKind::Default, {});
 
   // Path boxes wide enough that wherever they land they push the extent.
-  std::vector<scav_path_box> const wide{
+  PodVector<scav_path_box> const wide{
     { .subject = 0, .w = 4000, .h = 300, .order = 0 },
     { .subject = 2, .w = 4000, .h = 300, .order = 0 },
   };
@@ -473,7 +474,7 @@ TEST_CASE("layout: a wide placed box is slid inside rather than hung off") {
   scav_rect const before{ row_of<scav_rect>(c, "scav.geom.chart", 0) };
 
   // Wider than the route's leg, narrower than the chart.
-  std::vector<scav_path_box> const boxes{
+  PodVector<scav_path_box> const boxes{
     { .subject = 0, .w = before.w - 1, .h = 8, .order = 0 }
   };
   scav_spaces const s{ .path_box = boxes.data(), .n_path_box = 1 };
@@ -497,9 +498,7 @@ TEST_CASE("layout: a placed box rides a leg of its own route, clear of every oth
   build_trans(c, a, d, TransKind::Default, {});
   build_trans(c, d, b, TransKind::Default, {});
 
-  std::vector<scav_path_box> const boxes{
-    { .subject = 2, .w = 240, .h = 80, .order = 0 }
-  };
+  PodVector<scav_path_box> const boxes{ { .subject = 2, .w = 240, .h = 80, .order = 0 } };
   scav_spaces const s{ .path_box = boxes.data(), .n_path_box = 1 };
   std::vector<scav_placed> const placed{ run(c, s, readable()) };
   REQUIRE(placed.size() == 1);
@@ -569,7 +568,7 @@ TEST_CASE("layout: the hash split separates size changes from shape changes") {
     StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
     StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
     build_trans(c, a, b, TransKind::Default, {});
-    std::vector<scav_box_space> boxes(c.states.size());
+    PodVector<scav_box_space> boxes(c.states.size());
     boxes[0].min_w = min_w;
     boxes[1].min_w = min_w;
     scav_spaces const s{ .box_state = boxes.data(),
@@ -587,7 +586,7 @@ TEST_CASE("layout: the hash split separates size changes from shape changes") {
     SubmachineId const root{ build_chart(c, "t", {}) };
     StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
     build_trans(c, a, a, TransKind::Default, {});
-    std::vector<scav_box_space> boxes(c.states.size());
+    PodVector<scav_box_space> boxes(c.states.size());
     boxes[0].min_w = min_w;
     scav_spaces const s{ .box_state = boxes.data(),
                          .n_box_state = static_cast<uint32_t>(boxes.size()) };
@@ -682,7 +681,7 @@ TEST_CASE("layout: the inputs digest hears every input that is not the model") {
   CHECK(layout_inputs_digest(c) != base);
 
   // A space-table change moves the digest; the spaces stand in for the font.
-  std::vector<scav_box_space> boxes(c.states.size());
+  PodVector<scav_box_space> boxes(c.states.size());
   boxes[0].min_w = 64;
   scav_spaces const s{ .box_state = boxes.data(),
                        .n_box_state = static_cast<uint32_t>(boxes.size()) };
@@ -717,7 +716,7 @@ TEST_CASE("layout: composed geometry past the domain is rejected, columns kept")
     StateId const comp{ build_state(c, parent, {}, StateKind::Normal, {}) };
     parent = build_submachine(c, comp, {}, {});
   }
-  std::vector<scav_box_space> boxes(
+  PodVector<scav_box_space> boxes(
       c.states.size(),
       { .min_w = 0, .h_before = SPACE_MAX, .h_after = SPACE_MAX });
   scav_spaces const s{ .box_state = boxes.data(),
@@ -745,7 +744,7 @@ TEST_CASE("layout: a rank taller than the domain is rejected") {
                 TransKind::Default,
                 {});
   }
-  std::vector<scav_box_space> const boxes(
+  PodVector<scav_box_space> const boxes(
       c.states.size(),
       { .min_w = 0, .h_before = SPACE_MAX, .h_after = 0 });
   scav_spaces const s{ .box_state = boxes.data(),
@@ -853,7 +852,7 @@ TEST_CASE("layout: invalid profiles and spaces fail before any geometry") {
   CHECK(diags[0].code == DiagCode::ProfileOutOfRange);
 
   diags.clear();
-  std::vector<scav_box_space> boxes{ { .min_w = -1, .h_before = 0, .h_after = 0 } };
+  PodVector<scav_box_space> boxes{ { .min_w = -1, .h_before = 0, .h_after = 0 } };
   scav_spaces const s{ .box_state = boxes.data(), .n_box_state = 1 };
   CHECK(!layout_run(c, s, opts(readable()), placed, diags));
   REQUIRE(diags.size() == 1);
@@ -933,7 +932,7 @@ TEST_CASE("layout: the C surface runs, queries, and reports end to end") {
   scav_layout_opts opts{};
   REQUIRE(scav_profile_named("compact", &opts.profile, PROFILE_SIZE) == SCAV_OK);
 
-  std::vector<scav_path_box> const boxes{ { .subject = 0, .w = 10, .h = 4, .order = 0 } };
+  PodVector<scav_path_box> const boxes{ { .subject = 0, .w = 10, .h = 4, .order = 0 } };
   scav_spaces const s{ .box_state_stride = static_cast<uint32_t>(sizeof(scav_box_space)),
                        .box_sub_stride = static_cast<uint32_t>(sizeof(scav_box_space)),
                        .path_clear_stride = static_cast<uint32_t>(sizeof(scav_path_clear)),
@@ -1128,13 +1127,13 @@ TEST_CASE("layout: geometry invariants hold across topologies and spaces" *
   SUBCASE("with no space requests") { run(c, {}, bounded); }
   SUBCASE("with fabricated measurement") {
     // Box spaces as an integer function of the state index; uniform path clears.
-    std::vector<scav_box_space> boxes(c.states.size());
+    PodVector<scav_box_space> boxes(c.states.size());
     for (uint32_t i = 0; i < c.states.size(); ++i) {
       boxes[i] = { .min_w = static_cast<int32_t>(200 + (i * 40)),
                    .h_before = static_cast<int32_t>(30 + (i % 3) * 10),
                    .h_after = static_cast<int32_t>((i % 2) * 20) };
     }
-    std::vector<scav_path_clear> clears(c.transitions.size(), { .src = 4, .dst = 8 });
+    PodVector<scav_path_clear> clears(c.transitions.size(), { .src = 4, .dst = 8 });
     scav_spaces const s{ .box_state = boxes.data(),
                          .n_box_state = static_cast<uint32_t>(boxes.size()),
                          .path_clear = clears.data(),
@@ -1306,7 +1305,7 @@ TEST_CASE("layout: Tier 0 at the scale target, and where the grid gives out") {
   {
     Chart c;
     SubmachineId const root{ build_chart(c, "flat", {}) };
-    std::vector<StateId> all;
+    PodVector<StateId> all;
     all.reserve(2048);
     for (uint32_t i = 0; i < 2048; ++i) {
       all.push_back(build_state(c, root, {}, StateKind::Normal, {}));
@@ -1420,7 +1419,7 @@ bool inflation_done(uint32_t fewest, uint32_t degraded, uint32_t unreachable, bo
 uint32_t search_tuple_count(scav_profile const &p);
 uint32_t search_move_budget(scav_profile const &p);
 Row search_row(scav_profile const &p, uint32_t index);
-uint32_t search_argmin(std::vector<Cost> const &cost, std::vector<uint8_t> const &viable);
+uint32_t search_argmin(PodVector<Cost> const &cost, PodVector<uint8_t> const &viable);
 
 }  // namespace scav
 
@@ -1537,8 +1536,8 @@ TEST_CASE("layout: the pick is the row exact Cost ranks first over the whole tab
   REQUIRE(picked < 4);
 
   SplitGraph const g{ decompose(searched) };
-  std::vector<Cost> cost;
-  std::vector<scav_rect> shipped;
+  PodVector<Cost> cost;
+  PodVector<scav_rect> shipped;
   for (uint32_t row = 0; row < 4; ++row) {
     CAPTURE(row);
     auto const [knobs, dar, pack, fold]{ search_row(p, row) };
@@ -1998,7 +1997,7 @@ TEST_CASE("layout: a label inside one of two regions stays inside that region") 
   TransId const labelled{ build_trans(c, h, q, TransKind::Default, {}) };
   build_trans(c, g, d, TransKind::Default, {});
 
-  std::vector<scav_path_box> const boxes{
+  PodVector<scav_path_box> const boxes{
     { .subject = labelled.v, .w = 1500, .h = 200, .order = 0 }
   };
   scav_spaces const s{ .path_box = boxes.data(), .n_path_box = 1 };
@@ -2191,7 +2190,7 @@ namespace {
 Chart sealed_with_chain() {
   Chart c{ sealed_chart() };
   SubmachineId const root{ 0 };
-  std::vector<StateId> chain;
+  PodVector<StateId> chain;
   chain.reserve(16);
   for (uint32_t i = 0; i < 16; ++i) {
     chain.push_back(build_state(c, root, {}, StateKind::Normal, {}));
@@ -2321,7 +2320,7 @@ TEST_CASE("layout: a graph past the router's budget is not a spacing problem" *
   // holding them all exceeds the router's grid budget.
   Chart c;
   SubmachineId const root{ build_chart(c, "wide", {}) };
-  std::vector<StateId> all;
+  PodVector<StateId> all;
   all.reserve(256);
   for (uint32_t i = 0; i < 256; ++i) {
     all.push_back(build_state(c, root, {}, StateKind::Normal, {}));
@@ -2429,7 +2428,7 @@ TEST_CASE("layout: nothing in the corpus or at the scale target inflates") {
 
   Chart flat;
   SubmachineId const root{ build_chart(flat, "flat", {}) };
-  std::vector<StateId> all;
+  PodVector<StateId> all;
   all.reserve(2048);
   for (uint32_t i = 0; i < 2048; ++i) {
     all.push_back(build_state(flat, root, {}, StateKind::Normal, {}));
@@ -2450,7 +2449,7 @@ TEST_CASE("layout: a frame full of long edges terminates, expensively" *
   // thirteen-rank skip into a thousand-rank one.
   Chart c;
   SubmachineId const root{ build_chart(c, "wide", {}) };
-  std::vector<StateId> all;
+  PodVector<StateId> all;
   all.reserve(512);
   for (uint32_t i = 0; i < 512; ++i) {
     all.push_back(build_state(c, root, {}, StateKind::Normal, {}));
@@ -2483,7 +2482,7 @@ TEST_CASE("layout: the coordinate extent estimate holds under fat text" *
   while ((hi - lo) > 16) {
     int32_t const mid{ lo + ((hi - lo) / 2) };
     Chart c{ nested_2k_chart() };
-    std::vector<scav_box_space> const boxes(
+    PodVector<scav_box_space> const boxes(
         c.states.size(),
         { .min_w = mid, .h_before = 448, .h_after = 96 });
     scav_spaces const s{ .box_state = boxes.data(),
@@ -2872,7 +2871,7 @@ TEST_CASE("layout: fuzzed charts and spaces either lay out or diagnose") {
     CAPTURE(iter);
     Chart c;
     SubmachineId const root{ build_chart(c, "f", {}) };
-    std::vector<SubmachineId> frames{ root };
+    PodVector<SubmachineId> frames{ root };
     uint32_t const n_states{ 2 + next(10) };
     for (uint32_t i = 0; i < n_states; ++i) {
       SubmachineId const parent{ frames[next(static_cast<uint32_t>(frames.size()))] };
@@ -2894,13 +2893,13 @@ TEST_CASE("layout: fuzzed charts and spaces either lay out or diagnose") {
 
     // Fields range outside the domain, subjects past the transition array, and
     // orders collide.
-    std::vector<scav_box_space> boxes(c.states.size());
+    PodVector<scav_box_space> boxes(c.states.size());
     for (scav_box_space &b : boxes) {
       b = { .min_w = static_cast<int32_t>(next(200000)) - 20000,
             .h_before = static_cast<int32_t>(next(150000)) - 10000,
             .h_after = static_cast<int32_t>(next(150000)) - 10000 };
     }
-    std::vector<scav_path_box> path_boxes(next(4));
+    PodVector<scav_path_box> path_boxes(next(4));
     for (scav_path_box &b : path_boxes) {
       b = { .subject = next(static_cast<uint32_t>(c.transitions.size()) + 2),
             .w = static_cast<int32_t>(next(150000)) - 10000,

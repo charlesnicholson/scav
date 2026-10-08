@@ -8,9 +8,9 @@
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
 #include "scav/scav_layout_c.h"
+#include "scav_pod_vector.h"
 
 #include <cstdint>
-#include <vector>
 
 namespace scav {
 
@@ -36,44 +36,44 @@ struct OrderEdge {
 };
 
 struct SubmachineOrders {
-  std::vector<OrderNode> nodes;     // contiguous per submachine
-  std::vector<OrderEdge> edges;     // contiguous per submachine
-  std::vector<Span> sub_nodes;      // parallel to submachines -> nodes
-  std::vector<Span> sub_edges;      // parallel to submachines -> edges
-  std::vector<uint32_t> sub_ranks;  // parallel to submachines; layer count
+  PodVector<OrderNode> nodes;     // contiguous per submachine
+  PodVector<OrderEdge> edges;     // contiguous per submachine
+  PodVector<Span> sub_nodes;      // parallel to submachines -> nodes
+  PodVector<Span> sub_edges;      // parallel to submachines -> edges
+  PodVector<uint32_t> sub_ranks;  // parallel to submachines; layer count
   // Parallel to submachines: 1 where an orient pin runs the ranks down (+y), else 0 (+x).
-  std::vector<uint8_t> sub_down;
+  PodVector<uint8_t> sub_down;
   // Parallel to submachines: 0 under the row's fold rule, else 1 + a fold pin's mode.
-  std::vector<uint8_t> sub_fold;
-  std::vector<uint32_t> sub_fold_cut;  // parallel to submachines: a fold pin's `layer`
+  PodVector<uint8_t> sub_fold;
+  PodVector<uint32_t> sub_fold_cut;  // parallel to submachines: a fold pin's `layer`
   // Parallel to states: 0 unpinned, else 1 + a loop pin's `face * 2 + end`.
-  std::vector<uint8_t> state_loop;
+  PodVector<uint8_t> state_loop;
 
   // The extra width each rank boundary carries beyond `rank_sep`, one row per boundary;
   // `len` is the frame's rank count less one.
-  std::vector<Span> sub_gaps;  // parallel to submachines -> gaps, labels
-  std::vector<int32_t> gaps;
+  PodVector<Span> sub_gaps;  // parallel to submachines -> gaps, labels
+  PodVector<int32_t> gaps;
   // Parallel to `gaps`: the part of each gap a label charged, without the lanes.
-  std::vector<int32_t> labels;
+  PodVector<int32_t> labels;
 
-  std::vector<uint32_t> state_node;  // parallel to states -> nodes; INVALID if dead
-  std::vector<uint32_t> seg_node;    // parallel to segments -> its boundary node
+  PodVector<uint32_t> state_node;  // parallel to states -> nodes; INVALID if dead
+  PodVector<uint32_t> seg_node;    // parallel to segments -> its boundary node
 
   // Parallel to segments: the port its boundary node stands for; INVALID for an inner-face
   // endpoint or no boundary node.
-  std::vector<uint32_t> seg_port;
+  PodVector<uint32_t> seg_port;
 
   // Parallel to segments: 1 where the boundary node sits on the leading cross border, 2 on
   // the trailing one, 0 on its rank's border. On a cross border it shares its mate's rank.
-  std::vector<uint8_t> seg_cross;
+  PodVector<uint8_t> seg_cross;
   // Parallel to segments: 1 where an end pin chose the boundary node's border.
-  std::vector<uint8_t> seg_sided;
+  PodVector<uint8_t> seg_sided;
   // Parallel to segments: the boundary node's face 0..3 as `scav_port_slot::side`; off a
   // cross border, the leading rank border if an edge leaves the node, else the trailing.
-  std::vector<uint8_t> seg_side;
+  PodVector<uint8_t> seg_side;
 
   // Parallel to segments: 1 where it lies on a cycle of its frame's graph before any turn.
-  std::vector<uint8_t> seg_cyclic;
+  PodVector<uint8_t> seg_cyclic;
 };
 
 // Ranks each frame by longest path under `pins`, chains long edges through bends, then
@@ -95,7 +95,7 @@ void order_submachines(SubmachineOrders &o,
                        SearchPins const &pins);
 
 // Crossings between two adjacent ranks: inversions of the south positions in north order.
-uint64_t rank_crossings(std::vector<uint32_t> const &south_positions);
+uint64_t rank_crossings(PodVector<uint32_t> const &south_positions);
 
 // The segment carrying `t`'s label: its first in the common frame, else the middle one;
 // INVALID with no segments or for an inner loop.

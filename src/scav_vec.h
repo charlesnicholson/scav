@@ -80,12 +80,6 @@ bool vec_has_room(std::vector<T> const &v) {
   return (v.data() + v.size()) < (v.data() + v.capacity());
 }
 
-template <typename T, typename... A>
-T &vec_emplace_back(std::vector<T> &v, A &&...a) {
-  if (vec_has_room(v)) [[likely]] { return v.emplace_back(std::forward<A>(a)...); }
-  return vec_emplace_back_grow(v, std::forward<A>(a)...);
-}
-
 template <typename T>
 void vec_push_back(std::vector<T> &v, std::type_identity_t<T> const &x) {
   if (vec_has_room(v)) [[likely]] {

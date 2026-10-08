@@ -4,6 +4,8 @@
 // Brandes & Kopf cross-axis coordinate assignment (GD 2001) with the 2020 erratum's
 // corrections (arXiv:2008.01252). Maps a POD layered graph to one centre per node.
 
+#include "scav_pod_vector.h"
+
 #include <cstdint>
 #include <vector>
 
@@ -18,15 +20,15 @@ struct CoordGraph {
     uint32_t weak{ 0 };                // tried after the strong medians
   };
 
-  std::vector<int32_t> extent;                // cross-axis size, indexed by node
-  std::vector<std::vector<uint32_t>> layers;  // layer -> nodes, in order
-  std::vector<Edge> edges;
+  PodVector<int32_t> extent;                // cross-axis size, indexed by node
+  std::vector<PodVector<uint32_t>> layers;  // layer -> nodes, in order
+  PodVector<Edge> edges;
   int32_t sep{ 0 };  // least edge-to-edge gap between neighbours in a layer
 };
 
 // One centre per node, translated so the least leading edge is zero; 0 for a node in
 // no layer.
-void cross_coordinates(CoordGraph const &g, std::vector<int32_t> &out);
+void cross_coordinates(CoordGraph const &g, PodVector<int32_t> &out);
 
 }  // namespace scav
 

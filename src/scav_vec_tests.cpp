@@ -75,20 +75,6 @@ TEST_CASE("vec: push_back of an element of the same vector, at capacity") {
   CHECK(o[1].empty());
 }
 
-TEST_CASE("vec: emplace_back constructs in place and returns the new element") {
-  auto v{ full<Pair>({ { .a = 1, .b = 1 } }) };
-  Pair &back{ vec_emplace_back(v, Pair{ .a = 5, .b = 6 }) };
-  CHECK(&back == &v.back());
-  CHECK(v == std::vector<Pair>{ { .a = 1, .b = 1 }, { .a = 5, .b = 6 } });
-
-  auto o{ full<Owned>({ { 1, 2 } }) };
-  Owned &made{ vec_emplace_back(o, size_t{ 3 }, uint32_t{ 9 }) };
-  CHECK(made == Owned{ 9, 9, 9 });
-  REQUIRE(o.size() == o.capacity());
-  vec_emplace_back(o, o[0]);
-  CHECK(o.back() == Owned{ 1, 2 });
-}
-
 TEST_CASE("vec: assign a count of one value") {
   std::vector<uint32_t> v{ 1, 2, 3, 4, 5 };
   vec_assign(v, 2, 9);  // shrink
@@ -202,9 +188,9 @@ TEST_CASE("vec: a random run of every helper matches the members") {
         vec_push_back(got, x);
         want.push_back(x);
         break;
-      case 1:
-        vec_emplace_back(got, x);
-        want.emplace_back(x);
+      case 1:  // an element of the same vector
+        vec_push_back(got, got.empty() ? x : got[0]);
+        want.push_back(want.empty() ? x : want[0]);
         break;
       case 2:
         vec_assign(got, n, x);

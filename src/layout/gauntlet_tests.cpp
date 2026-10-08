@@ -14,6 +14,7 @@
 #include "scav/scav_layout.h"
 #include "scav/scav_layout_c.h"
 #include "scav_int.h"
+#include "scav_pod_vector.h"
 
 #include "doctest.h"
 
@@ -77,8 +78,9 @@ scav_profile one_row(scav_profile const &p) {
 
 // Requires column `name` to equal `rows` word for word; geometry PODs are padding-free
 // int32 blocks.
-template <typename T>
-void column_holds(Chart const &c, char const *name, std::vector<T> const &rows) {
+template <typename V>
+void column_holds(Chart const &c, char const *name, V const &rows) {
+  using T = V::value_type;
   static_assert((sizeof(T) % sizeof(int32_t)) == 0, "geometry PODs are int32 blocks");
   constexpr uint32_t WORDS{ sizeof(T) / sizeof(int32_t) };
   ColumnId const id{ column_find(c, name) };
@@ -156,7 +158,7 @@ void lay(char const *name,
   out.lane_moves = static_cast<uint32_t>(std::ranges::count_if(
       routed.events(),
       [](TraceEvent const &e) { return e.kind == TraceKind::LaneAssigned; }));
-  std::vector<scav_rect> boxes;
+  PodVector<scav_rect> boxes;
   out.unplaced =
       place_labels(out.c, out.g, out.z, s, out.r.route, out.r.points, knobs, boxes);
   column_holds(out.c, "scav.geom.state", out.z.state);

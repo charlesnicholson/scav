@@ -4,20 +4,19 @@
 // Disjoint sets over `[0, n)`.
 
 #include "scav_int.h"
-#include "scav_vec.h"
+#include "scav_pod_vector.h"
 
 #include <cstdint>
-#include <vector>
 
 namespace scav {
 
 // Union-find: `root` halves paths and `join` unions onto the lower index, so a set's root
 // is its least member.
 struct Partition {
-  std::vector<uint32_t> of;
+  PodVector<uint32_t> of;
 
   void reset(size_t n) {
-    vec_resize(of, n);
+    of.resize(n);
     for (uint32_t i = 0; i < of.size(); ++i) { of[i] = i; }
   }
 

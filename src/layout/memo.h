@@ -5,9 +5,9 @@
 // arenas, indexed by open-addressed slots; a hit compares the whole key.
 
 #include "scav/scav_layout.h"
+#include "scav_pod_vector.h"
 
 #include <cstdint>
-#include <vector>
 
 namespace scav {
 
@@ -19,14 +19,21 @@ uint32_t memo_serial();
 uint32_t memo_profile(scav_profile const &p);
 
 // The probe hash; any function is correct, a constant one included.
-using MemoHash = uint64_t (*)(std::vector<uint32_t> const &key);
-uint64_t memo_hash(std::vector<uint32_t> const &key);
+using MemoHash = uint64_t (*)(PodVector<uint32_t> const &key);
+uint64_t memo_hash(PodVector<uint32_t> const &key);
 uint64_t memo_hash(uint32_t const *key, size_t len);  // the same over `key[0..len)`
 
 // An open-addressed index numbering word-string keys 0, 1, 2, ... in insertion order; keys
 // sit back to back in one arena, slots at their hash's high word, and a hit compares all.
 class KeyIndex {
  public:
+  KeyIndex() = default;
+  KeyIndex(KeyIndex const &) = default;
+  KeyIndex &operator=(KeyIndex const &) = default;
+  KeyIndex(KeyIndex &&) noexcept;  // moves and the destructor are out of line
+  KeyIndex &operator=(KeyIndex &&) noexcept;
+  ~KeyIndex();
+
   // The number of `key[0..len)`, or INVALID; `hash` is the hash it was stored under.
   [[nodiscard]] uint32_t find(uint32_t const *key, uint32_t len, uint64_t hash) const;
 
@@ -56,9 +63,9 @@ class KeyIndex {
   [[nodiscard]] size_t slot_of(uint32_t const *key, uint32_t len, uint64_t hash) const;
   void grow();
 
-  std::vector<uint32_t> keys;
-  std::vector<Entry> entries;
-  std::vector<Slot> slots;  // a power of two, at most half full
+  PodVector<uint32_t> keys;
+  PodVector<Entry> entries;
+  PodVector<Slot> slots;  // a power of two, at most half full
 };
 
 class Memo {
@@ -71,12 +78,12 @@ class Memo {
 
   // True when `key` is stored; `at` and `len` then give its value (`len` may be 0),
   // valid until the next `insert`.
-  [[nodiscard]] bool find(std::vector<uint32_t> const &key,
+  [[nodiscard]] bool find(PodVector<uint32_t> const &key,
                           int32_t const *&at,
                           uint32_t &len);
 
   // Stores `value` under `key`, which must not be present.
-  void insert(std::vector<uint32_t> const &key, std::vector<int32_t> const &value);
+  void insert(PodVector<uint32_t> const &key, PodVector<int32_t> const &value);
 
   // Drops every entry and frees the arenas and slots.
   void release();
@@ -92,14 +99,14 @@ class Memo {
     uint32_t key_off, key_len;  // `key_len` 0 is an empty slot
     uint32_t value_off, value_len;
   };
-  Slot &slot_of(uint64_t hash, std::vector<uint32_t> const &key);
+  Slot &slot_of(uint64_t hash, PodVector<uint32_t> const &key);
   void grow();
 
   size_t budget;
   MemoHash hash_of;
-  std::vector<uint32_t> keys;
-  std::vector<int32_t> values;
-  std::vector<Slot> slots;
+  PodVector<uint32_t> keys;
+  PodVector<int32_t> values;
+  PodVector<Slot> slots;
   uint32_t used{ 0 };
 };
 

@@ -4,6 +4,7 @@
 
 #include "scav/scav_layout.h"
 #include "scav/scav_types.h"
+#include "scav_pod_vector.h"
 #include "scav_vec.h"
 
 #include <array>
