@@ -144,6 +144,13 @@ class TestRender(unittest.TestCase):
                 self.assertEqual("", result.stdout)
                 self.assertIn(why, result.stderr)
 
+    def test_dash_j_sets_the_threads_and_nothing_else_moves(self) -> None:
+        chart = self.cfg.repo_root / "test_data/charts/led.scav"
+        pool = self.render(chart)
+        for count in ("1", "2", "0"):
+            with self.subTest(j=count):
+                self.assertEqual(pool, self.render(chart, "-j", count))
+
     def test_the_bundled_font_table_regenerates_unchanged(self) -> None:
         script = self.cfg.repo_root / "src/draw/gen_font_table.py"
         result = subprocess.run([str(self.cfg.python), str(script), "--check"],
@@ -172,6 +179,10 @@ class TestRender(unittest.TestCase):
                      ["render", "--profile"],
                      ["render", str(chart), "--profile"],
                      ["render", "--embed-font", "--embed-font", str(chart)],
+                     ["render", str(chart), "-j"],
+                     ["render", "-j", "x", str(chart)],
+                     ["render", "-j", "-1", str(chart)],
+                     ["render", "-j", "1", "-j", "2", str(chart)],
                      ["render", str(chart), str(chart)]):
             with self.subTest(args=args):
                 result = self.run_render(*args[1:])

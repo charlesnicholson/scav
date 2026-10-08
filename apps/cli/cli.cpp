@@ -97,6 +97,18 @@ bool read_value(std::string_view flag, std::string_view value, LayoutArgs &out) 
     }
     return false;
   }
+  if (flag == "-j") {
+    uint32_t n{ 0 };
+    std::from_chars_result const got{
+      std::from_chars(value.data(), value.data() + value.size(), n)
+    };
+    if ((got.ec != std::errc{}) || (got.ptr != (value.data() + value.size())) ||
+        (out.threads >= 0)) {
+      return false;
+    }
+    out.threads = n;
+    return true;
+  }
   if (flag == "--jitter-seed") {
     std::from_chars_result const got{
       std::from_chars(value.data(), value.data() + value.size(), out.jitter_seed)
@@ -169,7 +181,7 @@ ArgRead read_layout_arg(int argc, char **argv, int &i, LayoutArgs &out) {
   if ((arg != "--profile") && (arg != "--portfolio-row") && (arg != "--rank") &&
       (arg != "--cut") && (arg != "--reverse") && (arg != "--end") &&
       (arg != "--orient") && (arg != "--fold") && (arg != "--loop") &&
-      (arg != "--search") && (arg != "--jitter-seed")) {
+      (arg != "--search") && (arg != "--jitter-seed") && (arg != "-j")) {
     return ArgRead::NotOurs;
   }
   if ((i + 1) >= argc) { return ArgRead::Malformed; }
@@ -182,10 +194,11 @@ ArgRead read_layout_arg(int argc, char **argv, int &i, LayoutArgs &out) {
   return read_value(arg, argv[i], out) ? ArgRead::Taken : ArgRead::Malformed;
 }
 
-void apply_layout_args(LayoutArgs const &args, scav_profile &p) {
-  if (args.no_search) { p.portfolio_k = 0; }
-  if (args.search >= 0) { p.search_cull = args.search; }
-  if (args.jitter_seed >= 0) { p.jitter_seed = args.jitter_seed; }
+void apply_layout_args(LayoutArgs const &args, scav_layout_opts &o) {
+  if (args.no_search) { o.profile.portfolio_k = 0; }
+  if (args.search >= 0) { o.profile.search_cull = args.search; }
+  if (args.jitter_seed >= 0) { o.profile.jitter_seed = args.jitter_seed; }
+  if (args.threads >= 0) { o.threads = static_cast<uint32_t>(args.threads); }
 }
 
 void append_layout_args(std::string &out,

@@ -350,6 +350,8 @@ at both text scales, with `scored` as offered less deduped and pruned. `deduped`
 
 `--search full` runs the full search (PRD §11.10c) in place of the culled default, and
 `--jitter-seed N` breaks near-equal moves and kicks by a hash of `N`.
+`-j N` lays out on `N` threads, `0` being the host's concurrency; the drawing does not
+change, and `-j 1` gives stable instruction counts for size and speed comparisons.
 
 - `tools/jitter.py --runs DIR` runs the corpus at both scales for two searches
   (`--searches full,culled` by default), unperturbed and under three seeds, keeps each run

@@ -47,6 +47,7 @@ struct LayoutArgs {
   SearchPins pins;
   int32_t jitter_seed{ -1 };  // the profile's `jitter_seed`; -1 keeps the profile's
   int32_t search{ -1 };       // the profile's `search_cull`; -1 keeps the profile's
+  int64_t threads{ -1 };      // `scav_layout_opts.threads`; -1 leaves the host's
   bool no_search{ false };
   bool no_text{ false };
   bool given{ false };  // any of the flags below appeared
@@ -70,13 +71,15 @@ enum class ArgRead : uint32_t { NotOurs, Taken, Malformed };
 //                        --end), at end E (0 top or left, 1 bottom or right)
 //   --search full|culled the full search, or the culled one
 //   --jitter-seed N      near-equal moves and kicks rank by a hash of N; 0 is none
+//   -j N                 N worker threads; 0 is the host's concurrency
 //   --no-search          lay out the row and pins given, and move nothing
 //   --no-text            lay out with no space requests, the scale the layout
 //                        goldens are stated at
 ArgRead read_layout_arg(int argc, char **argv, int &i, LayoutArgs &out);
 
-// Writes `args`' search flags into `p`: no search, the culled search, the jitter seed.
-void apply_layout_args(LayoutArgs const &args, scav_profile &p);
+// Writes `args`' search flags and thread count into `o`: no search, the culled search,
+// the jitter seed, `-j`.
+void apply_layout_args(LayoutArgs const &args, scav_layout_opts &o);
 
 // Appends the flags that reproduce a run: the non-default profile, search and seed, and
 // `--no-text` from `args`, then `row` and every pin.

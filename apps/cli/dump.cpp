@@ -1037,7 +1037,7 @@ int run_dump(char const *path,
     write_error("no such profile", args.profile);
     return EXIT_UNUSABLE;
   }
-  apply_layout_args(args, opts.profile);
+  apply_layout_args(args, opts);
   CostTerms cost{};
   // The winning row and taken pins, for `rests on`; INVALID under `--trace`.
   uint32_t won{ INVALID };
