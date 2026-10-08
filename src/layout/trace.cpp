@@ -177,6 +177,7 @@ char const *trace_kind_name(TraceKind k) {
     case TraceKind::KickScored: return "kick_scored";
     case TraceKind::KickTaken: return "kick_taken";
     case TraceKind::StateGrown: return "state_grown";
+    case TraceKind::FaceSpread: return "face_spread";
     case TraceKind::None: break;
   }
   return "none";
@@ -443,6 +444,16 @@ void trace_event_json(TraceEvent const &e,
             static_cast<int32_t>(e.grow.seats_h));
       j.kxy("from", e.grow.from_w, e.grow.from_h);
       j.kxy("to", e.grow.to_w, e.grow.to_h);
+      break;
+    case TraceKind::FaceSpread:
+      j.kv("box", e.spread.box);
+      j.kv("face", e.spread.face);
+      j.kv("round", e.spread.round);
+      j.kv("seats", e.spread.seats);
+      j.kv("step", e.spread.step);
+      j.kv("blocks", e.spread.blocks);
+      j.kv("relaxed", e.spread.relaxed);
+      j.kv("frozen", e.spread.frozen);
       break;
     case TraceKind::None: break;
   }

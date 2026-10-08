@@ -178,6 +178,16 @@ void each_field(Event &e, F &&f) {
       f("to_w", e.grow.to_w);
       f("to_h", e.grow.to_h);
       break;
+    case TraceKind::FaceSpread:
+      f("box", e.spread.box);
+      f("face", e.spread.face);
+      f("round", e.spread.round);
+      f("seats", e.spread.seats);
+      f("step", e.spread.step);
+      f("blocks", e.spread.blocks);
+      f("relaxed", e.spread.relaxed);
+      f("frozen", e.spread.frozen);
+      break;
   }
 }
 

@@ -51,9 +51,10 @@ enum class TraceKind : uint16_t {
   KickScored,     // a kick was searched to convergence; `pass` is its `KickVerdict`
   KickTaken,      // a row took a kick search's result; `pass` is its `KickHow`
   StateGrown,     // seats per face raised a state's box; `pass` 1 for a pin, 0 the default
+  FaceSpread,     // the spread moved seats on one box face in one round
 };
 
-inline constexpr uint32_t TRACE_KINDS{ static_cast<uint32_t>(TraceKind::StateGrown) + 1U };
+inline constexpr uint32_t TRACE_KINDS{ static_cast<uint32_t>(TraceKind::FaceSpread) + 1U };
 
 // The kind's name in the JSON and the stream header; "none" for any other value.
 char const *trace_kind_name(TraceKind k);
@@ -212,6 +213,14 @@ struct TraceGrow {
   int32_t from_w, from_h, to_w, to_h;
 };
 
+// One spread round on face `face` of obstacle `box`: its `seats` a `step` apart in
+// `blocks`, of which `relaxed` left a straight net's far face and `frozen` stayed put.
+struct TraceSpread {
+  uint32_t box, face, round, seats;
+  int32_t step;
+  uint32_t blocks, relaxed, frozen;
+};
+
 struct TraceEvent {
   TraceKind kind{ TraceKind::None };
   uint16_t pass{ 0 };         // SeatPass / SeatHow / MoveVerdict / GapCause / Fold, else 0
@@ -238,6 +247,7 @@ struct TraceEvent {
     TraceGap gap;
     TraceCarry carry;
     TraceGrow grow;
+    TraceSpread spread;
   };
 };
 

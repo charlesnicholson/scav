@@ -389,11 +389,13 @@ inline void blame(Charged const &to, uint32_t a, uint32_t b, Wide by) {
 }
 
 // The length each pair shares on one line, per `(axis, coordinate)` bucket, less the
-// trunks; adds to `runs`, where given, each pair outside the routes' common head and tail.
+// trunks; adds to `runs`, where given, each pair outside the common head or tail two of
+// `c`'s transitions have at one inscribed glyph.
 Wide corridor_over(Routes const &r,
                    PodVector<Piece> const &pieces,
                    PodVector<Lane> const &lanes,
                    Charged const &to,
+                   Chart const *c,
                    int32_t *runs) {
   Wide total{ 0 };
   for (uint32_t lo = 0; lo < lanes.size();) {
@@ -412,7 +414,18 @@ Wide corridor_over(Routes const &r,
         scav_span const ru{ r.route[u.trans] };
         scav_span const rv{ r.route[v.trans] };
         if (runs != nullptr) {
-          Trunk const fan{ trunk_of(r.points, ru, rv, ru.len, true) };
+          Transition const &tu{ c->transitions[u.trans] };
+          Transition const &tv{ c->transitions[v.trans] };
+          // True when `a` and `b` are one inscribed glyph.
+          auto const glyph = [c](StateId a, StateId b) {
+            return (a == b) && (a.v < c->states.size()) &&
+                   kind_inscribed(c->states[a.v].kind);
+          };
+          Trunk const fan{ trunk_of(r.points,
+                                    ru,
+                                    rv,
+                                    glyph(tu.dst, tv.dst) ? ru.len : 0,
+                                    glyph(tu.src, tv.src)) };
           if (!trunk_piece(fan, ru.len, u.k) || !trunk_piece(fan, rv.len, v.k)) {
             ++*runs;
           }
@@ -1297,7 +1310,7 @@ void cost_grid_query(ChildGrid const &g,
 }
 
 [[maybe_unused]] Wide cost_corridor(Routes const &r, PodVector<Piece> const &pieces) {
-  return corridor_over(r, pieces, lanes_of(pieces), {}, nullptr);
+  return corridor_over(r, pieces, lanes_of(pieces), {}, nullptr, nullptr);
 }
 
 [[maybe_unused]] Wide cost_crowding(PodVector<Piece> const &pieces, int32_t em) {
@@ -1430,7 +1443,7 @@ CostTerms cost_terms(CostContext const &ctx,
   lanes_of(pieces, sc.key, sc.spare, sc.lanes);
   PodVector<Lane> const &lanes{ sc.lanes };
   t.crossings = crossings_over(pieces, lanes, crossings_of, sc.is_loose);
-  t.corridor = corridor_over(r, pieces, lanes, by(p.w_corridor), &t.shared_run);
+  t.corridor = corridor_over(r, pieces, lanes, by(p.w_corridor), &c, &t.shared_run);
   t.crowding = crowding_over(pieces, lanes, p.font_size_grid, by(p.w_crowding));
 
   // `excess_len` is what a route runs past the larger of its direct distance and its
