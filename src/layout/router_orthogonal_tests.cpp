@@ -1360,6 +1360,53 @@ TEST_CASE("ortho: seats are spread a pitch apart where the face has room for one
   CHECK((run(2, 192) == std::pair<int32_t, int32_t>{ 1, 1 }));
 }
 
+TEST_CASE("ortho: a round trip at the end of its own face parts as one, a pitch apart") {
+  // Aligned 5 from box 0's top corner, inside its 8 inset; box 1's face runs past it.
+  PodVector<scav_rect> const boxes{ rect(0, 0, 100, 400), rect(900, -500, 100, 1400) };
+  PodVector<int32_t> const arcs{ 5, 5 };
+  PodVector<RouteNet> const nets{
+    { .src = pt(50, 200), .dst = pt(950, 200), .src_obstacle = 0, .dst_obstacle = 1 },
+    { .src = pt(950, 200), .dst = pt(50, 200), .src_obstacle = 1, .dst_obstacle = 0 },
+  };
+  PodVector<scav_point> at{ pt(100, 5), pt(900, 5), pt(900, 5), pt(100, 5) };
+  ortho_spread_attachments(boxes, seats_of(nets, {}, arcs), aims(nets), 8, 100, at);
+  CHECK(at[0].y == at[1].y);  // both straight
+  CHECK(at[2].y == at[3].y);
+  CHECK((at[3].y - at[0].y) == 100);
+  CHECK(at[0].y == 8);  // the unit sits inside box 0's inset
+}
+
+TEST_CASE("ortho: a round trip at the end of the far face parts inside both faces") {
+  // Box 0's face runs long; box 1's ends 8 past y = 392, and the pair is aligned at 360.
+  PodVector<scav_rect> const boxes{ rect(0, -500, 100, 1400), rect(900, 0, 100, 400) };
+  PodVector<RouteNet> const nets{
+    { .src = pt(50, 200), .dst = pt(950, 200), .src_obstacle = 0, .dst_obstacle = 1 },
+    { .src = pt(950, 200), .dst = pt(50, 200), .src_obstacle = 1, .dst_obstacle = 0 },
+  };
+  PodVector<scav_point> at{ pt(100, 360), pt(900, 360), pt(900, 360), pt(100, 360) };
+  ortho_spread_attachments(boxes, seats_of(nets), aims(nets), 8, 100, at);
+  CHECK(at[0].y == at[1].y);
+  CHECK(at[2].y == at[3].y);
+  CHECK((at[3].y - at[0].y) == 100);
+  CHECK(at[3].y == 392);  // box 1's last seat
+}
+
+TEST_CASE(
+    "ortho: a round trip whose faces share less than a pitch parts as far as both hold") {
+  // The faces' runs overlap on 340..392, 52 units: both legs stay straight, 52 apart.
+  PodVector<scav_rect> const boxes{ rect(0, 332, 100, 400), rect(900, 0, 100, 400) };
+  PodVector<RouteNet> const nets{
+    { .src = pt(50, 532), .dst = pt(950, 200), .src_obstacle = 0, .dst_obstacle = 1 },
+    { .src = pt(950, 200), .dst = pt(50, 532), .src_obstacle = 1, .dst_obstacle = 0 },
+  };
+  PodVector<scav_point> at{ pt(100, 366), pt(900, 366), pt(900, 366), pt(100, 366) };
+  ortho_spread_attachments(boxes, seats_of(nets), aims(nets), 8, 100, at);
+  CHECK(at[0].y == at[1].y);
+  CHECK(at[2].y == at[3].y);
+  CHECK(at[0].y == 340);
+  CHECK(at[3].y == 392);
+}
+
 TEST_CASE("ortho: seats do not depend on the order the nets arrive in") {
   // Two leaving and two arriving on one seat, handed over in both orders.
   PodVector<scav_rect> const boxes{ rect(0, 0, 100, 100) };
@@ -1387,8 +1434,8 @@ TEST_CASE("ortho: seats do not depend on the order the nets arrive in") {
   PodVector<int32_t> const a{ run(false) };
   PodVector<int32_t> const b{ run(true) };
   CHECK(a == b);
-  // Both departures share one seat; the arrivals take one each above it.
-  CHECK(a == PodVector<int32_t>{ 46, 54, 46, 62 });
+  // Both departures share one seat; the arrivals take one each above it, all about 50.
+  CHECK(a == PodVector<int32_t>{ 44, 52, 44, 60 });
 }
 
 TEST_CASE("ortho: an equidistant escape is decided by the fixed side order") {

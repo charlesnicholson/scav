@@ -168,6 +168,52 @@ struct Spot {
   int32_t pos;
 };
 
+// A seat of a group the spread parts as a unit, placed at `start + k * s`. Bound set 0 is
+// its face's run; set 1 is that run cut to the far end's where the net runs straight.
+struct Member {
+  uint32_t seat;  // index into the spread's seats
+  int32_t k, pos;
+  std::array<int32_t, 2> lo, hi;
+};
+
+// The largest `s` from `least` to `step` at which every member sits within bound set `b`,
+// and the `start` nearest the members' mean that does; false where no `s` fits.
+bool fit_unit(PodVector<Member> const &members,
+              uint32_t b,
+              int32_t least,
+              int32_t step,
+              int32_t &s,
+              int32_t &start) {
+  Wide most{ step };
+  Wide fewest{ least };
+  for (Member const &x : members) {
+    for (Member const &y : members) {
+      Wide const dk{ Wide{ y.k } - x.k };
+      if (dk < 0) { continue; }
+      if ((dk == 0) && (y.lo[b] > x.hi[b])) { return false; }  // one seat, no common room
+      if (dk == 0) { continue; }
+      most = imin(most, floor_div(Wide{ y.hi[b] } - x.lo[b], dk));
+      fewest = imax(fewest, ceil_div(Wide{ y.lo[b] } - x.hi[b], dk));
+    }
+  }
+  if (most < fewest) { return false; }
+  s = static_cast<int32_t>(most);
+  Wide lo{ INT32_MIN };
+  Wide hi{ INT32_MAX };
+  Wide sum{ 0 };
+  for (Member const &m : members) {
+    Wide const off{ Wide{ m.k } * s };
+    lo = imax(lo, Wide{ m.lo[b] } - off);
+    hi = imin(hi, Wide{ m.hi[b] } - off);
+    sum += Wide{ m.pos } - off;
+  }
+  Wide const n{ static_cast<Wide>(members.size()) };
+  Wide const want{ floor_div((Wide{ 2 } * sum) + n,
+                             Wide{ 2 } * n) };  // the mean, halves up
+  start = static_cast<int32_t>(imin(imax(want, lo), hi));
+  return true;
+}
+
 // `aim` from `seat` on `face`: along the face, then out from it, 0 for an aim behind it
 // and 1 for an aim on the seat.
 std::array<Wide, 2> aim_offset(scav_point aim, scav_point seat, uint32_t face) {
@@ -579,8 +625,28 @@ void ortho_spread_attachments(PodVector<scav_rect> const &boxes,
     return true;
   };
 
-  // One sweep: seats sharing a point part by direction, half a step each way, past a
-  // `level` seat a whole step. Arrivals take a seat each, a step apart in aim order.
+  // `lo`..`hi` cut to the run of the far end's face where `seat`'s net runs straight
+  // between parallel faces of two boxes.
+  auto const tied = [&](Spot const &seat, int32_t lo, int32_t hi) {
+    std::array<int32_t, 2> out{ lo, hi };
+    Seat const &twin{ table[seat.slot ^ 1U] };
+    if ((twin.box >= boxes.size()) || twin.inscribed) { return out; }
+    uint32_t const face{ face_of(at[twin.slot], boxes[twin.box]) };
+    bool const along_y{ seat.face < 2 };
+    if ((face == INVALID) || ((face < 2) != along_y) ||
+        ((along_y ? at[twin.slot].y : at[twin.slot].x) !=
+         (along_y ? at[seat.slot].y : at[seat.slot].x))) {
+      return out;
+    }
+    FaceRun const far{ face_run(boxes[twin.box], face, clear, twin.arc) };
+    out[0] = imax(lo, far.lo + far.inset);
+    out[1] = imin(hi, (far.lo + far.len) - far.inset);
+    return out;
+  };
+
+  // One sweep: seats sharing a point part by direction as a unit, past a `level` seat a
+  // whole step. Arrivals take a seat each, a step apart in aim order.
+  thread_local PodVector<Member> members;
   auto const sweep = [&]() {
     for (Spot &seat : seats) {
       seat.pos = (seat.face < 2) ? at[seat.slot].y : at[seat.slot].x;
@@ -644,10 +710,45 @@ void ortho_spread_attachments(PodVector<scav_rect> const &boxes,
       }
       int32_t const step{ (room >= apart) ? apart : imin(clear, run.len / 3) };
       if (step <= 0) { continue; }
+      if (keep == INVALID) {
+        // One unit: the side running + across the face low, its departures on one seat
+        // and its arrivals a step apart in aim order, inside both faces of a straight net.
+        bool const departures_low{ (seats[first].face == 1) || (seats[first].face == 3) };
+        int32_t arrivals{ 0 };
+        for (uint32_t i = first; i < end; ++i) { arrivals += (seats[i].end == 1) ? 1 : 0; }
+        int32_t const lo{ run.lo + run.inset };
+        int32_t const hi{ (run.lo + run.len) - run.inset };
+        members.clear();
+        int32_t rank{ 0 };
+        for (uint32_t i = first; i < end; ++i) {
+          Spot const &seat{ seats[i] };
+          int32_t k{ departures_low ? 0 : arrivals };
+          if (seat.end == 1) {
+            k = departures_low ? (1 + rank) : rank;
+            ++rank;
+          }
+          std::array<int32_t, 2> const far{ tied(seat, lo, hi) };
+          members.push_back({ .seat = i,
+                              .k = k,
+                              .pos = seat.pos,
+                              .lo = { lo, far[0] },
+                              .hi = { hi, far[1] } });
+        }
+        int32_t s{ 0 };
+        int32_t from{ 0 };
+        if (!fit_unit(members, 1, imin(step, clear), step, s, from) &&
+            !fit_unit(members, 0, 0, step, s, from)) {
+          continue;
+        }
+        for (Member const &m : members) {
+          if (place(seats[m.seat], from + (m.k * s))) { moved = true; }
+        }
+        continue;
+      }
       // A `level` seat stays, as does a departure beside a level one, glyph-aimed aside.
       auto const stays = [&](Spot const &seat) {
-        return (keep != INVALID) && (level(seat) || ((seat.end == 0) && (keep == 0) &&
-                                                     !table[seat.slot ^ 1U].inscribed));
+        return level(seat) ||
+               ((seat.end == 0) && (keep == 0) && !table[seat.slot ^ 1U].inscribed);
       };
       int32_t movers{ 0 };  // arrivals that move
       for (uint32_t i = first; i < end; ++i) {
@@ -660,20 +761,15 @@ void ortho_spread_attachments(PodVector<scav_rect> const &boxes,
         // True when the net runs in + across this face; such a net takes the lower seat at
         // both ends.
         bool const forward{ (seat.end == 0) == ((seat.face == 1) || (seat.face == 3)) };
-        int32_t const down_by{ (keep == INVALID) ? (step / 2) : step };
-        int32_t const up_by{ (keep == INVALID) ? (step - (step / 2)) : step };
         // Moving arrivals stack a step apart beyond the first, low aims low.
         int32_t extra{ 0 };
         if (seat.end == 1) {
           extra = forward ? ((movers - 1) - rank) : rank;
           ++rank;
         }
-        int32_t const by{ forward ? -(down_by + (extra * step))
-                                  : (up_by + (extra * step)) };
+        int32_t const by{ (forward ? -1 : 1) * (step + (extra * step)) };
         int32_t got{ onto_face(seat.pos + by, run) };
-        if ((keep != INVALID) && (got == seat.pos)) {  // clamped at a corner: reverse
-          got = onto_face(seat.pos - by, run);
-        }
+        if (got == seat.pos) { got = onto_face(seat.pos - by, run); }  // clamped: reverse
         if (place(seat, got)) { moved = true; }
       }
     }
