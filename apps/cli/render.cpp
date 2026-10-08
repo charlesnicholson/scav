@@ -94,7 +94,7 @@ int run_render(char const *path,
     write_error("no such profile", profile_name);
     return EXIT_UNUSABLE;
   }
-  apply_layout_args(args, opts.profile);
+  apply_layout_args(args, opts);
 
   Metrics metrics;
   Spaces spaces;

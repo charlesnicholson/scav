@@ -1213,10 +1213,10 @@ bool cost_ancestor(Chart const &c, Ancestry const &an, StateId ancestor, StateId
   return g;
 }
 
-SCAV_COLD void cost_grid_query(ChildGrid const &g,
-                               uint32_t frame,
-                               scav_rect const &q,
-                               GridQuery &out) {
+void cost_grid_query(ChildGrid const &g,
+                     uint32_t frame,
+                     scav_rect const &q,
+                     GridQuery &out) {
   out.hit.clear();
   if (frame >= g.frame.size()) { return; }
   ChildGrid::Frame const &f{ g.frame[frame] };

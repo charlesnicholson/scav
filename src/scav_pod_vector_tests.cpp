@@ -319,7 +319,8 @@ TEST_CASE("pod_vector: resize value-initializes and keeps the prefix") {
 }
 
 TEST_CASE(
-    "vector: push_back, emplace_back and insert of an element of the same full vector") {
+    "pod_vector: push_back, emplace_back and insert of an element of the same full "
+    "vector") {
   auto v{ full<uint32_t>({ 7, 8, 9 }) };
   v.push_back(v[0]);
   CHECK(v == PodVector<uint32_t>{ 7, 8, 9, 7 });
