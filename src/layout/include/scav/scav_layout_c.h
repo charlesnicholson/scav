@@ -105,6 +105,7 @@ typedef struct {
   int32_t w_transit_bends;
   int32_t w_whitespace;
   int32_t w_backward_starts;
+  int32_t w_leaf_aspect;
 
   int32_t portfolio_k;                 /* bounded moves scored; [0, 2^20] */
   int32_t portfolio_m;                 /* chart-global phase-2 tuples; [1, 16] */

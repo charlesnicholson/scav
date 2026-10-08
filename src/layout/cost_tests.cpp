@@ -123,6 +123,61 @@ TEST_CASE("cost: a straight route between two boxes costs its length and the cha
   CHECK(t.aspect == ((400LL * 10) - (40LL * 16)));
 }
 
+namespace {
+
+// `A`'s leaf aspect drawn as `box` after a box `natural` before seats.
+int64_t leaf_aspect(scav_extent natural, scav_extent box) {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  SizedLayout z{ blank(c) };
+  z.state[a.v] = { .x = 0, .y = 0, .w = box.w, .h = box.h };
+  z.natural.assign(c.states.size(), {});
+  z.natural[a.v] = natural;
+  return cost_terms(c, decompose(c), z, routes_of(c, {}), {}, profile()).leaf_aspect;
+}
+
+}  // namespace
+
+TEST_CASE("cost: a leaf grown past twice its short side pays the excess, in ems") {
+  CHECK(leaf_aspect({ .w = 973, .h = 653 }, { .w = 973, .h = 10068 }) ==
+        10068 - (2 * 973));
+  CHECK(leaf_aspect({ .w = 973, .h = 653 }, { .w = 3508, .h = 3612 }) == 0);
+  CHECK(leaf_aspect({ .w = 973, .h = 653 }, { .w = 973, .h = 653 }) == 0);
+  CostTerms t;
+  t.leaf_aspect = 10068 - (2 * 973);
+  scav_profile const p{ profile() };
+  scav_profile unweighted{ p };
+  unweighted.w_leaf_aspect = 0;
+  int64_t const ems{ (t.leaf_aspect + p.font_size_grid - 1) / p.font_size_grid };
+  CHECK((cost_of(t, p).t2 - cost_of(t, unweighted).t2) == (p.w_leaf_aspect * ems));
+}
+
+TEST_CASE("cost: a box long by its own text pays only what seats add to it") {
+  CHECK(leaf_aspect({ .w = 3000, .h = 653 }, { .w = 3000, .h = 653 }) == 0);
+  CHECK(leaf_aspect({ .w = 3000, .h = 653 }, { .w = 3000, .h = 1870 }) == 0);
+  CHECK(leaf_aspect({ .w = 3000, .h = 653 }, { .w = 6000, .h = 653 }) == 3000);
+}
+
+TEST_CASE(
+    "cost: a composite, a pseudostate, and a layout with no boxes before seats pay none") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const outer{ build_state(c, root, "P", StateKind::Normal, {}) };
+  build_state(c, build_submachine(c, outer, {}, {}), "X", StateKind::Normal, {});
+  StateId const choice{ build_state(c, root, {}, StateKind::Choice, {}) };
+  SizedLayout z{ blank(c) };
+  z.natural.assign(c.states.size(), { .w = 500, .h = 500 });
+  for (StateId const st : { outer, choice }) {
+    z.state[st.v] = { .x = 0, .y = 0, .w = 500, .h = 5000 };
+  }
+  scav_profile const p{ profile() };
+  CHECK(cost_terms(c, decompose(c), z, routes_of(c, {}), {}, p).leaf_aspect == 0);
+  SizedLayout bare{ blank(c) };
+  bare.state[outer.v] = { .x = 0, .y = 0, .w = 500, .h = 5000 };
+  CHECK(cost_terms(c, decompose(c), bare, routes_of(c, {}), {}, p).leaf_aspect == 0);
+}
+
 TEST_CASE("cost: a start arrow running up is a quarter bend, running left a whole one") {
   // An initial at the origin into `A`, its last leg each of the four ways.
   Chart c;

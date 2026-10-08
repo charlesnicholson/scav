@@ -285,9 +285,9 @@ uint32_t layout_inputs_digest(Chart const &c);
 
 // Cost ======================================================================
 
-inline constexpr uint32_t TIER2_TERMS{ 14 };
+inline constexpr uint32_t TIER2_TERMS{ 15 };
 
-// The thirteen Tier-2 quantities before weighting, and the Tier-0 counts.
+// The Tier-2 quantities before weighting, and the Tier-0 counts.
 struct CostTerms {
   int64_t bends{ 0 };      // direction changes at a route's interior vertices
   int64_t corridor{ 0 };   // length two routes' segments run collinear over
@@ -317,6 +317,9 @@ struct CostTerms {
   int64_t whitespace{ 0 };
   // Start arrows against the reading direction, in quarter bends: up 1, left 4.
   int64_t backward_starts{ 0 };
+  // Per live leaf `Normal` state, `max(0, long - 2 * short)` of its box past that of its
+  // box before seats floored it.
+  int64_t leaf_aspect{ 0 };
 
   // Tier 0 counts, summed into `Cost::t0_violations`.
   int32_t through_box{ 0 };

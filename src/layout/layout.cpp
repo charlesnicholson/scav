@@ -241,7 +241,7 @@ void write_rows(Chart &c, ColumnId id, V const &rows) {
   }
 }
 
-static_assert(sizeof(scav_profile) == 53 * sizeof(int32_t),
+static_assert(sizeof(scav_profile) == 54 * sizeof(int32_t),
               "the profile must stay a flat block of int32 with no padding, or the "
               "inputs digest below would hash bytes whose values are unspecified");
 

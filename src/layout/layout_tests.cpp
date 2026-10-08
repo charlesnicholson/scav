@@ -2102,6 +2102,63 @@ TEST_CASE("layout: a grow pin is among the pins a run rests on, and lays it out 
   CHECK(layout_coordinate_hash(c) == coordinate);
 }
 
+TEST_CASE("layout: a leaf's aspect scored from the columns is the one sizing scored") {
+  // `A` is wide from its own text, under a title band and over an inner loop's room; a
+  // grow pin stands it on end.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::Default, {});
+  TransId const loop{ build_trans(c, a, a, TransKind::Internal, {}) };
+  std::vector<scav_box_space> boxes(c.states.size());
+  boxes[a.v] = { .min_w = 3000, .h_before = 300 };
+  std::vector<scav_path_box> labels{
+    { .subject = loop.v, .w = 700, .h = 269, .order = 0 }
+  };
+  scav_spaces const s{ .box_state = boxes.data(),
+                       .n_box_state = static_cast<uint32_t>(boxes.size()),
+                       .box_state_stride = sizeof(scav_box_space),
+                       .path_box = labels.data(),
+                       .n_path_box = static_cast<uint32_t>(labels.size()),
+                       .path_box_stride = sizeof(scav_path_box) };
+  scav_profile p{ readable() };
+  p.portfolio_k = 0;
+  p.portfolio_m = 1;
+  std::vector<scav_placed> placed;
+  std::vector<Diagnostic> diags;
+  REQUIRE(layout_run(c, s, opts(p), placed, diags));
+  scav_rect const natural{ state_rect(c, a) };
+  SearchPins const tall{ .grows = { { .state = a, .w = 1, .h = 40 } } };
+  REQUIRE(layout_run(c,
+                     s,
+                     opts(p),
+                     placed,
+                     diags,
+                     nullptr,
+                     nullptr,
+                     0,
+                     nullptr,
+                     nullptr,
+                     &tall));
+  scav_rect const grown{ state_rect(c, a) };
+  REQUIRE(grown.h > (2 * grown.w));
+  REQUIRE(natural.w > (2 * natural.h));
+  SplitGraph const g{ decompose(c) };
+  std::vector<scav_rect> const kept(placed.begin(), placed.end());
+  int64_t const want{ (grown.h - (2 * int64_t{ grown.w })) -
+                      (natural.w - (2 * int64_t{ natural.h })) };
+  CHECK(cost_columns(c, g, p, s, kept).leaf_aspect == want);
+  // The search's own scoring of the same drawing.
+  SubmachineOrders const o{ order_submachines(c, g, s, p, 1, tall) };
+  SizedLayout z;
+  REQUIRE(size_layout(c, g, o, s, p, z, diags));
+  CHECK((z.natural[a.v].w == natural.w));
+  CHECK((z.natural[a.v].h == natural.h));
+  Routes const r{ route_transitions(c, g, o, z, s, p, *router_at(0)) };
+  CHECK(cost_terms(c, g, z, r, s, p).leaf_aspect == want);
+}
+
 TEST_CASE("layout: a channel a fork bar touches routes at its drawn size") {
   // The bar is flush against `P`; the route runs level from the bar's face to
   // `deep` with no inflation.
@@ -2678,6 +2735,7 @@ TEST_CASE("layout: the corpus cost vector is committed, term by term and by shar
     CostTerms const t{ cost_columns(c, decompose(c), p) };
     Cost const scored{ cost_of(t, p) };
     CHECK(scored.t0_violations == 0);  // every corpus chart ships clean
+    CHECK(t.leaf_aspect == 0);         // and no state on it grows
 
     actual += name;
     for (int64_t const term : { int64_t{ scored.t0_violations },

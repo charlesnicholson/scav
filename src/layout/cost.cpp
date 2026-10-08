@@ -628,6 +628,32 @@ bool in_transit(Chart const &c,
 
 Wide area_of(scav_rect const &r) { return Wide{ r.w } * r.h; }
 
+// How far a `w` by `h` box's long side runs past twice its short one, floored at zero.
+Wide long_side_excess(int32_t w, int32_t h) {
+  constexpr Wide RATIO{ 2 };
+  return imax(Wide{ imax(w, h) } - (RATIO * imin(w, h)), Wide{ 0 });
+}
+
+// Per live leaf `Normal` state, the long side's excess of its box past its box's before
+// seats floored it, floored at zero; nothing where `z` holds no extents before seats.
+Wide leaf_aspect_of(Chart const &c, SizedLayout const &z) {
+  Wide total{ 0 };
+  for (uint32_t st = 0; (st < z.natural.size()) && (st < z.state.size()); ++st) {
+    if ((c.states[st].live == 0) || (c.states[st].kind != StateKind::Normal)) { continue; }
+    Span const subs{ c.states[st].submachines };
+    bool leaf{ true };
+    for (uint32_t k = 0; k < subs.len; ++k) {
+      leaf = leaf && (c.submachines[c.submachine_ids[subs.off + k].v].live == 0);
+    }
+    if (!leaf) { continue; }
+    scav_extent const was{ z.natural[st] };
+    total += imax(
+        long_side_excess(z.state[st].w, z.state[st].h) - long_side_excess(was.w, was.h),
+        Wide{ 0 });
+  }
+  return total;
+}
+
 // Per live composite, the hole between its bands inside its padding less its live
 // children's rects and its loop room, floored at zero; the sum capped at `chart`.
 Wide whitespace_of(Chart const &c, SizedLayout const &z, Wide chart) {
@@ -1337,6 +1363,7 @@ CostTerms cost_terms(CostContext const &ctx,
   t.area = area_of(z.chart);
   Scratch &sc{ scratch() };
   t.whitespace = whitespace_of(c, z, t.area);
+  t.leaf_aspect = leaf_aspect_of(c, z);
   // Every route segment once; transition `tr`'s pieces are `first[tr]..first[tr + 1]`.
   PodVector<Piece> &pieces{ sc.pieces };
   pieces.clear();
@@ -1652,6 +1679,7 @@ CostTerms cost_bound(Chart const &c,
   if (per_trans != nullptr) { per_trans->assign(c.transitions.size(), 0); }
   t.area = area_of(z.chart);
   t.whitespace = (p.w_whitespace != 0) ? whitespace_of(c, z, t.area) : 0;
+  t.leaf_aspect = leaf_aspect_of(c, z);
   t.adjacency = adjacency_of(c, g, z, p);
   bool const rectilinear{ router.rectilinear() };
   int32_t const near{ border_band(p) - 1 };
@@ -1767,6 +1795,8 @@ SCAV_COLD CostTerms cost_columns(Chart const &c,
   rows("scav.geom.state_lead", z.lead);
   rows("scav.geom.state_trail", z.trail);
   rows("scav.geom.sub", z.sub);
+  rows("scav.geom.state_loop_place", z.loop_place);
+  size_natural(c, s, p, z);
   PodVector<scav_rect> chart;
   rows("scav.geom.chart", chart);
   if (!chart.empty()) { z.chart = chart[0]; }
@@ -1798,7 +1828,8 @@ std::array<Wide, TIER2_TERMS> weighted_terms(CostTerms const &t, scav_profile co
            Wide{ p.w_length } * ceil_div(t.length, em),
            Wide{ p.w_transit_bends } * t.transit_bends,
            Wide{ p.w_whitespace } * ceil_div(t.whitespace, em2),
-           Wide{ p.w_backward_starts } * t.backward_starts };
+           Wide{ p.w_backward_starts } * t.backward_starts,
+           Wide{ p.w_leaf_aspect } * ceil_div(t.leaf_aspect, em) };
 }
 
 }  // namespace
@@ -1820,7 +1851,7 @@ std::array<int32_t, TIER0_TERMS> tier0_terms(CostTerms const &t) {
 Cost cost_of(CostTerms const &t, scav_profile const &p) {
   Cost out;
   out.t0_violations = tier0_of(t);
-  // Area, the largest term, is below (2 * COORD_MAX)^2 < 2^40; thirteen terms under
+  // Area, the largest term, is below (2 * COORD_MAX)^2 < 2^40; fifteen terms under
   // weights capped at 2^10 sum below 2^54.
   for (Wide const term : weighted_terms(t, p)) { out.t2 += term; }
   return out;

@@ -28,7 +28,7 @@ TEST_CASE("profile: both shipped profiles load and pass their own validation") {
     CAPTURE(name);
     scav_profile const p{ named(name) };
     CHECK(profile_validate(p));
-    CHECK(p.profile_version == 18);
+    CHECK(p.profile_version == 19);
     // Both run the culled search over every row of the Level 2 table.
     CHECK(p.portfolio_m == 16);
     CHECK(p.search_cull == 1);
@@ -114,6 +114,10 @@ TEST_CASE("profile: every bound rejects out of range") {
           .bad_high = 1025 },
     Poke{ .what = "w_whitespace",
           .field = &scav_profile::w_whitespace,
+          .bad_low = -1,
+          .bad_high = 1025 },
+    Poke{ .what = "w_leaf_aspect",
+          .field = &scav_profile::w_leaf_aspect,
           .bad_low = -1,
           .bad_high = 1025 },
     Poke{ .what = "w_area",
