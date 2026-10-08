@@ -11,6 +11,8 @@
 #include "layout/size.h"
 #include "layout/tests/pod_eq.h"
 #include "layout/tests/test_synth.h"
+#include "layout/tests/trace_record.h"
+#include "layout/trace.h"
 #include "scav/scav_core.h"
 #include "scav/scav_core_c.h"
 #include "scav/scav_layout.h"
@@ -1350,6 +1352,35 @@ constexpr std::array<std::array<int64_t, 11>, 8> SCALE_PINNED{
 };
 
 }  // namespace
+
+TEST_CASE(
+    "layout: the nested scale target's innermost composites grow to seat their ends") {
+  // Each of the eight deepest composites holds an empty region and meets fifteen routes:
+  // fourteen arrivals and its exit to the composite around it.
+  Chart const built{ nested_2k_chart() };
+  scav_profile const p{ readable() };
+  SplitGraph const g{ decompose(built) };
+  SubmachineOrders const o{ order_submachines(built, g, {}, p) };
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  TraceRecord t{ built };
+  trace_sink_set(&t);
+  bool const sized{ size_layout(built, g, o, {}, p, z, diags) };
+  trace_sink_set(nullptr);
+  REQUIRE(sized);
+  uint32_t grown{ 0 };
+  for (TraceEvent const &e : t.events()) {
+    if (e.kind != TraceKind::StateGrown) { continue; }
+    ++grown;
+    CAPTURE(e.grow.state);
+    CHECK(e.pass == 0);
+    CHECK(e.grow.ends == 15);
+    CHECK(e.grow.seats_w == 4);
+    CHECK(e.grow.seats_h == 4);
+    CHECK(e.grow.to_w == face_length(4, p.pad, p));
+  }
+  CHECK(grown == 8);
+}
 
 TEST_CASE("layout: both scale targets score to pinned terms, profile by router" *
           doctest::test_suite("full")) {
