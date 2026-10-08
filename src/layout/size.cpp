@@ -2233,19 +2233,34 @@ void Sizer::size_state(uint32_t i) {
   };
   Wide w{ natural_w };
   Wide h{ natural_h };
-  FaceSeats const seats{ (i < o.state_grow.size()) ? o.state_grow[i] : FaceSeats{} };
+  int32_t const pad{ (ring != 0) ? p.pad : 0 };
+  FaceSeats seats{ (i < o.state_grow.size()) ? o.state_grow[i] : FaceSeats{} };
+  bool const pinned{ seats.w != INVALID };
+  uint32_t const own{ (i < ends.size()) ? ends[i] : 0U };
+  if (!pinned && (sk == StateKind::Normal) && (own != 0) && (natural_w <= COORD_MAX) &&
+      (natural_h <= COORD_MAX)) {
+    // Route ends past what the natural box seats take a quarter of them on every face.
+    scav_rect const natural{ .x = 0,
+                             .y = 0,
+                             .w = static_cast<int32_t>(natural_w),
+                             .h = static_cast<int32_t>(natural_h) };
+    int32_t const arc{ state_corner_radius(sk, natural, pad) };
+    uint32_t const held{ 2 * (face_capacity(natural.w, arc, p) +
+                              face_capacity(natural.h, arc, p)) };
+    if (own > held) { seats = { .w = (own + 3) / 4, .h = (own + 3) / 4 }; }
+  }
   if (seats.w != INVALID) {
     // The corner at its largest, so the grown box seats its pin whatever its arc.
     scav_rect const wide{ .x = 0, .y = 0, .w = COORD_MAX, .h = COORD_MAX };
-    int32_t const arc{ state_corner_radius(sk, wide, (ring != 0) ? p.pad : 0) };
+    int32_t const arc{ state_corner_radius(sk, wide, pad) };
     w = imax(w, face_length(seats.w, arc, p));
     h = imax(h, face_length(seats.h, arc, p));
   }
   if ((w != natural_w) || (h != natural_h)) {
     trace_emit({ .kind = TraceKind::StateGrown,
-                 .pass = 1,
+                 .pass = pinned ? uint16_t{ 1 } : uint16_t{ 0 },
                  .grow = { .state = i,
-                           .ends = (i < ends.size()) ? ends[i] : 0U,
+                           .ends = own,
                            .seats_w = seats.w,
                            .seats_h = seats.h,
                            .from_w = saturate(natural_w),

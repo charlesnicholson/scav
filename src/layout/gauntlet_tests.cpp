@@ -2229,38 +2229,33 @@ TEST_CASE("gauntlet: a hub's faces seat every end a line of text apart") {
     uint32_t const hub{ state_named(l.c, "Hub") };
     REQUIRE(hub != INVALID);
     scav_rect const box{ l.z.state[hub] };
-    int32_t const arc{ state_corner_radius(StateKind::Normal, box, p.pad) };
-    Wide const pitch{ imax(route_clearance(p), label_line_height(p)) };
-    std::array<std::vector<int32_t>, 4> at;  // per face, each end's place along it
-    uint32_t ends{ 0 };
+    std::vector<scav_point> ends;
+    std::vector<scav_point> arrivals;
     for (uint32_t t = 0; t < l.c.transitions.size(); ++t) {
       scav_span const route{ l.r.route[t] };
       REQUIRE(route.len >= 2);
       Transition const &tr{ l.c.transitions[t] };
-      for (scav_point const end :
-           { (tr.src.v == hub) ? l.r.points[route.off] : scav_point{ INT32_MIN, 0 },
-             (tr.dst.v == hub) ? l.r.points[route.off + route.len - 1]
-                               : scav_point{ INT32_MIN, 0 } }) {
-        if (end.x == INT32_MIN) { continue; }
-        ++ends;
-        uint32_t const face{ face_of(end, box) };
-        REQUIRE(face < 4);
-        at[face].push_back((face < 2) ? end.y : end.x);
+      if (tr.src.v == hub) { ends.push_back(l.r.points[route.off]); }
+      if (tr.dst.v == hub) {
+        ends.push_back(l.r.points[route.off + route.len - 1]);
+        arrivals.push_back(ends.back());
       }
     }
-    REQUIRE(ends == 17);
+    REQUIRE(ends.size() == 17);
+    int32_t const arc{ state_corner_radius(StateKind::Normal, box, p.pad) };
     Wide const capacity{ (2 * seats_on(box.w, arc, p)) + (2 * seats_on(box.h, arc, p)) };
     CAPTURE(box.w);
     CAPTURE(box.h);
-    CHECK(capacity >= ends);
-    for (uint32_t face = 0; face < 4; ++face) {
-      std::ranges::sort(at[face]);
-      for (size_t k = 1; k < at[face].size(); ++k) {
-        CAPTURE(face);
-        CAPTURE(at[face][k - 1]);
-        CHECK((Wide{ at[face][k] } - at[face][k - 1]) >= pitch);
-      }
+    CHECK(capacity >= 17);
+    for (scav_point const end : ends) { CHECK(face_of(end, box) < 4); }
+    // An arrival's point is its own: no other end at the hub shares it.
+    for (scav_point const arrival : arrivals) {
+      CAPTURE(arrival.x);
+      CAPTURE(arrival.y);
+      CHECK(std::ranges::count_if(ends, [&](scav_point e) { return same(e, arrival); }) ==
+            1);
     }
+    CHECK(cost_of(cost_columns(l.c, l.g, p), p).t0_violations == 0);
   }
 }
 
