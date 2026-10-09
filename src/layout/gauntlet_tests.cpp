@@ -822,15 +822,15 @@ TEST_CASE(
 }
 
 TEST_CASE("gauntlet: a turn that pays once the root re-ranks around it is reached") {
-  // `kicked` at row 1 with both regions turned down, the root re-ranked and its exits
+  // `kicked` at row 1 with `outbound` turned down, the root re-ranked and its exit
   // re-faced: a kick searched in its own frame alone stops dearer, and the search costs
   // no more than this drawing.
   scav_profile const p{ readable() };
   uint32_t row{ INVALID };
   SearchPins known;
   REQUIRE(scav::test::corpus_pins_read(
-      "--portfolio-row 1 --rank 0:3 --rank 1:1 --rank 3:1 --rank 4:2 --cut 7:1 "
-      "--end 7:1:1:3 --end 6:0:1:1 --end 7:0:1:1 --orient 1 --orient 2",
+      "--portfolio-row 1 --rank 0:3 --rank 4:2 --rank 1:1 --cut 7:1 --end 7:0:1:1 "
+      "--end 7:1:1:3 --orient 2",
       row,
       known));
   REQUIRE(row == 1);
