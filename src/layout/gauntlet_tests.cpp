@@ -2295,7 +2295,9 @@ TEST_CASE("gauntlet: a hub over its seats is offered every shape up to four time
     uint32_t const hub{ state_named(c, "Hub") };
     std::erase_if(kicks, [hub](TraceEvent const &e) { return e.search.state != hub; });
     auto const five{ static_cast<int32_t>(face_length(5, p.pad, p)) };
-    int32_t const arc{ state_corner_radius(StateKind::Normal, { 0, 0, five, five }, p.pad) };
+    int32_t const arc{
+      state_corner_radius(StateKind::Normal, { 0, 0, five, five }, p.pad)
+    };
     std::vector<std::pair<uint32_t, uint32_t>> want;
     for (uint32_t const w : { 5U, 10U, 15U, 20U }) {
       for (uint32_t const h : { 5U, 10U, 15U, 20U }) {
@@ -2315,7 +2317,8 @@ TEST_CASE("gauntlet: a hub over its seats is offered every shape up to four time
       CHECK(kicks[k].search.seats_h == want[k].second);
     }
     CHECK(std::ranges::any_of(want, [](auto const &s) { return s.first != s.second; }));
-    CHECK(std::ranges::none_of(want, [](auto const &s) { return s.first * 2 <= s.second; }));
+    CHECK(
+        std::ranges::none_of(want, [](auto const &s) { return s.first * 2 <= s.second; }));
   }
 }
 
