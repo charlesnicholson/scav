@@ -2458,3 +2458,231 @@ TEST_CASE(
   CHECK(kept.pack == Compaction::On);
   CHECK(kept.fold == Fold::Always);
 }
+
+namespace {
+
+// `one_frame` over a lone state `a`, with a grow pin's `seats` on it.
+SubmachineOrders grown_one(Chart const &c, SubmachineId root, StateId a, FaceSeats seats) {
+  SubmachineOrders o{ one_frame(c, root, { state_node(a.v, 0, 0) }, {}, {}) };
+  o.state_grow.assign(c.states.size(), FaceSeats{});
+  o.state_grow[a.v] = seats;
+  return o;
+}
+
+}  // namespace
+
+TEST_CASE("size: a grow pin floors each face to hold its seats a line of text apart") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  scav_profile const p{ profile() };
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  REQUIRE(size_layout(c,
+                      depths({ 0 }),
+                      grown_one(c, root, a, { .w = 7, .h = 5 }),
+                      {},
+                      p,
+                      z,
+                      diags));
+  // The corner at its largest is `pad`, past the route clearance at `readable`.
+  int32_t const inset{ imax(route_clearance(p), p.pad) };
+  int32_t const pitch{ imax(route_clearance(p), label_line_height(p)) };
+  CHECK(z.state[a.v].w == ((6 * pitch) + (2 * inset)));
+  CHECK(z.state[a.v].h == ((4 * pitch) + (2 * inset)));
+  int32_t const arc{ state_corner_radius(StateKind::Normal, z.state[a.v], p.pad) };
+  CHECK(face_capacity(z.state[a.v].w, arc, p) == 7);
+  CHECK(face_capacity(z.state[a.v].h, arc, p) == 5);
+}
+
+TEST_CASE("size: a grow pin its natural box already holds leaves the box as it is") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  scav_profile const p{ profile() };
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  REQUIRE(size_layout(c,
+                      depths({ 0 }),
+                      grown_one(c, root, a, { .w = 2, .h = 0 }),
+                      {},
+                      p,
+                      z,
+                      diags));
+  CHECK(z.state[a.v].w == p.kind_min_w[0] + (2 * p.pad));
+  CHECK(z.state[a.v].h == p.kind_min_h[0] + (2 * p.pad));
+}
+
+TEST_CASE("size: the last grow pin naming a state decides its box") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::Default, {});
+  scav_profile const p{ profile() };
+  SplitGraph const g{ decompose(c) };
+  auto const sized = [&](SearchPins const &pins) {
+    SizedLayout z;
+    std::vector<Diagnostic> diags;
+    REQUIRE(size_layout(c, g, order_submachines(c, g, {}, p, 1, pins), {}, p, z, diags));
+    return z.state[a.v];
+  };
+  scav_rect const natural{ sized({}) };
+  SearchPins const wide{ .grows = { { .state = a, .w = 2, .h = 1 },
+                                    { .state = a, .w = 9, .h = 1 } } };
+  SearchPins const back{ .grows = { { .state = a, .w = 9, .h = 1 },
+                                    { .state = a, .w = 2, .h = 1 } } };
+  CHECK(sized(wide).w == face_length(9, p.pad, p));
+  CHECK(sized(wide).h == natural.h);
+  CHECK(sized(back).w == natural.w);
+}
+
+TEST_CASE("size: a box a grow pin raises is traced with its seats and both extents") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  scav_profile const p{ profile() };
+  auto const grown = [&](FaceSeats seats) {
+    TraceRecord t{ c };
+    trace_sink_set(&t);
+    SizedLayout z;
+    std::vector<Diagnostic> diags;
+    bool const ok{
+      size_layout(c, depths({ 0 }), grown_one(c, root, a, seats), {}, p, z, diags)
+    };
+    trace_sink_set(nullptr);
+    REQUIRE(ok);
+    std::vector<TraceEvent> out;
+    for (TraceEvent const &e : t.events()) {
+      if (e.kind == TraceKind::StateGrown) { out.push_back(e); }
+    }
+    return out;
+  };
+  CHECK(grown({ .w = 2, .h = 1 }).empty());
+  std::vector<TraceEvent> const up{ grown({ .w = 7, .h = 1 }) };
+  REQUIRE(up.size() == 1);
+  CHECK(up[0].pass == 1);  // pinned
+  CHECK(up[0].grow.state == a.v);
+  CHECK(up[0].grow.seats_w == 7);
+  CHECK(up[0].grow.seats_h == 1);
+  CHECK(up[0].grow.from_w == p.kind_min_w[0] + (2 * p.pad));
+  CHECK(up[0].grow.from_h == p.kind_min_h[0] + (2 * p.pad));
+  CHECK(up[0].grow.to_w == face_length(7, p.pad, p));
+  CHECK(up[0].grow.to_h == up[0].grow.from_h);
+}
+
+TEST_CASE("size: a state's route ends are its box ends and border ports in its frame") {
+  // `A` has two inner loops, an outer loop and an edge out; `P` is entered from `A`,
+  // left for `B`, and enters its child `X` from its own inner face.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  StateId const outer{ build_state(c, root, "P", StateKind::Normal, {}) };
+  StateId const x{
+    build_state(c, build_submachine(c, outer, {}, {}), "X", StateKind::Normal, {})
+  };
+  build_trans(c, a, a, TransKind::Internal, {});
+  build_trans(c, a, a, TransKind::Local, {});
+  build_trans(c, a, a, TransKind::Default, {});
+  build_trans(c, a, x, TransKind::Default, {});
+  build_trans(c, x, b, TransKind::Default, {});
+  build_trans(c, outer, x, TransKind::Local, {});
+  PodVector<uint32_t> ends;
+  size_route_ends(c, decompose(c), ends);
+  CHECK(ends[a.v] == 3);  // the outer loop's two and the edge out
+  CHECK(ends[b.v] == 1);
+  CHECK(ends[outer.v] == 2);  // the two ports; its inner face is inside it
+  CHECK(ends[x.v] == 3);      // from both ports and from the inner face
+}
+
+namespace {
+
+// A chart of `Hub` and `trips` satellites, each a round trip from it, and an initial into
+// it; `kind` is Hub's.
+Chart hub_chart(uint32_t trips, StateKind kind = StateKind::Normal) {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const hub{ build_state(c, root, "Hub", kind, {}) };
+  for (uint32_t k = 0; k < trips; ++k) {
+    StateId const s{
+      build_state(c, root, "S" + std::to_string(k), StateKind::Normal, {})
+    };
+    build_trans(c, hub, s, TransKind::Default, {});
+    build_trans(c, s, hub, TransKind::Default, {});
+  }
+  StateId const start{ build_state(c, root, {}, StateKind::Initial, {}) };
+  build_trans(c, start, hub, TransKind::Default, {});
+  return c;
+}
+
+// `c` sized at `p` from its own phase 1 under `pins`.
+SizedLayout sized_from(Chart const &c,
+                       scav_profile const &p,
+                       SearchPins const &pins = {}) {
+  SplitGraph const g{ decompose(c) };
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  REQUIRE(size_layout(c, g, order_submachines(c, g, {}, p, 1, pins), {}, p, z, diags));
+  return z;
+}
+
+}  // namespace
+
+TEST_CASE(
+    "size: a state with more route ends than its faces seat takes a quarter a face") {
+  // Seventeen ends against the ten a natural box seats: five a face, both axes.
+  scav_profile const p{ profile() };
+  Chart const c{ hub_chart(8) };
+  scav_rect const box{ sized_from(c, p).state[0] };
+  CHECK(box.w == face_length(5, p.pad, p));
+  CHECK(box.h == face_length(5, p.pad, p));
+  int32_t const arc{ state_corner_radius(StateKind::Normal, box, p.pad) };
+  CHECK((2 * (face_capacity(box.w, arc, p) + face_capacity(box.h, arc, p))) >= 17);
+}
+
+TEST_CASE("size: a state its natural box seats keeps that box") {
+  // Nine ends on a box whose faces seat three, three, two and two.
+  scav_profile const p{ profile() };
+  Chart const c{ hub_chart(4) };
+  Chart const more{ hub_chart(5) };
+  scav_rect const box{ sized_from(c, p).state[0] };
+  CHECK(box.w == p.kind_min_w[0] + (2 * p.pad));
+  CHECK(box.h == p.kind_min_h[0] + (2 * p.pad));
+  CHECK(sized_from(more, p).state[0].h > box.h);  // eleven ends take three a face
+}
+
+TEST_CASE("size: a grow pin decides over the default, and only a Normal state takes it") {
+  scav_profile const p{ profile() };
+  Chart const c{ hub_chart(8) };
+  scav_rect const pinned{
+    sized_from(c, p, { .grows = { { .state = StateId{ 0 }, .w = 2, .h = 2 } } }).state[0]
+  };
+  CHECK(pinned.w == p.kind_min_w[0] + (2 * p.pad));
+  CHECK(pinned.h == p.kind_min_h[0] + (2 * p.pad));
+  Chart const choice{ hub_chart(8, StateKind::Choice) };
+  scav_rect const mark{ sized_from(choice, p).state[0] };
+  CHECK(mark.w == p.kind_min_w[3]);
+  CHECK(mark.h == p.kind_min_h[3]);
+}
+
+TEST_CASE("size: the default's raised box is traced with its route ends") {
+  scav_profile const p{ profile() };
+  Chart const c{ hub_chart(8) };
+  TraceRecord t{ c };
+  trace_sink_set(&t);
+  SizedLayout const z{ sized_from(c, p) };
+  trace_sink_set(nullptr);
+  uint32_t grown{ 0 };
+  for (TraceEvent const &e : t.events()) {
+    if (e.kind != TraceKind::StateGrown) { continue; }
+    ++grown;
+    CHECK(e.pass == 0);
+    CHECK(e.grow.state == 0);
+    CHECK(e.grow.ends == 17);
+    CHECK(e.grow.seats_w == 5);
+    CHECK(e.grow.seats_h == 5);
+    CHECK(e.grow.to_w == z.state[0].w);
+  }
+  CHECK(grown == 1);
+}

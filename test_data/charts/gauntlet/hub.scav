@@ -1,0 +1,31 @@
+// One state with eight round trips, four satellites either side of it: more route
+// ends than its faces seat a line of text apart at its natural size.
+chart hub "a state with more ends than its faces seat" {
+  state West1,
+  state West2,
+  state West3,
+  state West4,
+  state Hub,
+  state East1,
+  state East2,
+  state East3,
+  state East4,
+
+  trans * -> Hub,
+  trans West1 -> Hub "w1 done",
+  trans Hub -> West1 "w1",
+  trans West2 -> Hub "w2 done",
+  trans Hub -> West2 "w2",
+  trans West3 -> Hub "w3 done",
+  trans Hub -> West3 "w3",
+  trans West4 -> Hub "w4 done",
+  trans Hub -> West4 "w4",
+  trans Hub -> East1 "e1",
+  trans East1 -> Hub "e1 done",
+  trans Hub -> East2 "e2",
+  trans East2 -> Hub "e2 done",
+  trans Hub -> East3 "e3",
+  trans East3 -> Hub "e3 done",
+  trans Hub -> East4 "e4",
+  trans East4 -> Hub "e4 done",
+}

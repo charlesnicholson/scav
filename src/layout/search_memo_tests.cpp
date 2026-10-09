@@ -181,7 +181,7 @@ TEST_CASE("search memo: the key tells apart every input a search is a function o
   base.seed.ends.push_back({ .trans = TransId{ 2 }, .leg = 0, .end = 0, .face = 1 });
   base.scope.assign(4, 0);
 
-  std::vector<Inputs> variants(22, base);
+  std::vector<Inputs> variants(24, base);
   variants[0].objective.node_sep += 1;
   variants[1].row.knobs.node_sep += 1;
   variants[2].row.dar = DarSource::OwnerHole;
@@ -209,6 +209,8 @@ TEST_CASE("search memo: the key tells apart every input a search is a function o
   variants[20].seed.folds.push_back(
       { .frame = SubmachineId{ 2 }, .mode = FOLD_ALWAYS, .layer = 2 });
   variants[21].refold = true;
+  variants[22].seed.grows.push_back({ .state = StateId{ 3 }, .w = 4, .h = 4 });
+  variants[23].seed.grows.push_back({ .state = StateId{ 3 }, .w = 4, .h = 5 });
 
   std::vector<PodVector<uint32_t>> keys{ key_of(base) };
   for (Inputs const &v : variants) { keys.push_back(key_of(v)); }
@@ -601,6 +603,32 @@ TEST_CASE(
   CHECK(drawn > 0);
   CHECK(deduped > drawn);
   CHECK(faced > 0);
+}
+
+TEST_CASE("search: a search that grows a state is the one run with no memo" *
+          doctest::test_suite("full")) {
+  // `gauntlet/hub` takes grow kicks; every memo answer is checked against the run afresh.
+  MemoGuard const guard;
+  CandidateGuard const candidates;
+  char const *const hub{ "gauntlet/hub.scav" };
+  for (bool const labelled : { false, true }) {
+    CAPTURE(labelled);
+    layout_test_search_memo_verify(true);
+    layout_test_candidate_memo(true, true);
+    Laid const with{ lay_out(hub, labelled) };
+    REQUIRE(with.ok);
+    CHECK(layout_test_search_memo_mismatches() == 0);
+    CHECK(layout_test_candidate_memo_mismatches() == 0);
+    layout_test_search_memo_verify(false);
+    layout_test_search_memo(false);
+    layout_test_candidate_memo(false, false);
+    Laid const without{ lay_out(hub, labelled) };
+    layout_test_search_memo(true);
+    layout_test_candidate_memo(true, false);
+    REQUIRE(without.ok);
+    CHECK(with.structural == without.structural);
+    CHECK(with.coordinate == without.coordinate);
+  }
 }
 
 TEST_CASE(

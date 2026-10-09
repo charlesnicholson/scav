@@ -2,7 +2,7 @@
 // Turning a region down, searched with the root held as it stands, costs more than the
 // drawing it replaces; searched again with the root free to re-rank and re-face around
 // the turned composite, it costs less. Only a kick whose search reaches the enclosing
-// frame finds the stacked regions with both exits straight.
+// frame finds it.
 chart kicked "a turn that pays once the frame around it re-ranks" {
   state Closed,
   state Open {

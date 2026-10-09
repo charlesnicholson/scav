@@ -123,6 +123,61 @@ TEST_CASE("cost: a straight route between two boxes costs its length and the cha
   CHECK(t.aspect == ((400LL * 10) - (40LL * 16)));
 }
 
+namespace {
+
+// `A`'s leaf aspect drawn as `box` after a box `natural` before seats.
+int64_t leaf_aspect(scav_extent natural, scav_extent box) {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  SizedLayout z{ blank(c) };
+  z.state[a.v] = { .x = 0, .y = 0, .w = box.w, .h = box.h };
+  z.natural.assign(c.states.size(), {});
+  z.natural[a.v] = natural;
+  return cost_terms(c, decompose(c), z, routes_of(c, {}), {}, profile()).leaf_aspect;
+}
+
+}  // namespace
+
+TEST_CASE("cost: a leaf grown past twice its short side pays the excess, in ems") {
+  CHECK(leaf_aspect({ .w = 973, .h = 653 }, { .w = 973, .h = 10068 }) ==
+        10068 - (2 * 973));
+  CHECK(leaf_aspect({ .w = 973, .h = 653 }, { .w = 3508, .h = 3612 }) == 0);
+  CHECK(leaf_aspect({ .w = 973, .h = 653 }, { .w = 973, .h = 653 }) == 0);
+  CostTerms t;
+  t.leaf_aspect = 10068 - (2 * 973);
+  scav_profile const p{ profile() };
+  scav_profile unweighted{ p };
+  unweighted.w_leaf_aspect = 0;
+  int64_t const ems{ (t.leaf_aspect + p.font_size_grid - 1) / p.font_size_grid };
+  CHECK((cost_of(t, p).t2 - cost_of(t, unweighted).t2) == (p.w_leaf_aspect * ems));
+}
+
+TEST_CASE("cost: a box long by its own text pays only what seats add to it") {
+  CHECK(leaf_aspect({ .w = 3000, .h = 653 }, { .w = 3000, .h = 653 }) == 0);
+  CHECK(leaf_aspect({ .w = 3000, .h = 653 }, { .w = 3000, .h = 1870 }) == 0);
+  CHECK(leaf_aspect({ .w = 3000, .h = 653 }, { .w = 6000, .h = 653 }) == 3000);
+}
+
+TEST_CASE(
+    "cost: a composite, a pseudostate, and a layout with no boxes before seats pay none") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const outer{ build_state(c, root, "P", StateKind::Normal, {}) };
+  build_state(c, build_submachine(c, outer, {}, {}), "X", StateKind::Normal, {});
+  StateId const choice{ build_state(c, root, {}, StateKind::Choice, {}) };
+  SizedLayout z{ blank(c) };
+  z.natural.assign(c.states.size(), { .w = 500, .h = 500 });
+  for (StateId const st : { outer, choice }) {
+    z.state[st.v] = { .x = 0, .y = 0, .w = 500, .h = 5000 };
+  }
+  scav_profile const p{ profile() };
+  CHECK(cost_terms(c, decompose(c), z, routes_of(c, {}), {}, p).leaf_aspect == 0);
+  SizedLayout bare{ blank(c) };
+  bare.state[outer.v] = { .x = 0, .y = 0, .w = 500, .h = 5000 };
+  CHECK(cost_terms(c, decompose(c), bare, routes_of(c, {}), {}, p).leaf_aspect == 0);
+}
+
 TEST_CASE("cost: a start arrow running up is a quarter bend, running left a whole one") {
   // An initial at the origin into `A`, its last leg each of the four ways.
   Chart c;
@@ -293,6 +348,19 @@ Chart edges(uint32_t n) {
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   for (uint32_t i = 0; i < n; ++i) { build_trans(c, a, b, TransKind::Default, {}); }
+  return c;
+}
+
+// Two transitions between a choice and a normal state: out of the choice where `from`,
+// else into it.
+Chart glyph_edges(bool from) {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const choice{ build_state(c, root, "C", StateKind::Choice, {}) };
+  StateId const box{ build_state(c, root, "B", StateKind::Normal, {}) };
+  for (uint32_t i = 0; i < 2; ++i) {
+    build_trans(c, from ? choice : box, from ? box : choice, TransKind::Default, {});
+  }
   return c;
 }
 
@@ -589,20 +657,36 @@ TEST_CASE("cost: two routes on one line with different ends are a Tier-0 shared 
   CHECK(apart.corridor == 100);
   CHECK(cost_of(apart, profile()).t0_violations == 1);
 
-  // A fan-in along its final leg.
-  CostTerms const fan_in{ terms(
-      { { { .x = 0, .y = 0 }, { .x = 200, .y = 0 }, { .x = 200, .y = 300 } },
-        { { .x = 100, .y = 100 }, { .x = 200, .y = 100 }, { .x = 200, .y = 300 } } }) };
-  CHECK(fan_in.shared_run == 0);
+  // A fan-in along its final leg into a box.
+  std::vector<PodVector<scav_point>> const in{
+    { { .x = 0, .y = 0 }, { .x = 200, .y = 0 }, { .x = 200, .y = 300 } },
+    { { .x = 100, .y = 100 }, { .x = 200, .y = 100 }, { .x = 200, .y = 300 } }
+  };
+  CostTerms const fan_in{ terms(in) };
+  CHECK(fan_in.shared_run == 1);
   CHECK(fan_in.corridor == 0);
 
-  // A fan-out along its first leg: priced by `corridor`, permitted by Tier 0.
-  CostTerms const fan_out{ terms(
-      { { { .x = 0, .y = 0 }, { .x = 200, .y = 0 }, { .x = 200, .y = 100 } },
-        { { .x = 0, .y = 0 }, { .x = 100, .y = 0 }, { .x = 100, .y = 100 } } }) };
-  CHECK(fan_out.shared_run == 0);
+  // A fan-out along its first leg out of a box: priced by `corridor`, forbidden by Tier 0.
+  std::vector<PodVector<scav_point>> const out{
+    { { .x = 0, .y = 0 }, { .x = 200, .y = 0 }, { .x = 200, .y = 100 } },
+    { { .x = 0, .y = 0 }, { .x = 100, .y = 0 }, { .x = 100, .y = 100 } }
+  };
+  CostTerms const fan_out{ terms(out) };
+  CHECK(fan_out.shared_run == 1);
   CHECK(fan_out.corridor == 100);
-  CHECK(cost_of(fan_out, profile()).t0_violations == 0);
+  CHECK(cost_of(fan_out, profile()).t0_violations == 1);
+
+  // The same two lines from and into an inscribed glyph's one point are permitted.
+  for (bool const from : { true, false }) {
+    CAPTURE(from);
+    Chart const g{ glyph_edges(from) };
+    SizedLayout const gz{ blank(g) };
+    CostTerms const fan{
+      cost_terms(g, decompose(g), gz, routes_of(g, from ? out : in), {}, profile())
+    };
+    CHECK(fan.shared_run == 0);
+    CHECK(cost_of(fan, profile()).t0_violations == 0);
+  }
 }
 
 TEST_CASE("cost: a degraded net's diagonal is no one's merge leg") {
@@ -2368,12 +2452,26 @@ scav_span reversed(PodVector<scav_point> const &pts,
 }
 
 // Whether segments `ku` of `u` and `kv` of `v` both lie in the two routes' common head or
-// common tail, uncapped, with the leg out of or into it where those legs share a run.
-bool fan_pair(Routes const &r, uint32_t u, uint32_t ku, uint32_t v, uint32_t kv) {
+// common tail at an inscribed glyph both name, uncapped, with the leg out of or into it
+// where those legs share a run.
+bool fan_pair(Chart const &c,
+              Routes const &r,
+              uint32_t u,
+              uint32_t ku,
+              uint32_t v,
+              uint32_t kv) {
   scav_span const a{ r.route[u] };
   scav_span const b{ r.route[v] };
-  Trunk const tail{ trunk_of(r.points, a, b, ~0U) };
-  if (trunk_piece(tail, a.len, ku) && trunk_piece(tail, b.len, kv)) { return true; }
+  auto const glyph = [&c](StateId x, StateId y) {
+    return (x == y) && kind_inscribed(c.states[x.v].kind);
+  };
+  Transition const &tu{ c.transitions[u] };
+  Transition const &tv{ c.transitions[v] };
+  if (glyph(tu.dst, tv.dst)) {
+    Trunk const tail{ trunk_of(r.points, a, b, ~0U) };
+    if (trunk_piece(tail, a.len, ku) && trunk_piece(tail, b.len, kv)) { return true; }
+  }
+  if (!glyph(tu.src, tv.src)) { return false; }
   PodVector<scav_point> back;
   scav_span const ra{ reversed(r.points, a, back) };
   scav_span const rb{ reversed(r.points, b, back) };
@@ -2383,7 +2481,7 @@ bool fan_pair(Routes const &r, uint32_t u, uint32_t ku, uint32_t v, uint32_t kv)
 }
 
 // Pairs of different transitions' collinear segments sharing a run outside `fan_pair`.
-int32_t shared_runs(Routes const &r, PodVector<Piece> const &pieces) {
+int32_t shared_runs(Chart const &c, Routes const &r, PodVector<Piece> const &pieces) {
   int32_t total{ 0 };
   for (uint32_t i = 0; i < pieces.size(); ++i) {
     for (uint32_t j = i + 1; j < pieces.size(); ++j) {
@@ -2391,7 +2489,7 @@ int32_t shared_runs(Routes const &r, PodVector<Piece> const &pieces) {
       Piece const &v{ pieces[j] };
       if (u.trans == v.trans) { continue; }
       if (shared_run(u.a, u.b, v.a, v.b) <= 0) { continue; }
-      if (!fan_pair(r, u.trans, u.k, v.trans, v.k)) { ++total; }
+      if (!fan_pair(c, r, u.trans, u.k, v.trans, v.k)) { ++total; }
     }
   }
   return total;
@@ -2727,7 +2825,7 @@ CostTerms terms(Chart const &c,
   }
   t.crossings = crossings(pieces, crossings_of);
   t.corridor = corridor(r, pieces);
-  t.shared_run = shared_runs(r, pieces);
+  t.shared_run = shared_runs(c, r, pieces);
   t.crowding = crowding(pieces, p.font_size_grid);
 
   for (uint32_t tr = 0; tr < c.transitions.size(); ++tr) {

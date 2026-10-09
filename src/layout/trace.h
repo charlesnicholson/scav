@@ -50,9 +50,11 @@ enum class TraceKind : uint16_t {
   RowRepeated,    // a row drew an earlier row's drawing, so it is not kicked
   KickScored,     // a kick was searched to convergence; `pass` is its `KickVerdict`
   KickTaken,      // a row took a kick search's result; `pass` is its `KickHow`
+  StateGrown,     // seats per face raised a state's box; `pass` 1 for a pin, 0 the default
+  FaceSpread,     // the spread moved seats on one box face in one round
 };
 
-inline constexpr uint32_t TRACE_KINDS{ static_cast<uint32_t>(TraceKind::KickTaken) + 1U };
+inline constexpr uint32_t TRACE_KINDS{ static_cast<uint32_t>(TraceKind::FaceSpread) + 1U };
 
 // The kind's name in the JSON and the stream header; "none" for any other value.
 char const *trace_kind_name(TraceKind k);
@@ -187,19 +189,36 @@ inline constexpr uint16_t TRACE_MOVE_SIDE{ 4 };    // `face` holds the side
 inline constexpr uint16_t TRACE_MOVE_FOLD{ 5 };    // `rank` holds the cut's layer
 inline constexpr uint16_t TRACE_MOVE_ORIENT{ 6 };  // a kick only
 inline constexpr uint16_t TRACE_MOVE_LOOP{ 7 };    // `face` and `end` hold the placement
+inline constexpr uint16_t TRACE_MOVE_GROW{ 8 };    // a kick only
 // Each Tier-2 term's share of the scored sum in basis points, in CostTerms order.
 struct TraceTerms {
   std::array<int32_t, TIER2_TERMS> share;
 };
 // A whole search's result for Level 2 row `row`. A kick names its `TRACE_MOVE_*` in
-// `move`, a reversal its segment in `trans` and `leg`; `framed_t0` and `framed` are the
-// cost its frame's own search reached. `of` is the earlier row a repeated row draws.
+// `move`, a reversal its segment in `trans` and `leg`, a growth its `state` and seats as
+// `TraceGrow`'s; `framed_t0` and `framed` are the cost its frame's own search reached.
+// `of` is the earlier row a repeated row draws.
 struct TraceSearch {
   uint32_t row, of;
   uint16_t move;
   uint32_t trans, leg;
+  uint32_t state, seats_w, seats_h;
   int32_t t0, framed_t0;
   int64_t t2, framed;
+};
+// A state's route ends, the seats its box was raised to hold on its top and bottom faces
+// (`seats_w`) and its left and right (`seats_h`), and its extent before and after.
+struct TraceGrow {
+  uint32_t state, ends, seats_w, seats_h;
+  int32_t from_w, from_h, to_w, to_h;
+};
+
+// One spread round on face `face` of obstacle `box`: its `seats` a `step` apart in
+// `blocks`, of which `relaxed` left a straight net's far face and `frozen` stayed put.
+struct TraceSpread {
+  uint32_t box, face, round, seats;
+  int32_t step;
+  uint32_t blocks, relaxed, frozen;
 };
 
 struct TraceEvent {
@@ -227,6 +246,8 @@ struct TraceEvent {
     TracePiece piece;
     TraceGap gap;
     TraceCarry carry;
+    TraceGrow grow;
+    TraceSpread spread;
   };
 };
 
@@ -292,10 +313,11 @@ void trace_event_json(TraceEvent const &e,
                       std::vector<uint32_t> const &name_end,
                       std::vector<char> &out);
 
-inline constexpr uint32_t TRACE_MOVES{ 8 };  // `TRACE_MOVE_*` values
+inline constexpr uint32_t TRACE_MOVES{ 9 };  // `TRACE_MOVE_*` values
 
 // Per `TRACE_MOVE_*`: moves offered, answered by the candidate memo, taken, culled
-// unoffered as changing nothing, and left unscored by don't-look bits in a taking round.
+// unoffered as changing nothing, and left unscored by don't-look bits in a taking round;
+// a growth's offered and taken count kicks.
 struct SearchStats {
   SearchStats();  // out of line in trace.cpp
 

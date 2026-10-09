@@ -44,6 +44,25 @@ struct RouteNet {
 // resolve as in `ortho_ring`.
 uint32_t face_of(scav_point at, scav_rect const &r);
 
+// The inset a seat keeps from each corner of a box face: `clear`, or the corner's `arc`
+// where larger. A face shorter than twice it seats at its middle.
+constexpr int32_t seat_inset(int32_t clear, int32_t arc) {
+  return (arc > clear) ? arc : clear;
+}
+
+// The distance between two seats on one face: a line of text, at least `route_clearance`.
+int32_t seat_pitch(scav_profile const &p);
+
+// The seats a face `len` long holds `seat_pitch` apart inside its `seat_inset`s.
+uint32_t face_capacity(int32_t len, int32_t arc, scav_profile const &p);
+
+// The seats a `w` by `h` box's four faces hold, as `face_capacity`.
+uint32_t box_capacity(int32_t w, int32_t h, int32_t arc, scav_profile const &p);
+
+// The least face length holding `seats` seats `seat_pitch` apart inside its `seat_inset`s;
+// 0 for none.
+Wide face_length(uint32_t seats, int32_t arc, scav_profile const &p);
+
 // True when face `face` of `r` exceeds twice the inset `max(clear, arc)` a seat keeps from
 // each corner.
 bool face_seats(scav_rect const &r, uint32_t face, int32_t clear, int32_t arc);

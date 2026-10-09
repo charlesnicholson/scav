@@ -35,6 +35,13 @@ struct OrderEdge {
   constexpr bool operator==(OrderEdge const &) const = default;
 };
 
+// A state's seats per face: `w` on its top and bottom faces, `h` on its left and right.
+struct FaceSeats {
+  uint32_t w{ INVALID };
+  uint32_t h{ INVALID };
+};
+static_assert(sizeof(FaceSeats) == 8);
+
 struct SubmachineOrders {
   PodVector<OrderNode> nodes;     // contiguous per submachine
   PodVector<OrderEdge> edges;     // contiguous per submachine
@@ -48,6 +55,8 @@ struct SubmachineOrders {
   PodVector<uint32_t> sub_fold_cut;  // parallel to submachines: a fold pin's `layer`
   // Parallel to states: 0 unpinned, else 1 + a loop pin's `face * 2 + end`.
   PodVector<uint8_t> state_loop;
+  // Parallel to states, or empty: a grow pin's seats; `w` INVALID where none names it.
+  PodVector<FaceSeats> state_grow;
 
   // The extra width each rank boundary carries beyond `rank_sep`, one row per boundary;
   // `len` is the frame's rank count less one.

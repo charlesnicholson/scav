@@ -31,9 +31,10 @@ struct SizedLayout {
   PodVector<scav_rect> state, before, after;  // parallel to states
   PodVector<scav_rect> lead, trail;           // parallel to states: the side bands
   PodVector<scav_rect> loop;                  // parallel to states: its inner loops' room
-  PodVector<uint8_t> loop_place;  // parallel to states: the room's `face * 2 + end`
-  PodVector<scav_rect> sub;       // parallel to submachines
-  PodVector<scav_point> node;     // parallel to the orders' nodes
+  PodVector<scav_extent> natural;  // parallel to states: the box before seats floor it
+  PodVector<uint8_t> loop_place;   // parallel to states: the room's `face * 2 + end`
+  PodVector<scav_rect> sub;        // parallel to submachines
+  PodVector<scav_point> node;      // parallel to the orders' nodes
   // Parallel to the segments, or empty: 1 where a straight leg seats at the leading end of
   // its ends' overlap, with its label's room on the trailing side.
   PodVector<uint8_t> lean;
@@ -91,6 +92,27 @@ bool loop_room_unmoved(Chart const &c, SizedLayout const &z, uint32_t st, uint32
 // Whether a band of `state` lines `face` (0 left, 1 right, 2 top, 3 bottom), which then
 // takes no port.
 bool face_lined(scav_spaces const &s, uint32_t state, uint32_t face);
+
+// How far a `w` by `h` box's long side runs past twice its short one, floored at zero.
+Wide long_side_excess(int32_t w, int32_t h);
+
+// Fills `z.natural` from `z.state`, the space tables, `z.loop_place` and `p`: a live leaf
+// `Normal` state's box before seats floor it, every other state's box as drawn.
+void size_natural(Chart const &c,
+                  scav_spaces const &s,
+                  scav_profile const &p,
+                  SizedLayout &z);
+
+// The state whose box, or border at a port, end `k` (0 src, 1 dst) of `seg` meets in that
+// state's parent frame; INVALID for an inner face, an inner loop, or a frame inside it.
+uint32_t size_end_state(Chart const &c,
+                        SplitGraph const &g,
+                        SplitSegment const &seg,
+                        uint32_t k);
+
+// Per state, its route ends in its parent frame: segment ends at its box and at ports on
+// its border. An inner loop has none.
+void size_route_ends(Chart const &c, SplitGraph const &g, PodVector<uint32_t> &ends);
 
 // One inner loop's row in its state's room: rows stack across the exit face in transition
 // order. The far leg runs `loop_reach` in from the exit face and spans the label stack

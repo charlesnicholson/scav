@@ -284,25 +284,27 @@ void append_rect(std::string &out, scav_rect r) {
 
 // Tier-2 term names in CostTerms order, the order `cost_shares` returns.
 constexpr std::array<char const *, TIER2_TERMS> TERMS{
-  "bends",  "corridor",      "crossings",  "excess_len",     "adjacency",
-  "label",  "label_near",    "aspect",     "area",           "crowding",
-  "length", "transit_bends", "whitespace", "backward_starts"
+  "bends",      "corridor",        "crossings",  "excess_len",
+  "adjacency",  "label",           "label_near", "aspect",
+  "area",       "crowding",        "length",     "transit_bends",
+  "whitespace", "backward_starts", "leaf_aspect"
 };
 
 // Per Tier-2 term, the power of the em it is divided by before weighting: 0 counts, 1
 // lengths, 2 areas.
-constexpr std::array<uint32_t, TIER2_TERMS> EM_POWER{ 0, 1, 0, 1, 0, 0, 1,
-                                                      1, 2, 1, 1, 0, 2, 0 };
+constexpr std::array<uint32_t, TIER2_TERMS> EM_POWER{ 0, 1, 0, 1, 0, 0, 1, 1,
+                                                      2, 1, 1, 0, 2, 0, 1 };
 
 std::array<int64_t, TIER2_TERMS> term_values(CostTerms const &t) {
-  return { t.bends,  t.corridor,      t.crossings,  t.excess_len,     t.adjacency,
-           t.label,  t.label_near,    t.aspect,     t.area,           t.crowding,
-           t.length, t.transit_bends, t.whitespace, t.backward_starts };
+  return { t.bends,      t.corridor,        t.crossings,  t.excess_len,
+           t.adjacency,  t.label,           t.label_near, t.aspect,
+           t.area,       t.crowding,        t.length,     t.transit_bends,
+           t.whitespace, t.backward_starts, t.leaf_aspect };
 }
 
 // The profile values layout reads and the spacing it derives from them, parallel to
 // `profile_values`.
-constexpr std::array<char const *, 39> PROFILE{ "em",
+constexpr std::array<char const *, 40> PROFILE{ "em",
                                                 "line_height",
                                                 "pad",
                                                 "rank_sep",
@@ -332,6 +334,7 @@ constexpr std::array<char const *, 39> PROFILE{ "em",
                                                 "w_transit_bends",
                                                 "w_whitespace",
                                                 "w_backward_starts",
+                                                "w_leaf_aspect",
                                                 "portfolio_m",
                                                 "lane_pitch",
                                                 "portfolio_k",
@@ -375,6 +378,7 @@ std::array<int64_t, PROFILE.size()> profile_values(scav_profile const &p) {
            p.w_transit_bends,
            p.w_whitespace,
            p.w_backward_starts,
+           p.w_leaf_aspect,
            p.portfolio_m,
            imax64(route_clearance(p), p.font_size_grid),  // the orthogonal router's lanes
            p.portfolio_k,

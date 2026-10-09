@@ -42,6 +42,9 @@ SCAV_INTERNAL_END
 
 namespace {
 
+// Clamps `v` to COORD_MAX + 1, which the box formula still rejects.
+int32_t saturate(Wide v) { return static_cast<int32_t>(imin(v, Wide{ COORD_MAX } + 1)); }
+
 scav_box_space box_of(scav_box_space const *rows, uint32_t count, uint32_t i) {
   return ((rows != nullptr) && (i < count)) ? rows[i] : scav_box_space{};
 }
@@ -102,6 +105,33 @@ bool bare_pseudostate(Chart const &c,
     if ((sub[m].w != 0) || (sub[m].h != 0)) { return false; }
   }
   return true;
+}
+
+// The gap each band keeps from the contents beside it, as interior pieces keep from one
+// another: `sep` where `full` and the band is nonempty. Left, right, top, bottom.
+std::array<int32_t, 4> band_gaps_of(scav_box_space const &b, bool full, int32_t sep) {
+  std::array<int32_t, 4> const band{ b.w_before, b.w_after, b.h_before, b.h_after };
+  std::array<int32_t, 4> gap{};
+  for (uint32_t k = 0; k < 4; ++k) { gap[k] = (full && (band[k] > 0)) ? sep : 0; }
+  return gap;
+}
+
+// The box formula before seats floor it: the bands around the packed submachines and the
+// loop room, each band `gap` from them, at least `min`, plus `ring`.
+std::array<Wide, 2> box_extent(scav_box_space const &b,
+                               scav_extent packed,
+                               scav_extent room,
+                               std::array<int32_t, 4> const &gap,
+                               std::array<int32_t, 2> min,
+                               Wide ring,
+                               int32_t sep) {
+  Wide const centre{ Wide{ b.w_before } + gap[0] + imax(Wide{ packed.w }, Wide{ room.w }) +
+                     gap[1] + b.w_after };
+  Wide const body{ Wide{ packed.h } + room.h +
+                   (((packed.h > 0) && (room.h > 0)) ? sep : 0) };
+  return { imax(imax(Wide{ b.min_w }, centre), Wide{ min[0] }) + ring,
+           imax(Wide{ b.h_before } + gap[2] + body + gap[3] + b.h_after, Wide{ min[1] }) +
+               ring };
 }
 
 // A pseudostate the seating pass moved, levelled or declined.
@@ -176,6 +206,7 @@ struct SizeScratch {
   PodVector<Frame> work;
   PodVector<scav_extent> loop_label, loop_room;  // `loop_rooms`
   PodVector<uint8_t> looped;  // per state, 1 where an outer self-loop leaves it
+  PodVector<uint32_t> ends;   // `size_route_ends`
   // What an `OwnerHole` sizing's first pass sized.
   SizedLayout first;
   PodVector<FrameDar> hole;  // `size_owner_holes` of `first`
@@ -259,6 +290,7 @@ struct Sizer {
   PodVector<scav_extent> &loop_label{ sc.loop_label };
   PodVector<scav_extent> &loop_room{ sc.loop_room };
   PodVector<uint8_t> &looped{ sc.looped };
+  PodVector<uint32_t> &ends{ sc.ends };
   bool ok{ true };
 
   // The ratio packings inside `state` aim at: its hole's, else the profile's.
@@ -313,10 +345,7 @@ struct Sizer {
       uint32_t const m{ c.submachine_ids[subs.off + u].v };
       full = (c.submachines[m].live != 0) && ((out.sub[m].w > 0) || (out.sub[m].h > 0));
     }
-    std::array<int32_t, 4> const band{ b.w_before, b.w_after, b.h_before, b.h_after };
-    std::array<int32_t, 4> gap{};
-    for (uint32_t k = 0; k < 4; ++k) { gap[k] = (full && (band[k] > 0)) ? p.sub_sep : 0; }
-    return gap;
+    return band_gaps_of(b, full, p.sub_sep);
   }
   // How far a loop room above the packed submachines moves them down; 0 for one below.
   [[nodiscard]] int32_t room_shift(uint32_t state, int32_t packed_h) const {
@@ -2216,16 +2245,51 @@ void Sizer::size_state(uint32_t i) {
   int32_t const min_w{ lies ? p.kind_min_h[kind] : p.kind_min_w[kind] };
   int32_t const min_h{ lies ? p.kind_min_w[kind] : p.kind_min_h[kind] };
   Wide const ring{ bare(b, i) ? Wide{ 0 } : (2 * static_cast<Wide>(p.pad)) };
-  scav_extent const room{ room_of(i) };
-  std::array<int32_t, 4> const gap{ band_gaps(b, i) };
-  Wide const centre{ Wide{ b.w_before } + gap[0] + imax(Wide{ packed.w }, Wide{ room.w }) +
-                     gap[1] + b.w_after };
-  Wide const body{ Wide{ packed.h } + room.h +
-                   (((packed.h > 0) && (room.h > 0)) ? p.sub_sep : 0) };
-  Wide const w{ imax(imax(Wide{ b.min_w }, centre), Wide{ min_w }) + ring };
-  Wide const h{
-    imax(Wide{ b.h_before } + gap[2] + body + gap[3] + b.h_after, Wide{ min_h }) + ring
-  };
+  auto const [natural_w, natural_h]{ box_extent(b,
+                                                { .w = packed.w, .h = packed.h },
+                                                room_of(i),
+                                                band_gaps(b, i),
+                                                { min_w, min_h },
+                                                ring,
+                                                p.sub_sep) };
+  out.natural[i] = { .w = saturate(natural_w), .h = saturate(natural_h) };
+  Wide w{ natural_w };
+  Wide h{ natural_h };
+  int32_t const pad{ (ring != 0) ? p.pad : 0 };
+  FaceSeats seats{ (i < o.state_grow.size()) ? o.state_grow[i] : FaceSeats{} };
+  bool const pinned{ seats.w != INVALID };
+  uint32_t const own{ (i < ends.size()) ? ends[i] : 0U };
+  if (!pinned && (sk == StateKind::Normal) && (own != 0) && (natural_w <= COORD_MAX) &&
+      (natural_h <= COORD_MAX)) {
+    // Route ends past what the natural box seats take a quarter of them on every face.
+    scav_rect const natural{ .x = 0,
+                             .y = 0,
+                             .w = static_cast<int32_t>(natural_w),
+                             .h = static_cast<int32_t>(natural_h) };
+    int32_t const arc{ state_corner_radius(sk, natural, pad) };
+    if (own > box_capacity(natural.w, natural.h, arc, p)) {
+      seats = { .w = (own + 3) / 4, .h = (own + 3) / 4 };
+    }
+  }
+  if (seats.w != INVALID) {
+    // Seats inset from the corner arc at its largest.
+    scav_rect const wide{ .x = 0, .y = 0, .w = COORD_MAX, .h = COORD_MAX };
+    int32_t const arc{ state_corner_radius(sk, wide, pad) };
+    w = imax(w, face_length(seats.w, arc, p));
+    h = imax(h, face_length(seats.h, arc, p));
+  }
+  if ((w != natural_w) || (h != natural_h)) {
+    trace_emit({ .kind = TraceKind::StateGrown,
+                 .pass = pinned ? uint16_t{ 1 } : uint16_t{ 0 },
+                 .grow = { .state = i,
+                           .ends = own,
+                           .seats_w = seats.w,
+                           .seats_h = seats.h,
+                           .from_w = saturate(natural_w),
+                           .from_h = saturate(natural_h),
+                           .to_w = saturate(w),
+                           .to_h = saturate(h) } });
+  }
   if ((w > COORD_MAX) || (h > COORD_MAX)) {
     overflow(diags, ElemKind::State, i);
     ok = false;
@@ -2263,6 +2327,7 @@ bool size_pass(Chart const &c,
   out.lead.assign(c.states.size(), {});
   out.trail.assign(c.states.size(), {});
   out.loop.assign(c.states.size(), {});
+  out.natural.assign(c.states.size(), {});
   out.loop_place.assign(c.states.size(), 0);
   for (uint32_t i = 0; i < c.states.size(); ++i) {
     uint8_t const pinned{ (i < o.state_loop.size()) ? o.state_loop[i] : uint8_t{ 0 } };
@@ -2304,6 +2369,7 @@ bool size_pass(Chart const &c,
     x.seg_label_w[at] = imax(x.seg_label_w[at], down ? box.h : box.w);
   }
   loop_rooms(c, s, p, out.loop_place, x.loop_label, x.loop_room);
+  size_route_ends(c, g, x.ends);
   x.looped.assign(c.states.size(), 0);
   for (uint32_t t = 0; t < c.transitions.size(); ++t) {
     Transition const &tr{ c.transitions[t] };
@@ -2453,13 +2519,6 @@ void size_owner_holes(Chart const &c,
 
 SCAV_INTERNAL_END
 
-namespace {
-
-// Clamps `v` to COORD_MAX + 1, which the box formula still rejects.
-int32_t saturate(Wide v) { return static_cast<int32_t>(imin(v, Wide{ COORD_MAX } + 1)); }
-
-}  // namespace
-
 std::array<scav_rect, 5> state_walls(SizedLayout const &z, uint32_t st) {
   auto const row = [st](PodVector<scav_rect> const &v) {
     return (st < v.size()) ? v[st] : scav_rect{};
@@ -2582,6 +2641,69 @@ SCAV_COLD bool loop_room_unmoved(Chart const &c,
 bool face_lined(scav_spaces const &s, uint32_t state, uint32_t face) {
   scav_box_space const b{ box_of(s.box_state, s.n_box_state, state) };
   return (face < 4) && (bands_of(b)[face] > 0);
+}
+
+Wide long_side_excess(int32_t w, int32_t h) {
+  constexpr Wide RATIO{ 2 };
+  return imax(Wide{ imax(w, h) } - (RATIO * imin(w, h)), Wide{ 0 });
+}
+
+void size_natural(Chart const &c,
+                  scav_spaces const &s,
+                  scav_profile const &p,
+                  SizedLayout &z) {
+  constexpr auto NORMAL{ static_cast<uint32_t>(StateKind::Normal) };
+  thread_local PodVector<scav_extent> label;
+  thread_local PodVector<scav_extent> room;
+  loop_rooms(c, s, p, z.loop_place, label, room);
+  z.natural.assign(c.states.size(), {});
+  for (uint32_t st = 0; (st < c.states.size()) && (st < z.state.size()); ++st) {
+    z.natural[st] = { .w = z.state[st].w, .h = z.state[st].h };
+    if ((c.states[st].live == 0) || (c.states[st].kind != StateKind::Normal)) { continue; }
+    Span const subs{ c.states[st].submachines };
+    bool leaf{ true };
+    for (uint32_t k = 0; k < subs.len; ++k) {
+      leaf = leaf && (c.submachines[c.submachine_ids[subs.off + k].v].live == 0);
+    }
+    if (!leaf) { continue; }
+    scav_box_space const b{ box_of(s.box_state, s.n_box_state, st) };
+    scav_extent const r{ (st < room.size()) ? room[st] : scav_extent{} };
+    auto const [w, h]{ box_extent(b,
+                                  {},
+                                  r,
+                                  band_gaps_of(b, (r.w > 0) || (r.h > 0), p.sub_sep),
+                                  { p.kind_min_w[NORMAL], p.kind_min_h[NORMAL] },
+                                  2 * Wide{ p.pad },
+                                  p.sub_sep) };
+    z.natural[st] = { .w = saturate(w), .h = saturate(h) };
+  }
+}
+
+uint32_t size_end_state(Chart const &c,
+                        SplitGraph const &g,
+                        SplitSegment const &seg,
+                        uint32_t k) {
+  uint32_t const t{ seg.trans.v };
+  if ((t >= c.transitions.size()) || inner_loop(c, t)) { return INVALID; }
+  uint32_t const port{ (k == 0) ? seg.src_port : seg.dst_port };
+  uint32_t const inner{ (k == 0) ? seg.src_inner : seg.dst_inner };
+  uint32_t st{ INVALID };
+  if (port < g.ports.size()) {
+    st = g.ports[port].state.v;
+  } else if ((port == INVALID) && (inner == 0)) {
+    st = (k == 0) ? c.transitions[t].src.v : c.transitions[t].dst.v;
+  }
+  return ((st < c.states.size()) && (c.states[st].parent == seg.frame)) ? st : INVALID;
+}
+
+void size_route_ends(Chart const &c, SplitGraph const &g, PodVector<uint32_t> &ends) {
+  ends.assign(c.states.size(), 0U);
+  for (SplitSegment const &seg : g.segments) {
+    for (uint32_t k = 0; k < 2; ++k) {
+      uint32_t const st{ size_end_state(c, g, seg, k) };
+      if (st != INVALID) { ++ends[st]; }
+    }
+  }
 }
 
 int32_t loop_reach(scav_profile const &p) { return imax(p.pad, 1); }

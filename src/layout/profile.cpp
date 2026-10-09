@@ -13,7 +13,7 @@ constexpr int32_t PT{ 16 };  // grid units are 1/16 pt
 
 constexpr scav_profile READABLE{
   .profile_id = 2,
-  .profile_version = 18,
+  .profile_version = 19,
   .pad = 8 * PT,
   .rank_sep = 36 * PT,
   .node_sep = 18 * PT,
@@ -59,6 +59,7 @@ constexpr scav_profile READABLE{
   .w_transit_bends = 768,
   .w_whitespace = 0,
   .w_backward_starts = 128,
+  .w_leaf_aspect = 64,
   .portfolio_k = 1024,
   .portfolio_m = 16,  // every row of the search table
   .search_cull = 1,
@@ -72,7 +73,7 @@ constexpr scav_profile READABLE{
 // Tighter spacing and smaller type than READABLE.
 constexpr scav_profile COMPACT{
   .profile_id = 1,
-  .profile_version = 18,
+  .profile_version = 19,
   .pad = 4 * PT,
   .rank_sep = 22 * PT,
   .node_sep = 11 * PT,
@@ -116,6 +117,7 @@ constexpr scav_profile COMPACT{
   .w_transit_bends = 768,
   .w_whitespace = 0,
   .w_backward_starts = 128,
+  .w_leaf_aspect = 64,
   .portfolio_k = 1024,
   .portfolio_m = 16,  // every row of the search table
   .search_cull = 1,
@@ -159,7 +161,8 @@ bool profile_validate(scav_profile const &p) {
            in_range(p.w_aspect, 0, 1024) && in_range(p.w_area, 0, 1024) &&
            in_range(p.w_crowding, 0, 1024) && in_range(p.w_length, 0, 1024) &&
            in_range(p.w_transit_bends, 0, 1024) && in_range(p.w_whitespace, 0, 1024) &&
-           in_range(p.w_backward_starts, 0, 1024) && in_range(p.portfolio_k, 0, 1 << 20) &&
+           in_range(p.w_backward_starts, 0, 1024) && in_range(p.w_leaf_aspect, 0, 1024) &&
+           in_range(p.portfolio_k, 0, 1 << 20) &&
            in_range(p.portfolio_m, 1, static_cast<int32_t>(LAYOUT_SEARCH_ROWS)) &&
            in_range(p.search_cull, 0, 1) &&
            in_range(p.kick_rows, 1, static_cast<int32_t>(LAYOUT_SEARCH_ROWS)) &&

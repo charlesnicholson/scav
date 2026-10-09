@@ -174,6 +174,26 @@ TEST_CASE(
   CHECK(memo.arrangement(moved, &encoded) == moved_alone);
 }
 
+TEST_CASE("candidate memo: a grow pin numbers the arrangement holding its state anew") {
+  Fixture const f;
+  CandidateMemo memo{ f.c, f.g };
+  uint32_t st{ INVALID };
+  for (uint32_t k = 0; (k < f.c.states.size()) && (st == INVALID); ++k) {
+    if ((f.c.states[k].live != 0) && (f.c.states[k].kind == StateKind::Normal)) { st = k; }
+  }
+  REQUIRE(st != INVALID);
+  auto const grown = [&](uint32_t w, uint32_t h) {
+    return memo.arrangement(
+        f.order({ .grows = { { .state = StateId{ st }, .w = w, .h = h } } }));
+  };
+  uint32_t const plain{ memo.arrangement(f.order()) };
+  REQUIRE(plain != INVALID);
+  uint32_t const wide{ grown(4, 1) };
+  CHECK(wide != plain);
+  CHECK(grown(4, 2) != wide);
+  CHECK(grown(4, 1) == wide);
+}
+
 TEST_CASE(
     "candidate memo: an ordering key is the row, the laid arrangement and the box-end "
     "faces") {

@@ -62,9 +62,9 @@ chart vac "robot vacuum" (test_data/charts/vac.scav:3)
   include dock "dock.scav" -> test_data/charts/dock.scav (test_data/charts/vac.scav:4)
   include lamp "./led.scav" -> test_data/charts/led.scav (test_data/charts/vac.scav:7)
   include lamp "led.scav" -> test_data/charts/led.scav (test_data/charts/dock.scav:4)
-geometry structural 63b93200 coordinate c5ebfe5d
+geometry structural 63b93200 coordinate 75de0415
   chart 0,0 14294x9142
-  rests on --portfolio-row 1 --rank 10:1 --rank 19:3 --rank 2:0 --rank 7:1 --rank 17:0 --rank 14:3 --cut 1:0 --end 19:0:1:3 --end 13:0:0:2 --orient 5
+  rests on --portfolio-row 1 --rank 10:1 --rank 19:3 --rank 3:0 --rank 7:1 --rank 2:0 --rank 17:0 --rank 14:3 --end 19:0:1:3 --end 13:0:0:2 --orient 5
   cost t0 0 t2 6809
     tier0 through_box 0 through_band 0 box_overlap 0 vanished 0 flush 0 through_region 0 retrace 0 self_crossing 0 shared_run 0 label_over_box 0 label_over_route 0 label_far 0 loop_unanchored 0
     bends 4 em_power 0 share 3007bp
@@ -81,8 +81,9 @@ geometry structural 63b93200 coordinate c5ebfe5d
     transit_bends 0 em_power 0 share 0bp
     whitespace 50425718 em_power 2 share 0bp
     backward_starts 0 em_power 0 share 0bp
-  profile em 192 line_height 269 pad 128 rank_sep 576 node_sep 288 sub_sep 192 dar_num 16 dar_den 10 route_clearance 96 border_band 128 box_clearance 128 bend_penalty 576 label_leader 96 loop_gap 64 loop_reach 128 loop_lane 269 w_bends 512 w_corridor 48 w_crossings 512 w_excess_len 4 w_adjacency 16 w_label 768 w_label_near 48 w_aspect 2 w_area 1 w_crowding 512 w_length 8 w_transit_bends 768 w_whitespace 0 w_backward_starts 128 portfolio_m 16 lane_pitch 192 portfolio_k 0 search_cull 1 kick_rows 4 jitter_seed 0 sweep_count 8 spacing_inflation_cap 8 spacing_inflation_increment 32 min_w.normal 640 min_h.normal 384 min_w.initial 224 min_h.initial 224 min_w.final 224 min_h.final 224 min_w.choice 320 min_h.choice 320 min_w.junction 192 min_h.junction 192 min_w.fork 64 min_h.fork 960 min_w.join 64 min_h.join 960 min_w.history 256 min_h.history 256 min_w.deephistory 256 min_h.deephistory 256
-  placed t1 553,1276 1050x269
+    leaf_aspect 0 em_power 1 share 0bp
+  profile em 192 line_height 269 pad 128 rank_sep 576 node_sep 288 sub_sep 192 dar_num 16 dar_den 10 route_clearance 96 border_band 128 box_clearance 128 bend_penalty 576 label_leader 96 loop_gap 64 loop_reach 128 loop_lane 269 w_bends 512 w_corridor 48 w_crossings 512 w_excess_len 4 w_adjacency 16 w_label 768 w_label_near 48 w_aspect 2 w_area 1 w_crowding 512 w_length 8 w_transit_bends 768 w_whitespace 0 w_backward_starts 128 w_leaf_aspect 64 portfolio_m 16 lane_pitch 192 portfolio_k 0 search_cull 1 kick_rows 4 jitter_seed 0 sweep_count 8 spacing_inflation_cap 8 spacing_inflation_increment 32 min_w.normal 640 min_h.normal 384 min_w.initial 224 min_h.initial 224 min_w.final 224 min_h.final 224 min_w.choice 320 min_h.choice 320 min_w.junction 192 min_h.junction 192 min_w.fork 64 min_h.fork 960 min_w.join 64 min_h.join 960 min_w.history 256 min_h.history 256 min_w.deephistory 256 min_h.deephistory 256
+  placed t1 697,1276 1050x269
   placed t3 256,6462 1280x269
   placed t4 2307,6827 1396x269
   placed t7 5515,7206 1856x269
@@ -98,7 +99,7 @@ geometry structural 63b93200 coordinate c5ebfe5d
   state dock 4001,3403 10293x5557 before 4129,3531 10037x333 after 4129,8832 10037x0 corner 128 ruled 1
   state lamp 4045,0 4993x2932 before 4173,128 4737x333 after 4173,2804 4737x0 corner 128 ruled 1
   state Off 800,182 1895x922 before 928,310 1639x666 after 928,976 1639x0 corner 115
-  state Booting 800,1758 1319x653 before 928,1886 1063x397 after 928,2283 1063x0 corner 81
+  state Booting 1088,1758 1319x653 before 1216,1886 1063x397 after 1216,2283 1063x0 corner 81
   state PreConfig 10389,0 2842x1050 before 10517,128 2586x794 after 10517,922 2586x0
   state On 0,4055 2029x4161 before 128,4183 1773x333 after 128,8088 1773x0 corner 128 ruled 1
   state On:main/Idle 928,4708 973x653 before 1056,4836 717x397 after 1056,5233 717x0 corner 81
@@ -131,7 +132,7 @@ geometry structural 63b93200 coordinate c5ebfe5d
   sub 5 4173,653 4737x2151
   sub 6 9282,6198 4756x2324
   route $initial -> Off (224,643) (800,643) clear 0 96
-  route Off -> Booting (1603,1104) (1603,1758) clear 0 96
+  route Off -> Booting (1747,1104) (1747,1758) clear 0 96
   route On:main/$initial -> On:main/Idle (352,5034) (928,5034) clear 0 96
   route On:main/Ready -> On:main/Ready (1856,6462) (1600,6462) (1600,6731) (1856,6731) clear 0 96
   route On:main/Ready -> dock/On/Seated (1856,6827) (2029,6827) (4001,6827) (4506,6827) (5434,6827) clear 0 96 port s1 d0 (2029,6827) port s0 d0 (4001,6827) port s0 d1 (4506,6827)

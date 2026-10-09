@@ -143,6 +143,8 @@ def print_outline(events):
             what = e["move"]
             if what == "reverse":
                 what += f" t{e['trans']}:{e['leg']}"
+            if what == "grow":
+                what += f" {e['state']} {e['seats'][0]}x{e['seats'][1]}"
             print(f"    {what:16} frame {e['frame']:3}  framed {e['framed']:7} "
                   f"t0 {e['framed_t0']}  -> {e['t2']:7} t0 {e['t0']}  {e['verdict']}")
         elif k == "kick_taken":
@@ -150,9 +152,9 @@ def print_outline(events):
             print(f"  took {e['how']:8} t2 {e['t2']} t0 {e['t0']}")
 
 
-MOVES = ("rank", "cut", "reverse", "face", "side", "fold", "orient", "loop")
+MOVES = ("rank", "cut", "reverse", "face", "side", "fold", "orient", "loop", "grow")
 VALUED = ("--profile", "--rank", "--cut", "--reverse", "--end", "--orient", "--fold",
-          "--loop", "--search", "--jitter-seed", "-j")  # scav layout flags that take a value
+          "--loop", "--grow", "--search", "--jitter-seed", "-j")  # scav layout flags that take a value
 
 
 def split_layout(argv):

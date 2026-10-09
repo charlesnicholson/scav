@@ -1146,7 +1146,7 @@ void route_transitions(Routes &out,
       int32_t const lo{ gap.vertical ? r.y : r.x };
       int32_t const len{ gap.vertical ? r.h : r.w };
       int32_t const arc{ state_corner_radius(c.states[st].kind, r, z.before[st].x - r.x) };
-      int32_t const inset{ imin(imax(clear, arc), len / 2) };
+      int32_t const inset{ imin(seat_inset(clear, arc), len / 2) };
       bool const level{ kind_inscribed(c.states[st].kind)
                             ? (along == (lo + floor_div(len, 2)))
                             : ((along >= (lo + inset)) &&

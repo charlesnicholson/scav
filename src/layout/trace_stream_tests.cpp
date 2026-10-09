@@ -185,10 +185,33 @@ void each_field(TraceEvent &e, F &&f) {
       f(e.search.move);
       f(e.search.trans);
       f(e.search.leg);
+      f(e.search.state);
+      f(e.search.seats_w);
+      f(e.search.seats_h);
       f(e.search.t0);
       f(e.search.framed_t0);
       f(e.search.t2);
       f(e.search.framed);
+      break;
+    case TraceKind::StateGrown:
+      f(e.grow.state);
+      f(e.grow.ends);
+      f(e.grow.seats_w);
+      f(e.grow.seats_h);
+      f(e.grow.from_w);
+      f(e.grow.from_h);
+      f(e.grow.to_w);
+      f(e.grow.to_h);
+      break;
+    case TraceKind::FaceSpread:
+      f(e.spread.box);
+      f(e.spread.face);
+      f(e.spread.round);
+      f(e.spread.seats);
+      f(e.spread.step);
+      f(e.spread.blocks);
+      f(e.spread.relaxed);
+      f(e.spread.frozen);
       break;
   }
 }

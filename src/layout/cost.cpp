@@ -389,11 +389,13 @@ inline void blame(Charged const &to, uint32_t a, uint32_t b, Wide by) {
 }
 
 // The length each pair shares on one line, per `(axis, coordinate)` bucket, less the
-// trunks; adds to `runs`, where given, each pair outside the routes' common head and tail.
+// trunks; adds to `runs`, where given, each pair outside the common head or tail two of
+// `c`'s transitions have at one inscribed glyph.
 Wide corridor_over(Routes const &r,
                    PodVector<Piece> const &pieces,
                    PodVector<Lane> const &lanes,
                    Charged const &to,
+                   Chart const *c,
                    int32_t *runs) {
   Wide total{ 0 };
   for (uint32_t lo = 0; lo < lanes.size();) {
@@ -412,7 +414,18 @@ Wide corridor_over(Routes const &r,
         scav_span const ru{ r.route[u.trans] };
         scav_span const rv{ r.route[v.trans] };
         if (runs != nullptr) {
-          Trunk const fan{ trunk_of(r.points, ru, rv, ru.len, true) };
+          Transition const &tu{ c->transitions[u.trans] };
+          Transition const &tv{ c->transitions[v.trans] };
+          // True when `a` and `b` are one inscribed glyph.
+          auto const glyph = [c](StateId a, StateId b) {
+            return (a == b) && (a.v < c->states.size()) &&
+                   kind_inscribed(c->states[a.v].kind);
+          };
+          Trunk const fan{ trunk_of(r.points,
+                                    ru,
+                                    rv,
+                                    glyph(tu.dst, tv.dst) ? ru.len : 0,
+                                    glyph(tu.src, tv.src)) };
           if (!trunk_piece(fan, ru.len, u.k) || !trunk_piece(fan, rv.len, v.k)) {
             ++*runs;
           }
@@ -627,6 +640,26 @@ bool in_transit(Chart const &c,
 }
 
 Wide area_of(scav_rect const &r) { return Wide{ r.w } * r.h; }
+
+// Per live leaf `Normal` state, the long side's excess of its box past its box's before
+// seats floored it, floored at zero; nothing where `z` holds no extents before seats.
+Wide leaf_aspect_of(Chart const &c, SizedLayout const &z) {
+  Wide total{ 0 };
+  for (uint32_t st = 0; (st < z.natural.size()) && (st < z.state.size()); ++st) {
+    if ((c.states[st].live == 0) || (c.states[st].kind != StateKind::Normal)) { continue; }
+    Span const subs{ c.states[st].submachines };
+    bool leaf{ true };
+    for (uint32_t k = 0; k < subs.len; ++k) {
+      leaf = leaf && (c.submachines[c.submachine_ids[subs.off + k].v].live == 0);
+    }
+    if (!leaf) { continue; }
+    scav_extent const was{ z.natural[st] };
+    total += imax(
+        long_side_excess(z.state[st].w, z.state[st].h) - long_side_excess(was.w, was.h),
+        Wide{ 0 });
+  }
+  return total;
+}
 
 // Per live composite, the hole between its bands inside its padding less its live
 // children's rects and its loop room, floored at zero; the sum capped at `chart`.
@@ -1271,7 +1304,7 @@ void cost_grid_query(ChildGrid const &g,
 }
 
 [[maybe_unused]] Wide cost_corridor(Routes const &r, PodVector<Piece> const &pieces) {
-  return corridor_over(r, pieces, lanes_of(pieces), {}, nullptr);
+  return corridor_over(r, pieces, lanes_of(pieces), {}, nullptr, nullptr);
 }
 
 [[maybe_unused]] Wide cost_crowding(PodVector<Piece> const &pieces, int32_t em) {
@@ -1337,6 +1370,7 @@ CostTerms cost_terms(CostContext const &ctx,
   t.area = area_of(z.chart);
   Scratch &sc{ scratch() };
   t.whitespace = whitespace_of(c, z, t.area);
+  t.leaf_aspect = leaf_aspect_of(c, z);
   // Every route segment once; transition `tr`'s pieces are `first[tr]..first[tr + 1]`.
   PodVector<Piece> &pieces{ sc.pieces };
   pieces.clear();
@@ -1403,7 +1437,7 @@ CostTerms cost_terms(CostContext const &ctx,
   lanes_of(pieces, sc.key, sc.spare, sc.lanes);
   PodVector<Lane> const &lanes{ sc.lanes };
   t.crossings = crossings_over(pieces, lanes, crossings_of, sc.is_loose);
-  t.corridor = corridor_over(r, pieces, lanes, by(p.w_corridor), &t.shared_run);
+  t.corridor = corridor_over(r, pieces, lanes, by(p.w_corridor), &c, &t.shared_run);
   t.crowding = crowding_over(pieces, lanes, p.font_size_grid, by(p.w_crowding));
 
   // `excess_len` is what a route runs past the larger of its direct distance and its
@@ -1652,6 +1686,7 @@ CostTerms cost_bound(Chart const &c,
   if (per_trans != nullptr) { per_trans->assign(c.transitions.size(), 0); }
   t.area = area_of(z.chart);
   t.whitespace = (p.w_whitespace != 0) ? whitespace_of(c, z, t.area) : 0;
+  t.leaf_aspect = leaf_aspect_of(c, z);
   t.adjacency = adjacency_of(c, g, z, p);
   bool const rectilinear{ router.rectilinear() };
   int32_t const near{ border_band(p) - 1 };
@@ -1767,6 +1802,8 @@ SCAV_COLD CostTerms cost_columns(Chart const &c,
   rows("scav.geom.state_lead", z.lead);
   rows("scav.geom.state_trail", z.trail);
   rows("scav.geom.sub", z.sub);
+  rows("scav.geom.state_loop_place", z.loop_place);
+  size_natural(c, s, p, z);
   PodVector<scav_rect> chart;
   rows("scav.geom.chart", chart);
   if (!chart.empty()) { z.chart = chart[0]; }
@@ -1798,7 +1835,8 @@ std::array<Wide, TIER2_TERMS> weighted_terms(CostTerms const &t, scav_profile co
            Wide{ p.w_length } * ceil_div(t.length, em),
            Wide{ p.w_transit_bends } * t.transit_bends,
            Wide{ p.w_whitespace } * ceil_div(t.whitespace, em2),
-           Wide{ p.w_backward_starts } * t.backward_starts };
+           Wide{ p.w_backward_starts } * t.backward_starts,
+           Wide{ p.w_leaf_aspect } * ceil_div(t.leaf_aspect, em) };
 }
 
 }  // namespace
@@ -1820,7 +1858,7 @@ std::array<int32_t, TIER0_TERMS> tier0_terms(CostTerms const &t) {
 Cost cost_of(CostTerms const &t, scav_profile const &p) {
   Cost out;
   out.t0_violations = tier0_of(t);
-  // Area, the largest term, is below (2 * COORD_MAX)^2 < 2^40; thirteen terms under
+  // Area, the largest term, is below (2 * COORD_MAX)^2 < 2^40; fifteen terms under
   // weights capped at 2^10 sum below 2^54.
   for (Wide const term : weighted_terms(t, p)) { out.t2 += term; }
   return out;

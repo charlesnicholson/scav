@@ -1,0 +1,33 @@
+// Eight transitions out of one state into a chain of nine. Each departure takes
+// its own seat on the source, and no leg out of a first bend crosses another's
+// run out.
+chart fanout "eight departures into one chain" {
+  state Reset,
+  state S0,
+  state S1,
+  state S2,
+  state S3,
+  state S4,
+  state S5,
+  state S6,
+  state S7,
+  state S8,
+
+  trans * -> S0,
+  trans S0 -> S1,
+  trans S1 -> S2,
+  trans S2 -> S3,
+  trans S3 -> S4,
+  trans S4 -> S5,
+  trans S5 -> S6,
+  trans S6 -> S7,
+  trans S7 -> S8,
+  trans Reset -> S1,
+  trans Reset -> S2,
+  trans Reset -> S3,
+  trans Reset -> S4,
+  trans Reset -> S5,
+  trans Reset -> S6,
+  trans Reset -> S7,
+  trans Reset -> S8,
+}

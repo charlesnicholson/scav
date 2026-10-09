@@ -390,6 +390,7 @@ TEST_CASE("drawlist corpus: the cost terms on the rendered scale") {
     scoring_us += std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
     Cost const scored{ cost_of(t, p) };
     CHECK(scored.t0_violations == 0);  // every corpus chart ships clean
+    CHECK(t.leaf_aspect == 0);         // and no state on it grows
     actual += name;
     for (int64_t const term : { int64_t{ scored.t0_violations },
                                 t.bends,

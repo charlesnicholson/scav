@@ -230,6 +230,12 @@ bool CandidateMemo::put_frame(SubmachineOrders const &o,
     }
   }
   if (shift != 0) { w.push_back(packed); }
+  // Each grow-pinned state as its place among the block's states, then its seats.
+  for (uint32_t k = state_off[m]; k < state_off[m + 1]; ++k) {
+    uint32_t const st{ state_list[k] };
+    if ((st >= o.state_grow.size()) || (o.state_grow[st].w == INVALID)) { continue; }
+    w.insert(w.end(), { k - state_off[m], o.state_grow[st].w, o.state_grow[st].h });
+  }
   return true;
 }
 

@@ -1,0 +1,15 @@
+// A transition and its return between a tall composite and a state beside its upper
+// end. The pair's shared line lies at the end of the small state's face, so it parts
+// as a unit inside that face: two straight legs a line apart, neither one jogging.
+chart offset "a round trip seated at the end of a face" {
+  state Tall { state A, state B, state C, state D, state E, state F },
+  state Small,
+  state Up,
+  state Down,
+
+  trans * -> Tall,
+  trans Tall -> Small "go",
+  trans Small -> Tall "back",
+  trans Tall -> Up,
+  trans Tall -> Down,
+}

@@ -24,9 +24,28 @@ constexpr std::array<Router const *, 2> ROUTERS{ { &ORTHOGONAL, &STRAIGHT } };
 
 }  // namespace
 
+int32_t seat_pitch(scav_profile const &p) {
+  return imax(route_clearance(p), label_line_height(p));
+}
+
+uint32_t face_capacity(int32_t len, int32_t arc, scav_profile const &p) {
+  int32_t const inset{ imin(seat_inset(route_clearance(p), arc), len / 2) };
+  return static_cast<uint32_t>(((Wide{ len } - (Wide{ 2 } * inset)) / seat_pitch(p)) + 1);
+}
+
+uint32_t box_capacity(int32_t w, int32_t h, int32_t arc, scav_profile const &p) {
+  return 2 * (face_capacity(w, arc, p) + face_capacity(h, arc, p));
+}
+
+Wide face_length(uint32_t seats, int32_t arc, scav_profile const &p) {
+  if (seats == 0) { return 0; }
+  return (Wide{ seats - 1 } * seat_pitch(p)) +
+         (Wide{ 2 } * seat_inset(route_clearance(p), arc));
+}
+
 bool face_seats(scav_rect const &r, uint32_t face, int32_t clear, int32_t arc) {
   int32_t const len{ (face < 2) ? r.h : r.w };
-  return len > (2 * imin(imax(clear, arc), len / 2));
+  return len > (2 * imin(seat_inset(clear, arc), len / 2));
 }
 
 uint32_t face_of(scav_point at, scav_rect const &r) {

@@ -17,8 +17,9 @@ thread_local LayoutTrace *g_sink{ nullptr };
 thread_local LayoutTrace *g_outline{ nullptr };
 
 // Level 1 move kinds by `TRACE_MOVE_*`.
-constexpr std::array<char const *, TRACE_MOVES> MOVES{ "rank", "cut",  "reverse", "face",
-                                                       "side", "fold", "orient",  "loop" };
+constexpr std::array<char const *, TRACE_MOVES> MOVES{ "rank",   "cut",  "reverse",
+                                                       "face",   "side", "fold",
+                                                       "orient", "loop", "grow" };
 
 char const *seat_pass_name(uint16_t p) {
   switch (static_cast<SeatPass>(p)) {
@@ -175,6 +176,8 @@ char const *trace_kind_name(TraceKind k) {
     case TraceKind::RowRepeated: return "row_repeated";
     case TraceKind::KickScored: return "kick_scored";
     case TraceKind::KickTaken: return "kick_taken";
+    case TraceKind::StateGrown: return "state_grown";
+    case TraceKind::FaceSpread: return "face_spread";
     case TraceKind::None: break;
   }
   return "none";
@@ -406,12 +409,19 @@ void trace_event_json(TraceEvent const &e,
       char const *kick{ "orient" };
       if (m == TRACE_MOVE_REVERSE) { kick = "reverse"; }
       if (m == TRACE_MOVE_FOLD) { kick = "fold"; }
+      if (m == TRACE_MOVE_GROW) { kick = "grow"; }
       j.ks("verdict", kick_verdict_name(e.pass));
       j.kv("row", e.search.row);
       j.ks("move", kick);
       if (m == TRACE_MOVE_REVERSE) {
         j.kv("trans", e.search.trans);
         j.kv("leg", e.search.leg);
+      }
+      if (m == TRACE_MOVE_GROW) {
+        j.kstate(states, e.search.state);
+        j.kxy("seats",
+              static_cast<int32_t>(e.search.seats_w),
+              static_cast<int32_t>(e.search.seats_h));
       }
       j.kv("t0", e.search.t0);
       j.kv("t2", e.search.t2);
@@ -424,6 +434,26 @@ void trace_event_json(TraceEvent const &e,
       j.kv("row", e.search.row);
       j.kv("t0", e.search.t0);
       j.kv("t2", e.search.t2);
+      break;
+    case TraceKind::StateGrown:
+      j.ks("by", (e.pass != 0) ? "pin" : "default");
+      j.kstate(states, e.grow.state);
+      j.kv("ends", e.grow.ends);
+      j.kxy("seats",
+            static_cast<int32_t>(e.grow.seats_w),
+            static_cast<int32_t>(e.grow.seats_h));
+      j.kxy("from", e.grow.from_w, e.grow.from_h);
+      j.kxy("to", e.grow.to_w, e.grow.to_h);
+      break;
+    case TraceKind::FaceSpread:
+      j.kv("box", e.spread.box);
+      j.kv("face", e.spread.face);
+      j.kv("round", e.spread.round);
+      j.kv("seats", e.spread.seats);
+      j.kv("step", e.spread.step);
+      j.kv("blocks", e.spread.blocks);
+      j.kv("relaxed", e.spread.relaxed);
+      j.kv("frozen", e.spread.frozen);
       break;
     case TraceKind::None: break;
   }

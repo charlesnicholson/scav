@@ -11,6 +11,8 @@
 #include "layout/size.h"
 #include "layout/tests/pod_eq.h"
 #include "layout/tests/test_synth.h"
+#include "layout/tests/trace_record.h"
+#include "layout/trace.h"
 #include "scav/scav_core.h"
 #include "scav/scav_core_c.h"
 #include "scav/scav_layout.h"
@@ -1339,17 +1341,46 @@ constexpr std::array<char const *, 2> SCALE_ROUTERS{ "orthogonal", "straight" };
 // One row per cell, chart-major then profile then router: through_box, box_overlap,
 // bends, corridor, crossings, excess_len, adjacency, label, label_near, aspect, area.
 constexpr std::array<std::array<int64_t, 11>, 8> SCALE_PINNED{
-  { { 0, 0, 2512, 0, 0, 1998176, 0, 0, 0, 2764964, 36418952256 },
-    { 21608, 0, 3072, 46749232, 52856, 95492256, 0, 0, 0, 2764964, 36418952256 },
-    { 0, 0, 2512, 0, 0, 1231216, 0, 0, 0, 640768, 14447836160 },
-    { 22248, 0, 3072, 31627520, 52552, 57525032, 0, 0, 0, 640768, 14447836160 },
-    { 0, 0, 1054, 0, 10, 2003890, 0, 0, 0, 73344, 3667557376 },
+  { { 0, 0, 2528, 0, 0, 1990520, 0, 0, 0, 2766634, 36433557408 },
+    { 21624, 0, 3072, 46799624, 52960, 95675392, 0, 0, 0, 2766634, 36433557408 },
+    { 0, 0, 2528, 0, 0, 1223264, 0, 0, 0, 640960, 14451116032 },
+    { 22272, 0, 3072, 31646464, 52568, 57521032, 0, 0, 0, 640960, 14451116032 },
+    { 0, 0, 1040, 0, 0, 1781165, 0, 0, 0, 73344, 3667557376 },
     { 2088, 0, 319, 0, 265, 7295646, 0, 0, 0, 73344, 3667557376 },
-    { 0, 0, 1046, 127360, 13, 1643681, 0, 0, 0, 13056, 1615626240 },
+    { 0, 0, 974, 127104, 18, 1768403, 0, 0, 0, 13056, 1615626240 },
     { 1986, 0, 324, 0, 266, 5555577, 0, 0, 0, 13056, 1615626240 } }
 };
 
 }  // namespace
+
+TEST_CASE(
+    "layout: the nested scale target's innermost composites grow to seat their ends") {
+  // Each of the eight deepest composites holds an empty region and meets fifteen routes:
+  // fourteen arrivals and its exit to the composite around it.
+  Chart const built{ nested_2k_chart() };
+  scav_profile const p{ readable() };
+  SplitGraph const g{ decompose(built) };
+  SubmachineOrders const o{ order_submachines(built, g, {}, p) };
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  TraceRecord t{ built };
+  trace_sink_set(&t);
+  bool const sized{ size_layout(built, g, o, {}, p, z, diags) };
+  trace_sink_set(nullptr);
+  REQUIRE(sized);
+  uint32_t grown{ 0 };
+  for (TraceEvent const &e : t.events()) {
+    if (e.kind != TraceKind::StateGrown) { continue; }
+    ++grown;
+    CAPTURE(e.grow.state);
+    CHECK(e.pass == 0);
+    CHECK(e.grow.ends == 15);
+    CHECK(e.grow.seats_w == 4);
+    CHECK(e.grow.seats_h == 4);
+    CHECK(e.grow.to_w == face_length(4, p.pad, p));
+  }
+  CHECK(grown == 8);
+}
 
 TEST_CASE("layout: both scale targets score to pinned terms, profile by router" *
           doctest::test_suite("full")) {
@@ -2056,6 +2087,109 @@ TEST_CASE("layout: a composite running down is entered through its top") {
   CHECK(slot.x == first.x + (first.w / 2));
 }
 
+TEST_CASE("layout: a grow pin is among the pins a run rests on, and lays it out again") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::Default, {});
+  scav_profile p{ readable() };
+  p.portfolio_k = 0;
+  SearchPins const seed{ .grows = { { .state = a, .w = 6, .h = 4 } } };
+  std::vector<scav_placed> placed;
+  std::vector<Diagnostic> diags;
+  uint32_t row{ INVALID };
+  SearchPins taken;
+  REQUIRE(layout_run(c,
+                     {},
+                     opts(p),
+                     placed,
+                     diags,
+                     nullptr,
+                     &row,
+                     INVALID,
+                     nullptr,
+                     &taken,
+                     &seed));
+  REQUIRE(taken.grows.size() == 1);
+  CHECK(taken.grows[0].state == a);
+  CHECK(taken.grows[0].w == 6);
+  CHECK(taken.grows[0].h == 4);
+  scav_rect const grown{ state_rect(c, a) };
+  CHECK(grown.w > (p.kind_min_w[0] + (2 * p.pad)));
+  CHECK(grown.h > (p.kind_min_h[0] + (2 * p.pad)));
+  uint32_t const coordinate{ layout_coordinate_hash(c) };
+  REQUIRE(layout_run(c,
+                     {},
+                     opts(p),
+                     placed,
+                     diags,
+                     nullptr,
+                     nullptr,
+                     row,
+                     nullptr,
+                     nullptr,
+                     &taken));
+  CHECK(layout_coordinate_hash(c) == coordinate);
+}
+
+TEST_CASE("layout: a leaf's aspect scored from the columns is the one sizing scored") {
+  // `A` is wide from its own text, under a title band and over an inner loop's room; a
+  // grow pin stands it on end.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::Default, {});
+  TransId const loop{ build_trans(c, a, a, TransKind::Internal, {}) };
+  std::vector<scav_box_space> boxes(c.states.size());
+  boxes[a.v] = { .min_w = 3000, .h_before = 300 };
+  std::vector<scav_path_box> labels{
+    { .subject = loop.v, .w = 700, .h = 269, .order = 0 }
+  };
+  scav_spaces const s{ .box_state = boxes.data(),
+                       .n_box_state = static_cast<uint32_t>(boxes.size()),
+                       .box_state_stride = sizeof(scav_box_space),
+                       .path_box = labels.data(),
+                       .n_path_box = static_cast<uint32_t>(labels.size()),
+                       .path_box_stride = sizeof(scav_path_box) };
+  scav_profile p{ readable() };
+  p.portfolio_k = 0;
+  p.portfolio_m = 1;
+  std::vector<scav_placed> placed;
+  std::vector<Diagnostic> diags;
+  REQUIRE(layout_run(c, s, opts(p), placed, diags));
+  scav_rect const natural{ state_rect(c, a) };
+  SearchPins const tall{ .grows = { { .state = a, .w = 1, .h = 40 } } };
+  REQUIRE(layout_run(c,
+                     s,
+                     opts(p),
+                     placed,
+                     diags,
+                     nullptr,
+                     nullptr,
+                     0,
+                     nullptr,
+                     nullptr,
+                     &tall));
+  scav_rect const grown{ state_rect(c, a) };
+  REQUIRE(grown.h > (2 * grown.w));
+  REQUIRE(natural.w > (2 * natural.h));
+  SplitGraph const g{ decompose(c) };
+  std::vector<scav_rect> const kept(placed.begin(), placed.end());
+  int64_t const want{ (grown.h - (2 * int64_t{ grown.w })) -
+                      (natural.w - (2 * int64_t{ natural.h })) };
+  CHECK(cost_columns(c, g, p, s, kept).leaf_aspect == want);
+  // The search's own scoring of the same drawing.
+  SubmachineOrders const o{ order_submachines(c, g, s, p, 1, tall) };
+  SizedLayout z;
+  REQUIRE(size_layout(c, g, o, s, p, z, diags));
+  CHECK((z.natural[a.v].w == natural.w));
+  CHECK((z.natural[a.v].h == natural.h));
+  Routes const r{ route_transitions(c, g, o, z, s, p, *router_at(0)) };
+  CHECK(cost_terms(c, g, z, r, s, p).leaf_aspect == want);
+}
+
 TEST_CASE("layout: a channel a fork bar touches routes at its drawn size") {
   // The bar is flush against `P`; the route runs level from the bar's face to
   // `deep` with no inflation.
@@ -2632,6 +2766,7 @@ TEST_CASE("layout: the corpus cost vector is committed, term by term and by shar
     CostTerms const t{ cost_columns(c, decompose(c), p) };
     Cost const scored{ cost_of(t, p) };
     CHECK(scored.t0_violations == 0);  // every corpus chart ships clean
+    CHECK(t.leaf_aspect == 0);         // and no state on it grows
 
     actual += name;
     for (int64_t const term : { int64_t{ scored.t0_violations },

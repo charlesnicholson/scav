@@ -206,6 +206,24 @@ class TestDump(unittest.TestCase):
         self.assertNotEqual(geometry, [ln for ln in other.stdout.splitlines()
                                        if ln.startswith("geometry ")])
 
+    def test_a_grown_state_is_part_of_what_a_layout_rests_on(self) -> None:
+        # `--grow S:W:H` is reported field for field, and lays out again from it.
+        chart = "test_data/charts/gauntlet/hub.scav"
+        shipped = self.run_dump("--layout", "--no-search", "--grow", "4:9:3", chart)
+        self.assertEqual(0, shipped.returncode)
+        rests = [ln for ln in shipped.stdout.splitlines() if ln.startswith("  rests on ")]
+        self.assertEqual(1, len(rests))
+        self.assertIn(" --grow 4:9:3", rests[0])
+        again = self.run_dump("--layout", "--no-search", *rests[0].split()[2:], chart)
+        self.assertEqual(0, again.returncode)
+        self.assertEqual(shipped.stdout, again.stdout)
+        other = self.run_dump("--layout", "--no-search", "--grow", "4:3:9", chart)
+        self.assertEqual(0, other.returncode)
+        hub = [ln for ln in shipped.stdout.splitlines() if ln.startswith("  state Hub ")]
+        self.assertEqual(1, len(hub))
+        self.assertNotEqual(hub, [ln for ln in other.stdout.splitlines()
+                                  if ln.startswith("  state Hub ")])
+
     def test_a_malformed_pin_is_a_usage_error(self) -> None:
         for bad in (["--rank", "1"], ["--cut", "a:b"], ["--end", "1:0:2:0"],
                     ["--portfolio-row", "99"], ["--no-search", "--no-search"],
@@ -214,7 +232,9 @@ class TestDump(unittest.TestCase):
                     ["--fold", "0:1:x"], ["--fold", "0:1:"], ["--end"],
                     ["--end", "6:1:0"], ["--end", "6:1:2:0"], ["--end", "6:1:0:4"],
                     ["--end", "6:1:0:x"], ["--end", "6:1:0:"], ["--end", "6:1:0:2:1"],
-                    ["--loop", "0:4:0"], ["--loop", "0:0:2"], ["--loop", "0:1"]):
+                    ["--loop", "0:4:0"], ["--loop", "0:0:2"], ["--loop", "0:1"],
+                    ["--grow", "0:1"], ["--grow", "0:x:1"], ["--grow", "0:1:1:1"],
+                    ["--grow", "0:4294967295:1"], ["--grow", "0:1:4294967295"]):
             with self.subTest(bad=bad):
                 result = self.run_dump("--layout", *bad, CHART.as_posix())
                 self.assertEqual(2, result.returncode)
