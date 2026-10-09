@@ -529,14 +529,14 @@ TEST_CASE("search: kicks stacked after a round's pick rank by cost plus jitter")
 }
 
 TEST_CASE("search: a jitter seed draws one drawing at every thread count") {
-  // A seed breaks near-ties the same way on any thread; seed 7 moves estop and kiln.
+  // A seed breaks near-ties the same way on any thread; seed 1 moves estop and kiln.
   char const *const chart{ scav::test::corpus_light() ? "estop.scav" : "kiln.scav" };
   for (bool const cull : { false, true }) {
     CAPTURE(cull);
     scav_profile p{ cull ? culled() : readable() };
     REQUIRE(p.jitter_seed == 0);
     Laid const plain{ lay(chart, p, false) };
-    p.jitter_seed = 7;
+    p.jitter_seed = 1;
     Laid const one{ lay(chart, p, false, 1) };
     CHECK(one.pins != plain.pins);
     check_same_drawing(lay(chart, p, false, 0), one);
