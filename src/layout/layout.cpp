@@ -3293,13 +3293,9 @@ bool layout_run(Chart &c,
   if (budget != 0) { search_rows(PodVector<uint8_t>(rows, 1), false); }
   PodVector<uint8_t> const &eligible{ viable };
 
-  // The grow kicks' gate: each state's route ends, and the objective with corridor and
-  // crowding unpriced.
+  // Each state's route ends, which gate the grow kicks.
   PodVector<uint32_t> route_ends;
   size_route_ends(c, g, route_ends);
-  scav_profile uncrowded{ p };
-  uncrowded.w_corridor = 0;
-  uncrowded.w_crowding = 0;
 
   // Iterated local search from row `best`: each kick restarts a search, kept where it
   // converges below the incumbent; winning kicks in distinct frames combine.
@@ -3440,34 +3436,18 @@ bool layout_run(Chart &c,
                           .kind = MoveKind::Fold });
         kick_frame.push_back(m);
       }
-      // Grow kicks: a Normal state over its natural seats, or at a corridor or crowding
-      // charged transition's end, asks twice its seats of each face pair, then of both.
+      // Grow kicks: a leaf Normal state over its natural seats asks 1 to 4 times its seats
+      // of each face pair, every shape whose long side `leaf_aspect` leaves unpriced.
       Candidate const &drawn{ candidates[best] };
-      PodVector<Wide> priced;
-      PodVector<Wide> unpriced;
-      (void)cost_terms(scoring, c, g, drawn.sized, drawn.routes, s, p, nullptr, &priced);
-      (void)cost_terms(scoring,
-                       c,
-                       g,
-                       drawn.sized,
-                       drawn.routes,
-                       s,
-                       uncrowded,
-                       nullptr,
-                       &unpriced);
-      PodVector<uint8_t> crowded(c.states.size(), 0);
-      for (SplitSegment const &seg : g.segments) {
-        uint32_t const t{ seg.trans.v };
-        if ((t >= priced.size()) || (priced[t] <= unpriced[t])) { continue; }
-        for (uint32_t k = 0; k < 2; ++k) {
-          uint32_t const st{ size_end_state(c, g, seg, k) };
-          if (st != INVALID) { crowded[st] = 1; }
-        }
-      }
       for (uint32_t st = 0; st < c.states.size(); ++st) {
         if ((c.states[st].live == 0) || (c.states[st].kind != StateKind::Normal) ||
             (st >= drawn.sized.natural.size())) {
           continue;
+        }
+        Span const subs{ c.states[st].submachines };
+        bool leaf{ true };
+        for (uint32_t k = 0; k < subs.len; ++k) {
+          leaf = leaf && (c.submachines[c.submachine_ids[subs.off + k].v].live == 0);
         }
         scav_extent const was{ drawn.sized.natural[st] };
         scav_rect const natural{ .x = 0, .y = 0, .w = was.w, .h = was.h };
@@ -3477,19 +3457,29 @@ bool layout_run(Chart &c,
                              was.h,
                              state_corner_radius(StateKind::Normal, natural, p.pad),
                              p) };
-        if (!over && (crowded[st] == 0)) { continue; }
+        if (!leaf || !over) { continue; }
         scav_rect const &box{ drawn.sized.state[st] };
         int32_t const arc{ state_corner_radius(StateKind::Normal, box, p.pad) };
         uint32_t const w{ face_capacity(box.w, arc, p) };
         uint32_t const h{ face_capacity(box.h, arc, p) };
-        for (FaceSeats const twice : { FaceSeats{ .w = 2 * w, .h = h },
-                                       FaceSeats{ .w = w, .h = 2 * h },
-                                       FaceSeats{ .w = 2 * w, .h = 2 * h } }) {
-          if (kick_scored >= budget) { break; }
-          ++kick_scored;
-          kicks.push_back({ .grow = { .state = StateId{ st }, .w = twice.w, .h = twice.h },
-                            .kind = MoveKind::Grow });
-          kick_frame.push_back(c.states[st].parent.v);
+        Wide const allowed{ long_side_excess(was.w, was.h) };
+        for (uint32_t kw = 1; kw <= 4; ++kw) {
+          for (uint32_t kh = 1; kh <= 4; ++kh) {
+            if ((kw == 1) && (kh == 1)) { continue; }
+            FaceSeats const ask{ .w = kw * w, .h = kh * h };
+            Wide const gw{ imax(Wide{ was.w }, face_length(ask.w, arc, p)) };
+            Wide const gh{ imax(Wide{ was.h }, face_length(ask.h, arc, p)) };
+            if ((gw > COORD_MAX) || (gh > COORD_MAX) ||
+                (long_side_excess(static_cast<int32_t>(gw), static_cast<int32_t>(gh)) >
+                 allowed)) {
+              continue;
+            }
+            if (kick_scored >= budget) { break; }
+            ++kick_scored;
+            kicks.push_back({ .grow = { .state = StateId{ st }, .w = ask.w, .h = ask.h },
+                              .kind = MoveKind::Grow });
+            kick_frame.push_back(c.states[st].parent.v);
+          }
         }
       }
       if (kicks.empty()) { break; }

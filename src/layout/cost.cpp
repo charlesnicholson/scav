@@ -641,12 +641,6 @@ bool in_transit(Chart const &c,
 
 Wide area_of(scav_rect const &r) { return Wide{ r.w } * r.h; }
 
-// How far a `w` by `h` box's long side runs past twice its short one, floored at zero.
-Wide long_side_excess(int32_t w, int32_t h) {
-  constexpr Wide RATIO{ 2 };
-  return imax(Wide{ imax(w, h) } - (RATIO * imin(w, h)), Wide{ 0 });
-}
-
 // Per live leaf `Normal` state, the long side's excess of its box past its box's before
 // seats floored it, floored at zero; nothing where `z` holds no extents before seats.
 Wide leaf_aspect_of(Chart const &c, SizedLayout const &z) {

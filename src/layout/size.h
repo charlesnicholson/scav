@@ -93,6 +93,9 @@ bool loop_room_unmoved(Chart const &c, SizedLayout const &z, uint32_t st, uint32
 // takes no port.
 bool face_lined(scav_spaces const &s, uint32_t state, uint32_t face);
 
+// How far a `w` by `h` box's long side runs past twice its short one, floored at zero.
+Wide long_side_excess(int32_t w, int32_t h);
+
 // Fills `z.natural` from `z.state`, the space tables, `z.loop_place` and `p`: a live leaf
 // `Normal` state's box before seats floor it, every other state's box as drawn.
 void size_natural(Chart const &c,

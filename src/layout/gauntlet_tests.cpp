@@ -2285,27 +2285,41 @@ std::vector<TraceEvent> grow_kicks(char const *name, scav_profile const &p, Char
 
 }  // namespace
 
-TEST_CASE("gauntlet: a hub over its seats is offered twice them on a face pair or both") {
-  // The default seats five a face; a round's kicks ask ten of one pair and of both, and
-  // search the frame the hub sits in.
+TEST_CASE("gauntlet: a hub over its seats is offered every shape up to four times them") {
+  // The default seats five a face; a round's kicks ask 5, 10, 15 or 20 of each face pair,
+  // every shape whose long side stays within twice its short one, in the hub's frame.
   for (scav_profile const &p : { readable(), compact() }) {
     CAPTURE(p.profile_id);
     Chart c;
     std::vector<TraceEvent> kicks{ grow_kicks("hub.scav", p, c) };
     uint32_t const hub{ state_named(c, "Hub") };
     std::erase_if(kicks, [hub](TraceEvent const &e) { return e.search.state != hub; });
-    REQUIRE(kicks.size() >= 3);
-    for (TraceEvent const &e : kicks) { CHECK(e.frame == c.states[hub].parent.v); }
-    CHECK(kicks[0].search.seats_w == 10);
-    CHECK(kicks[0].search.seats_h == 5);
-    CHECK(kicks[1].search.seats_w == 5);
-    CHECK(kicks[1].search.seats_h == 10);
-    CHECK(kicks[2].search.seats_w == 10);
-    CHECK(kicks[2].search.seats_h == 10);
+    auto const five{ static_cast<int32_t>(face_length(5, p.pad, p)) };
+    int32_t const arc{ state_corner_radius(StateKind::Normal, { 0, 0, five, five }, p.pad) };
+    std::vector<std::pair<uint32_t, uint32_t>> want;
+    for (uint32_t const w : { 5U, 10U, 15U, 20U }) {
+      for (uint32_t const h : { 5U, 10U, 15U, 20U }) {
+        auto const len = [&](uint32_t n) {
+          return static_cast<int32_t>(face_length(n, arc, p));
+        };
+        if (((w != 5) || (h != 5)) && (long_side_excess(len(w), len(h)) == 0)) {
+          want.emplace_back(w, h);
+        }
+      }
+    }
+    REQUIRE(kicks.size() >= want.size());
+    for (size_t k = 0; k < want.size(); ++k) {
+      CAPTURE(k);
+      CHECK(kicks[k].frame == c.states[hub].parent.v);
+      CHECK(kicks[k].search.seats_w == want[k].first);
+      CHECK(kicks[k].search.seats_h == want[k].second);
+    }
+    CHECK(std::ranges::any_of(want, [](auto const &s) { return s.first != s.second; }));
+    CHECK(std::ranges::none_of(want, [](auto const &s) { return s.first * 2 <= s.second; }));
   }
 }
 
-TEST_CASE("gauntlet: a chart with no state over its seats and no crowded end grows none") {
+TEST_CASE("gauntlet: a chart with no state over its seats grows none") {
   for (scav_profile const &p : { readable(), compact() }) {
     CAPTURE(p.profile_id);
     Chart c;

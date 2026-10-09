@@ -2643,6 +2643,11 @@ bool face_lined(scav_spaces const &s, uint32_t state, uint32_t face) {
   return (face < 4) && (bands_of(b)[face] > 0);
 }
 
+Wide long_side_excess(int32_t w, int32_t h) {
+  constexpr Wide RATIO{ 2 };
+  return imax(Wide{ imax(w, h) } - (RATIO * imin(w, h)), Wide{ 0 });
+}
+
 void size_natural(Chart const &c,
                   scav_spaces const &s,
                   scav_profile const &p,
